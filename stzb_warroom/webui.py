@@ -7,10 +7,11 @@ neither other sites in a browser nor other computers can use it. The page polls
 everything through ``POST /api/action``.
 
 One window per computer: a second start finds the first through ``window.json`` in the
-state folder and only opens its page. When the last page closes (it says so as it goes, else
-its events stream breaks), the program ends, unless it was started at login (``--background``)
-or the player chose to keep it running. On Windows an icon in the notification area opens
-the window again or quits.
+state folder and asks it to show its window. Showing it (a start, the tray icon) brings an
+open window to the front, and opens one only when none is open or opening. When the last page
+closes (it says so as it goes, else its events stream breaks), the program ends, unless it was
+started at login (``--background``) or the player chose to keep it running. On Windows an icon
+in the notification area shows the window again or quits.
 """
 
 import hmac
@@ -30,6 +31,8 @@ from . import winsys
 from .app import App
 
 UI = Path(__file__).resolve().parent / "ui"
+TITLE = "率土战局"  # the page's <title>, which names Edge's window
+OPENING = 15  # seconds a window may take to open (Edge starting) before another is opened
 CLOSED_AFTER = 3  # seconds without any page open before the program ends (a reload comes back sooner)
 KEEP_ALIVE = 2  # seconds between writes to a quiet events stream, which find a page that is gone
 COOKIE = "stzb_key"
@@ -165,11 +168,28 @@ class Window(ThreadingHTTPServer):
         self.url = f"http://127.0.0.1:{port}/?k={self.key}"
         self.open_pages, self.seen_page, self.alone_since = set(), False, None
         self.count_lock = threading.Lock()
+        self.opener, self.opened_at = None, None  # opener(): opens a window on the page
+        self.show_lock = threading.Lock()
 
     def page_open(self, page):
         with self.count_lock:
             self.open_pages.add(page)
-            self.seen_page, self.alone_since = True, None
+            self.seen_page, self.alone_since, self.opened_at = True, None, None
+
+    def show(self):
+        """Bring the window to the front, or open one if none is open or on its way."""
+        with self.show_lock:
+            with self.count_lock:
+                open_now = bool(self.open_pages)
+            # Only a page of this program counts: a window left by an earlier run shows nothing.
+            if open_now and winsys.focus_window(TITLE):
+                return "front"
+            with self.count_lock:
+                if self.opened_at is not None and time.monotonic() - self.opened_at < OPENING:
+                    return "opening"  # a click while Edge starts must not open a second window
+                self.opened_at = time.monotonic()
+            self.opener()
+            return "opened"
 
     def page_gone(self, page):
         """A page closed (it said so, or its events stream broke); said twice is fine."""
@@ -192,6 +212,7 @@ class Window(ThreadingHTTPServer):
             "start": app.start,
             "stop": app.stop,
             "quit": lambda: threading.Thread(target=self.quit, daemon=True).start(),
+            "show": self.show,
             "closing": lambda: self.page_gone(str(body.get("page") or "")),
             "add_token": lambda: app.add_token(body.get("token") or ""),
             "remove_token": lambda: app.remove_token(int(index)),
@@ -240,27 +261,44 @@ def running_window(state_dir):
         return None
 
 
+def ask_to_show(state_dir):
+    """Ask the program already running to show its window: True if it did."""
+    try:
+        value = json.loads((Path(state_dir) / "window.json").read_text())
+        origin = value["url"].split("/?")[0]
+        request = Request(origin + "/api/action", data=json.dumps({"action": "show"}).encode(),
+                          headers={"Cookie": f"{COOKIE}={value['key']}", "Origin": origin,
+                                   "Content-Type": "application/json"})
+        winsys.let_others_focus()  # this start is what the player clicked, so it may give the front away
+        with build_opener(ProxyHandler({})).open(request, timeout=5) as response:
+            return response.status == 200
+    except (OSError, ValueError, KeyError):
+        return False
+
+
 def main(server, state_dir, background=False, show=None):
     """Run the window until it is closed (or quit). `show(url, profile)` opens the page."""
     show = show or winsys.open_window
     state_dir = Path(state_dir)
     url = running_window(state_dir)
     if url:
-        if not background:
+        if not background and not ask_to_show(state_dir):
             show(url, state_dir / "browser")
         return
+    winsys.sharp()
     app = App(server, state_dir)
     window = Window(app)
+    window.opener = lambda: show(window.url, state_dir / "browser")
     state_dir.mkdir(parents=True, exist_ok=True)
     marker = state_dir / "window.json"
     marker.write_text(json.dumps({"url": window.url, "key": window.key}))
     threading.Thread(target=window.serve_forever, name="window", daemon=True).start()
     app.begin()
-    tray = winsys.Tray("率土战局", on_open=lambda: show(window.url, state_dir / "browser"),
+    tray = winsys.Tray(TITLE, on_open=window.show, icon=UI / "icon.ico",
                        on_quit=lambda: threading.Thread(target=window.quit, daemon=True).start())
     tray.start()
     if not background:
-        show(window.url, state_dir / "browser")
+        window.show()
     try:
         while not app.quit.wait(1):
             # Started at login it stays, as does a player's choice to keep it running.

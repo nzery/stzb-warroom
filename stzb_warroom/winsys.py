@@ -1,4 +1,5 @@
-"""What the window needs from Windows: start at login, a file picker, Edge, Npcap, the tray icon.
+"""What the window needs from Windows: start at login, a file picker, Edge, Npcap, the tray icon,
+bringing the window to the front.
 
 Everything here does nothing (or says "not available") on other systems, where the window
 is only used for development.
@@ -95,6 +96,57 @@ def open_window(url, profile):
     webbrowser.open(url)
 
 
+def sharp():
+    """Draw this process's own windows (tray icon, its menu, the file picker) at the screen's
+    real scale; unaware, Windows stretches them, blurred, on a screen above 100%."""
+    if not WINDOWS:
+        return
+    import ctypes
+    user32 = ctypes.WinDLL("user32")
+    try:
+        user32.SetProcessDpiAwarenessContext.argtypes = [ctypes.c_void_p]
+        if user32.SetProcessDpiAwarenessContext(ctypes.c_void_p(-2)):  # system aware
+            return
+    except AttributeError:  # before Windows 10 1703
+        pass
+    user32.SetProcessDPIAware()
+
+
+def focus_window(title):
+    """Bring the open window titled `title` (Edge's app window) to the front: True, or False if none."""
+    if not WINDOWS:
+        return False
+    import ctypes
+    from ctypes import wintypes
+    api = _api()
+    user32, found = api.user32, []
+
+    def visit(hwnd, _):
+        name, kind = ctypes.create_unicode_buffer(256), ctypes.create_unicode_buffer(64)
+        user32.GetWindowTextW(hwnd, name, len(name))
+        user32.GetClassNameW(hwnd, kind, len(kind))
+        if name.value == title and kind.value.startswith("Chrome_WidgetWin") and user32.IsWindowVisible(hwnd):
+            found.append(hwnd)
+            return False
+        return True
+
+    user32.EnumWindows(api.WNDENUMPROC(visit), 0)
+    if not found:
+        return False
+    hwnd = found[0]
+    user32.ShowWindow(hwnd, 9 if user32.IsIconic(hwnd) else 5)  # SW_RESTORE, SW_SHOW
+    user32.SetForegroundWindow(hwnd)
+    return True
+
+
+def let_others_focus():
+    """Let the program already running bring its window to the front (only the program the
+    player just started may)."""
+    if WINDOWS:
+        import ctypes
+        ctypes.WinDLL("user32").AllowSetForegroundWindow(-1)  # ASFW_ANY
+
+
 def open_folder(path):
     if WINDOWS:
         os.startfile(path)
@@ -159,8 +211,9 @@ class Tray:
 
     OPEN, QUIT = 1, 2
 
-    def __init__(self, tip, on_open, on_quit):
-        self.tip, self.on_open, self.on_quit = tip, on_open, on_quit
+    def __init__(self, tip, on_open, on_quit, icon=None):
+        """`icon`: an .ico file with the sizes the notification area may want (16 to 32 pixels)."""
+        self.tip, self.on_open, self.on_quit, self.icon = tip, on_open, on_quit, icon
         self.hwnd, self.thread = None, None
         self.ready = threading.Event()
 
@@ -193,9 +246,13 @@ class Tray:
         taskbar_created = user32.RegisterWindowMessageW("TaskbarCreated")  # Explorer restarted
 
         hinstance = api.kernel32.GetModuleHandleW(None)
+        # The size the notification area shows at this screen's scale (16 at 100%, 24 at 150%),
+        # picked from the file rather than a 16-pixel icon stretched.
+        side = user32.GetSystemMetrics(49)  # SM_CXSMICON
         icon = wintypes.HICON()
-        if not (getattr(sys, "frozen", False) and shell32.ExtractIconExW(sys.executable, 0, None, ctypes.byref(icon), 1)
-                and icon.value):
+        if self.icon:
+            icon = wintypes.HICON(user32.LoadImageW(None, str(self.icon), 1, side, side, 0x0010))  # IMAGE_ICON, LR_LOADFROMFILE
+        if not icon.value:
             icon = wintypes.HICON(user32.LoadIconW(None, ctypes.c_void_p(32512)))  # IDI_APPLICATION
         data = api.NOTIFYICONDATAW()
         data.cbSize = ctypes.sizeof(data)
@@ -259,7 +316,7 @@ _API = None
 
 
 def _api():
-    """user32/shell32/kernel32 with the signatures the tray needs (64-bit safe)."""
+    """user32/shell32/kernel32 with the signatures the tray and focus_window need (64-bit safe)."""
     global _API
     if _API is not None:
         return _API
@@ -268,6 +325,7 @@ def _api():
     from ctypes import wintypes
     LRESULT = ctypes.c_ssize_t
     WNDPROC = ctypes.WINFUNCTYPE(LRESULT, wintypes.HWND, wintypes.UINT, wintypes.WPARAM, wintypes.LPARAM)
+    WNDENUMPROC = ctypes.WINFUNCTYPE(wintypes.BOOL, wintypes.HWND, wintypes.LPARAM)
 
     class WNDCLASSW(ctypes.Structure):
         _fields_ = [("style", wintypes.UINT), ("lpfnWndProc", WNDPROC), ("cbClsExtra", ctypes.c_int),
@@ -300,6 +358,15 @@ def _api():
         (user32.DispatchMessageW, LRESULT, [ctypes.POINTER(wintypes.MSG)]),
         (user32.RegisterWindowMessageW, wintypes.UINT, [wintypes.LPCWSTR]),
         (user32.LoadIconW, wintypes.HICON, [wintypes.HINSTANCE, ctypes.c_void_p]),
+        (user32.LoadImageW, wintypes.HANDLE, [wintypes.HINSTANCE, wintypes.LPCWSTR, wintypes.UINT, ctypes.c_int,
+                                              ctypes.c_int, wintypes.UINT]),
+        (user32.GetSystemMetrics, ctypes.c_int, [ctypes.c_int]),
+        (user32.EnumWindows, wintypes.BOOL, [WNDENUMPROC, wintypes.LPARAM]),
+        (user32.GetWindowTextW, ctypes.c_int, [wintypes.HWND, wintypes.LPWSTR, ctypes.c_int]),
+        (user32.GetClassNameW, ctypes.c_int, [wintypes.HWND, wintypes.LPWSTR, ctypes.c_int]),
+        (user32.IsWindowVisible, wintypes.BOOL, [wintypes.HWND]),
+        (user32.IsIconic, wintypes.BOOL, [wintypes.HWND]),
+        (user32.ShowWindow, wintypes.BOOL, [wintypes.HWND, ctypes.c_int]),
         (user32.CreatePopupMenu, wintypes.HMENU, []),
         (user32.AppendMenuW, wintypes.BOOL, [wintypes.HMENU, wintypes.UINT, ctypes.c_size_t, wintypes.LPCWSTR]),
         (user32.TrackPopupMenu, wintypes.BOOL, [wintypes.HMENU, wintypes.UINT, ctypes.c_int, ctypes.c_int,
@@ -308,12 +375,10 @@ def _api():
         (user32.GetCursorPos, wintypes.BOOL, [ctypes.POINTER(wintypes.POINT)]),
         (user32.SetForegroundWindow, wintypes.BOOL, [wintypes.HWND]),
         (shell32.Shell_NotifyIconW, wintypes.BOOL, [wintypes.DWORD, ctypes.POINTER(NOTIFYICONDATAW)]),
-        (shell32.ExtractIconExW, wintypes.UINT, [wintypes.LPCWSTR, ctypes.c_int, ctypes.POINTER(wintypes.HICON),
-                                                 ctypes.POINTER(wintypes.HICON), wintypes.UINT]),
         (kernel32.GetModuleHandleW, wintypes.HMODULE, [wintypes.LPCWSTR]),
     ]
     for function, restype, argtypes in signatures:
         function.restype, function.argtypes = restype, argtypes
-    _API = types.SimpleNamespace(user32=user32, shell32=shell32, kernel32=kernel32, WNDPROC=WNDPROC,
+    _API = types.SimpleNamespace(user32=user32, shell32=shell32, kernel32=kernel32, WNDPROC=WNDPROC, WNDENUMPROC=WNDENUMPROC,
                                  WNDCLASSW=WNDCLASSW, NOTIFYICONDATAW=NOTIFYICONDATAW)
     return _API

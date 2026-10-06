@@ -20,7 +20,7 @@ if ($LASTEXITCODE) { throw "pip failed" }
 # The window's page (stzb_warroom\ui) goes along as data; tkinter is not used.
 python -m PyInstaller --noconfirm --clean --onedir --windowed --name stzb-warroom `
     --distpath build\dist --workpath build\work --specpath build `
-    --icon "$root\packaging\windows\icon.ico" --exclude-module tkinter `
+    --icon "$root\stzb_warroom\ui\icon.ico" --exclude-module tkinter `
     --add-data "$root\stzb_warroom\ui;stzb_warroom\ui" `
     --paths $root "$root\packaging\windows\launcher.py"
 if ($LASTEXITCODE) { throw "PyInstaller failed" }

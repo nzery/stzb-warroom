@@ -182,6 +182,30 @@ class PageServerTests(unittest.TestCase):
             self.window.act("closing", {"page": "b"})
             self.assertTrue(self.window.closed())
 
+    def test_one_window_at_a_time(self):
+        opened, front = [], []
+        self.window.opener = lambda: opened.append(1)
+        with unittest.mock.patch.object(winsys, "focus_window", lambda title: front.append(title) or True):
+            self.assertEqual(self.window.show(), "opened")
+            self.assertEqual(self.window.show(), "opening")  # clicked again while Edge starts
+            self.window.page_open("a")
+            self.assertEqual(self.window.show(), "front")
+            self.assertEqual(front, [webui.TITLE])
+            self.window.act("closing", {"page": "a"})  # closed to the tray
+            self.assertEqual(self.window.show(), "opened")
+        self.assertEqual(opened, [1, 1])
+        with unittest.mock.patch.object(webui, "OPENING", -1):  # Edge never came: open again
+            self.assertEqual(self.window.show(), "opened")
+
+    def test_a_second_start_asks_the_first_to_show_its_window(self):
+        folder = tempfile.TemporaryDirectory()
+        self.addCleanup(folder.cleanup)
+        (Path(folder.name) / "window.json").write_text(json.dumps({"url": self.window.url, "key": self.window.key}))
+        shown = []
+        self.window.opener = lambda: shown.append("first")
+        webui.main(None, folder.name, show=lambda url, profile: shown.append("second"))
+        self.assertEqual(shown, ["first"])
+
     def test_the_page_needs_the_key(self):
         self.assertEqual(self.request("GET", "/")[0], 403)
         self.assertEqual(self.request("GET", "/api/state")[0], 403)
