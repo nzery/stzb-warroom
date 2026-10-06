@@ -5,3 +5,4 @@ __pycache__/
 *.pcapng
 *.sqlite
 build/
+stzb_warroom/_version.py

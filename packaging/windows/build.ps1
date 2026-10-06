@@ -3,17 +3,24 @@
 #   powershell -ExecutionPolicy Bypass -File packaging\windows\build.ps1 -Server https://api.example.com
 #   powershell -ExecutionPolicy Bypass -File packaging\windows\build.ps1 -Server ... -Include D:\Wireshark-4.6.9-x64.exe
 #
+# -Version (default: the tag being built, GITHUB_REF_NAME, without its "v") is the version the
+# program reports and compares with the newest release; any other build is 0.0.0.
 # -Server (default: ST_SERVER) is the server the package reports to and -Site (default: ST_SITE) the
 # website its window links to; both go into config.json beside the exe, not into the source.
 #
 # Needs Python 3.11+ (python.org, with tcl/tk); installs PyInstaller with pip (build only).
 # -Include copies files into the package folder (e.g. the Wireshark installer, which the
 # window offers to run when Wireshark is missing).
-param([string]$Server = $env:ST_SERVER, [string]$Site = $env:ST_SITE, [string[]]$Include = @())
+param([string]$Server = $env:ST_SERVER, [string]$Site = $env:ST_SITE, [string[]]$Include = @(),
+      [string]$Version = $env:GITHUB_REF_NAME)
 $ErrorActionPreference = "Stop"
 if (-not $Server) { throw "no server: pass -Server or set ST_SERVER" }
 $root = Resolve-Path "$PSScriptRoot\..\.."
 Set-Location $root
+$Version = $Version -replace '^v', ''
+if ($Version -notmatch '^\d+(\.\d+)*$') { $Version = "0.0.0" }
+[IO.File]::WriteAllText("$root\stzb_warroom\_version.py", "__version__ = `"$Version`"`n")
+Write-Host "version $Version"
 
 python -m pip install --upgrade "pyinstaller==6.22.3"
 if ($LASTEXITCODE) { throw "pip failed" }
