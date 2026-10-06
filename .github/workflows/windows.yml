@@ -1,0 +1,40 @@
+# The Windows package: built on every v* tag (and by hand), attached to the tag's release.
+name: windows
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+      - name: Test
+        run: python -m unittest discover -s tests -v
+      - name: Build
+        env:  # secrets, so the addresses stay out of the source and the public logs
+          ST_SERVER: ${{ secrets.ST_SERVER }}
+          ST_SITE: ${{ secrets.ST_SITE }}
+        run: powershell -ExecutionPolicy Bypass -File packaging\windows\build.ps1
+      - name: Check the package
+        run: |
+          if (-not (Test-Path build\dist\stzb-warroom\_internal\stzb_warroom\ui\index.html)) { throw "the window's page is missing" }
+          if (-not (Test-Path build\dist\stzb-warroom\stzb-warroom.exe)) { throw "the exe is missing" }
+          if (-not (Test-Path build\dist\stzb-warroom\config.json)) { throw "config.json is missing" }
+      - uses: actions/upload-artifact@v4
+        with:
+          name: stzb-warroom-windows
+          path: build/dist/stzb-warroom
+      - name: Release
+        if: startsWith(github.ref, 'refs/tags/')
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release create "${{ github.ref_name }}" build/stzb-warroom-windows.zip --generate-notes

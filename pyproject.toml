@@ -1,0 +1,16 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "stzb-warroom"
+version = "1.0.0"
+description = "率土战局: the desktop client of 率土游戏助手, a helper for 率土之滨 (STZB) players"
+requires-python = ">=3.11"
+dependencies = []
+
+[project.scripts]
+stzb-warroom = "stzb_warroom.__main__:main"
+
+[tool.setuptools.packages.find]
+include = ["stzb_warroom*"]

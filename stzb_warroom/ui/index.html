@@ -1,0 +1,193 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>率土战局</title>
+  <link rel="icon" href="/ui/icon.svg" type="image/svg+xml">
+  <link rel="stylesheet" href="/ui/app.css">
+  <script src="/ui/app.js" defer></script>
+</head>
+<body>
+<div class="app">
+  <aside class="sidebar">
+    <div class="brand">
+      <span class="mark">率</span>
+      <div><strong>率土战局</strong><small>率土游戏助手</small></div>
+    </div>
+    <nav id="nav">
+      <button class="nav-item active" data-page="overview"><i data-icon="home"></i><span>概览</span></button>
+      <button class="nav-item" data-page="notices"><i data-icon="bell"></i><span>通知</span><b class="badge" id="badge-notices"></b></button>
+      <button class="nav-item" data-page="accounts"><i data-icon="user"></i><span>账号与推送</span><b class="badge alert" id="badge-accounts"></b></button>
+      <button class="nav-item" data-page="settings"><i data-icon="gear"></i><span>设置</span></button>
+      <button class="nav-item" data-page="diagnostics"><i data-icon="pulse"></i><span>诊断</span></button>
+      <button class="nav-item" data-page="about"><i data-icon="info"></i><span>关于</span></button>
+    </nav>
+    <div class="side-status">
+      <div><span class="dot" id="side-dot"></span><span id="side-state">正在连接…</span></div>
+      <small id="side-detail"></small>
+    </div>
+  </aside>
+
+  <main class="main">
+    <header class="topbar">
+      <div>
+        <h1 id="page-title">概览</h1>
+        <p id="page-sub" class="sub">上报游戏数据，接收战局通知</p>
+      </div>
+      <button id="toggle" class="btn primary" disabled>开始上报</button>
+    </header>
+    <div id="banners" class="banners"></div>
+
+    <section class="page active" id="page-overview">
+      <div class="hero" id="hero">
+        <div class="hero-icon" id="hero-icon"></div>
+        <div class="hero-text">
+          <h2 id="hero-title">正在连接…</h2>
+          <p id="hero-desc"></p>
+        </div>
+        <div class="hero-actions" id="hero-actions"></div>
+      </div>
+      <div class="metrics">
+        <div class="metric"><span>已上传</span><strong id="m-uploaded">0</strong><small>本次运行的数据条数</small></div>
+        <div class="metric"><span>待上传</span><strong id="m-pending">-</strong><small>网络断开时先存在本机</small></div>
+        <div class="metric"><span>最近上传</span><strong id="m-last">-</strong><small id="m-last-at">还没有上传</small></div>
+        <div class="metric"><span>游戏连接</span><strong id="m-conn">0</strong><small>最近 5 分钟看到的</small></div>
+      </div>
+      <div class="columns">
+        <div class="card">
+          <div class="card-head"><h3>账号</h3><button class="link" data-goto="accounts">管理</button></div>
+          <div id="ov-accounts" class="mini-list"></div>
+        </div>
+        <div class="card">
+          <div class="card-head"><h3>最新通知</h3><button class="link" data-goto="notices">全部</button></div>
+          <div id="ov-notices" class="mini-list"></div>
+        </div>
+      </div>
+    </section>
+
+    <section class="page" id="page-notices">
+      <div class="toolbar">
+        <div class="chips" id="filters">
+          <button class="chip active" data-filter="all">全部</button>
+          <button class="chip" data-filter="alarm">紧急</button>
+          <button class="chip" data-filter="warn">提醒</button>
+          <button class="chip" data-filter="info">消息</button>
+        </div>
+        <div class="toolbar-right">
+          <label class="check"><input type="checkbox" id="opt-sound"><span>紧急通知响铃</span></label>
+          <label class="check"><input type="checkbox" id="opt-desktop"><span>桌面弹窗</span></label>
+          <button class="btn ghost small" id="clear-notices">清空列表</button>
+        </div>
+      </div>
+      <div id="notice-list" class="notice-list"></div>
+    </section>
+
+    <section class="page" id="page-accounts">
+      <div id="account-list" class="account-list"></div>
+      <div class="card add-card">
+        <h3>添加账号</h3>
+        <p class="muted">粘贴管理员发给你的 Token（sta_ 开头）。这台电脑上玩几个游戏账号，就添加几个 Token。Token 加密保存在本机。</p>
+        <form id="add-form" class="inline-form">
+          <input id="add-token" type="password" autocomplete="off" spellcheck="false" placeholder="sta_…">
+          <button class="btn primary" type="submit">添加</button>
+        </form>
+      </div>
+      <details class="card guide">
+        <summary>怎么用 Bark 在 iPhone 上收通知？</summary>
+        <ol>
+          <li>在 iPhone 的 App Store 搜索并安装 <b>Bark</b>，打开后允许通知。</li>
+          <li>Bark 首页会显示一个以 <code>https://api.day.app/</code> 开头的地址，点它旁边的复制按钮。</li>
+          <li>把地址发到这台电脑（微信、QQ 都行），粘贴到对应账号的“Bark 地址”里，点“绑定”。</li>
+          <li>手机收到一条测试通知就成功了。之后敌袭等需要你下令的通知会推送到手机，即使这台电脑没开也会推。</li>
+        </ol>
+      </details>
+    </section>
+
+    <section class="page" id="page-settings">
+      <div class="card settings">
+        <h3>运行</h3>
+        <div class="setting">
+          <div><b>开机自动启动</b><p>登录 Windows 后自动在后台开始上报，不弹窗口；这样启动时，关掉窗口也不会停。</p></div>
+          <label class="switch"><input type="checkbox" id="set-autostart"><span></span></label>
+        </div>
+        <div class="setting">
+          <div><b>关闭窗口后继续在后台运行</b><p>关掉窗口也不停止上报。想再打开窗口，点屏幕右下角的托盘图标。</p></div>
+          <label class="switch"><input type="checkbox" id="set-keep"><span></span></label>
+        </div>
+        <div class="setting">
+          <div><b>退出程序</b><p>停止上报并关闭程序。没上传完的数据会保存，下次打开继续上传。</p></div>
+          <button class="btn danger small" id="quit">退出</button>
+        </div>
+      </div>
+      <div class="card settings">
+        <h3>网络组件</h3>
+        <div class="setting">
+          <div><b>dumpcap.exe</b><p id="dumpcap-path" class="path">-</p></div>
+          <div class="row-actions">
+            <button class="btn ghost small" id="pick-dumpcap">手动选择</button>
+            <button class="btn ghost small" id="forget-dumpcap">自动查找</button>
+          </div>
+        </div>
+        <div class="setting">
+          <div><b>Wireshark</b><p>程序要用 Wireshark 自带的 Npcap 和 dumpcap。还没装的话先安装，安装时保持勾选 Npcap。</p></div>
+          <button class="btn ghost small" id="install-wireshark">安装 Wireshark</button>
+        </div>
+      </div>
+      <div class="card settings">
+        <h3>数据</h3>
+        <div class="setting">
+          <div><b>数据文件夹</b><p id="state-dir" class="path">-</p></div>
+          <button class="btn ghost small" id="open-folder">打开</button>
+        </div>
+        <div class="setting">
+          <div><b>服务器</b><p id="server-origin" class="path">-</p></div>
+        </div>
+      </div>
+    </section>
+
+    <section class="page" id="page-diagnostics">
+      <div class="card">
+        <div class="card-head"><h3>检查</h3>
+          <div class="row-actions">
+            <button class="btn ghost small" id="copy-diag">复制诊断信息</button>
+          </div>
+        </div>
+        <div id="checks" class="checks"></div>
+        <p class="muted small-note">遇到问题时点“复制诊断信息”，粘贴发给管理员。诊断信息里没有 Token 和 Bark 密钥。</p>
+      </div>
+      <div class="card log-card">
+        <div class="card-head"><h3>运行日志</h3>
+          <label class="check"><input type="checkbox" id="log-follow" checked><span>自动滚动</span></label>
+        </div>
+        <div id="log" class="log"></div>
+      </div>
+    </section>
+
+    <section class="page" id="page-about">
+      <div class="card about">
+        <span class="mark big">率</span>
+        <h2>率土战局</h2>
+        <p class="muted">率土游戏助手 · 电脑客户端</p>
+        <p class="version">版本 <b id="about-version">-</b></p>
+        <p id="update-state" class="muted"></p>
+        <div class="row-actions center">
+          <button class="btn ghost" id="check-update">检查更新</button>
+          <a class="btn ghost hidden" id="site-link" href="#" target="_blank" rel="noopener">打开网站</a>
+          <a class="btn ghost" href="https://github.com/nzery/stzb-warroom" target="_blank" rel="noopener">开源项目</a>
+        </div>
+        <ul class="facts">
+          <li>只读取这台电脑上游戏的网络数据，不向游戏发送任何东西，不操作游戏。</li>
+          <li>通知内容由服务器生成；绑定 Bark 后，紧急通知也会推送到 iPhone。</li>
+          <li>Token 用 Windows 加密保存在本机，只有你的 Windows 账户能读取。</li>
+        </ul>
+      </div>
+    </section>
+  </main>
+</div>
+<div id="toasts" class="toasts"></div>
+<div id="gone" class="gone hidden">
+  <div><span class="mark big">率</span><h2>程序已退出</h2><p>需要时双击 stzb-warroom.exe 重新打开。</p></div>
+</div>
+</body>
+</html>
