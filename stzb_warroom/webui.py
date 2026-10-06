@@ -1,4 +1,4 @@
-"""The window: a page served on this computer only, shown by Edge as an app window.
+"""The window: a page served on this computer only, shown in the program's own window (Electron).
 
 The server listens on 127.0.0.1 at a random port, and answers only a page that presents
 the key it was opened with (a cookie set from ``/?k=<key>``) and names it as its host, so
@@ -18,6 +18,7 @@ import hmac
 import json
 import mimetypes
 import secrets
+import shutil
 import sys
 import threading
 import time
@@ -31,9 +32,8 @@ from . import winsys
 from .app import App
 
 UI = Path(__file__).resolve().parent / "ui"
-TITLE = "率土战局"  # the page's <title>, which names Edge's window
-OPENING = 15  # seconds a window may take to open (Edge starting) before another is opened
-ICON_AFTER = (0.3, 1.5, 4)  # seconds between giving a newly opened window our icon
+TITLE = "率土战局"  # the page's <title>, which names the window
+OPENING = 15  # seconds a window may take to open (Electron starting) before another is opened
 CLOSED_AFTER = 3  # seconds without any page open before the program ends (a reload comes back sooner)
 KEEP_ALIVE = 2  # seconds between writes to a quiet events stream, which find a page that is gone
 COOKIE = "stzb_key"
@@ -176,15 +176,6 @@ class Window(ThreadingHTTPServer):
         with self.count_lock:
             self.open_pages.add(page)
             self.seen_page, self.alone_since, self.opened_at = True, None, None
-        if winsys.WINDOWS:
-            threading.Thread(target=self.give_icon, name="icon", daemon=True).start()
-
-    def give_icon(self):
-        """Our own icon on Edge's window, sharp on the taskbar; again a little later, as Edge
-        sets the page's icon once it has it."""
-        for wait in ICON_AFTER:
-            time.sleep(wait)
-            winsys.give_icon(TITLE, UI / "icon.ico")
 
     def show(self):
         """Bring the window to the front, or open one if none is open or on its way."""
@@ -196,7 +187,7 @@ class Window(ThreadingHTTPServer):
                 return "front"
             with self.count_lock:
                 if self.opened_at is not None and time.monotonic() - self.opened_at < OPENING:
-                    return "opening"  # a click while Edge starts must not open a second window
+                    return "opening"  # a click while the window starts must not open a second window
                 self.opened_at = time.monotonic()
             self.opener()
             return "opened"
@@ -293,13 +284,14 @@ def main(server, state_dir, background=False, show=None):
     url = running_window(state_dir)
     if url:
         if not background and not ask_to_show(state_dir):
-            show(url, state_dir / "browser")
+            show(url, state_dir / "window")
         return
     winsys.sharp()
     app = App(server, state_dir)
     window = Window(app)
-    window.opener = lambda: show(window.url, state_dir / "browser")
+    window.opener = lambda: show(window.url, state_dir / "window")
     state_dir.mkdir(parents=True, exist_ok=True)
+    shutil.rmtree(state_dir / "browser", ignore_errors=True)  # Edge's data, from before the window was Electron
     marker = state_dir / "window.json"
     marker.write_text(json.dumps({"url": window.url, "key": window.key}))
     threading.Thread(target=window.serve_forever, name="window", daemon=True).start()
@@ -318,5 +310,6 @@ def main(server, state_dir, background=False, show=None):
         window.quit()
     finally:
         tray.close()
+        winsys.close_windows()
         marker.unlink(missing_ok=True)
     sys.stdout, sys.stderr = sys.__stdout__, sys.__stderr__

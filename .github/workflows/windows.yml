@@ -29,6 +29,8 @@ jobs:
           if (-not (Test-Path build\dist\stzb-warroom\_internal\stzb_warroom\ui\index.html)) { throw "the window's page is missing" }
           if (-not (Test-Path build\dist\stzb-warroom\stzb-warroom.exe)) { throw "the exe is missing" }
           if (-not (Test-Path build\dist\stzb-warroom\config.json)) { throw "config.json is missing" }
+          if (-not (Test-Path build\dist\stzb-warroom\window\stzb-window.exe)) { throw "the window is missing" }
+          if (-not (Test-Path build\dist\stzb-warroom\window\resources\app\main.js)) { throw "the window's app is missing" }
       - uses: actions/upload-artifact@v4
         with:
           name: stzb-warroom-windows

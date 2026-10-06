@@ -6,6 +6,7 @@
 stzb-warroom/
 ├── stzb-warroom.exe        双击打开“率土战局”窗口（PyInstaller 打包，自带 Python）
 ├── _internal/              exe 运行要用的文件（含窗口页面 stzb_warroom/ui），不要删
+├── window/                 显示窗口的 Electron（stzb-window.exe，程序自己启动它），不要删
 ├── 使用说明.txt             给盟友看的说明（来自 packaging/windows/使用说明.txt）
 ├── config.json             构建时写入的服务器地址（和网站地址）
 └── Wireshark-…-x64.exe     可选：构建时用 -Include 放进来的 Wireshark 安装程序
@@ -13,9 +14,11 @@ stzb-warroom/
 
 ### 窗口是怎么做的
 
-程序在本机 `127.0.0.1` 的随机端口开一个只给自己用的网页服务（`stzb_warroom/webui.py`），用 Edge 的应用模式打开
-（`msedge --app=…`，没有地址栏，看起来像普通软件；Edge 数据放在 `%LOCALAPPDATA%\stzb-warroom\browser`，
-和盟友自己的浏览器分开）。没有 Edge 时用默认浏览器打开。页面在 `stzb_warroom/ui/`（HTML、CSS、JS），
+程序在本机 `127.0.0.1` 的随机端口开一个只给自己用的网页服务（`stzb_warroom/webui.py`），用包里的 Electron
+（`window\stzb-window.exe`，应用代码在仓库的 `electron/`）打开：没有地址栏和菜单，不登录账号、不提示保存密码，
+其他网站的链接交给系统默认浏览器打开；窗口数据放在 `%LOCALAPPDATA%\stzb-warroom\window`。
+Electron 固定在一个版本（`build.ps1` 里的 `$electronVersion` 和 SHA-256），要升级时改这两处。
+找不到 `window\` 时用默认浏览器打开。页面在 `stzb_warroom/ui/`（HTML、CSS、JS），
 只有带着启动时随机生成的密钥（Cookie）、并以 `127.0.0.1:端口` 访问的页面才能读写，别的网站和别的电脑用不了。
 
 - **概览**：上报状态、已上传/待上传/最近上传/游戏连接、账号摘要、最新通知。
@@ -55,7 +58,7 @@ Windows 用户能解开。窗口只用盟友自己添加的 Token，不读环境
 
 | 软件 | 用途 | 下载 |
 |---|---|---|
-| Python 3.12（只在本地构建时需要） | 运行 PyInstaller | <https://www.python.org/downloads/windows/>，选 “Windows installer (64-bit)” |
+| Python 3.12（只在本地构建时需要） | 运行 PyInstaller（Electron 由构建脚本自动下载） | <https://www.python.org/downloads/windows/>，选 “Windows installer (64-bit)” |
 | Wireshark 4.6.9 x64 | 盟友电脑上必须安装，自带 Npcap 驱动 | 下载页 <https://www.wireshark.org/download.html>，直链 <https://2.na.dl.wireshark.org/win64/Wireshark-4.6.9-x64.exe> |
 | Npcap 1.89（备用） | Wireshark 装好了但 Npcap 没装上时单独补装 | <https://npcap.com/#download>，直链 <https://npcap.com/dist/npcap-1.89.exe> |
 
@@ -111,7 +114,7 @@ GitHub 上构建的包里没有 Wireshark 安装程序。要放的话，下载 z
    python -m unittest discover -s tests
    ```
 
-4. 构建（会用 pip 装 PyInstaller 6.22.3，只在构建时用）：
+4. 构建（会用 pip 装 PyInstaller 6.22.3，只在构建时用；还会从 GitHub 下载 Electron 和 rcedit，存在 `build\downloads`）：
 
    ```powershell
    powershell -ExecutionPolicy Bypass -File packaging\windows\build.ps1 -Server https://api.example.com
@@ -130,13 +133,15 @@ GitHub 上构建的包里没有 Wireshark 安装程序。要放的话，下载 z
 
 在一台装好 Wireshark 的 Windows 电脑上：
 
-1. 解压 zip，双击 `stzb-warroom.exe`：打开标题为“率土战局”的窗口，没有地址栏，没有黑色命令行窗口。
+1. 解压 zip，双击 `stzb-warroom.exe`：打开标题为“率土战局”的窗口，没有地址栏，没有黑色命令行窗口；
+   任务栏和标题栏的图标一出现就是清晰的，“关于”页的链接在默认浏览器里打开。
 2. 没有 Token 时，顶部提示“还没有添加 Token”。到“账号与推送”粘贴一个错误的 Token（比如改掉最后一位）：
    卡片和顶部都标红“Token 无效”。删掉它，添加正确的 Token：显示角色和“正常”，概览变成“正在上报”。
 3. “诊断”里各项检查都是正常，运行日志里有 `dumpcap: …`，没有报错。
 4. 登录游戏：概览的“最近上传”有时间，“游戏连接”大于 0。
 5. Bark：未绑定的账号粘贴 Bark 地址点“绑定”，手机收到测试通知；“发测试推送”“解绑”都正常。
-6. 右下角有托盘图标，单击能打开窗口。关掉窗口，几秒后托盘图标消失，任务管理器里 `stzb-warroom.exe` 和 `dumpcap.exe` 都已退出。
+6. 右下角有托盘图标，单击能打开窗口。关掉窗口，几秒后托盘图标消失，任务管理器里 `stzb-warroom.exe`、`stzb-window.exe` 和 `dumpcap.exe` 都已退出。
+   托盘右键“退出”时窗口也一起关掉。
 7. 重新打开：Token 还在，自动开始上报。再双击一次 exe：不会开第二个程序，只是再打开一个窗口。
 8. “设置”里打开“开机自动启动”，注销再登录：任务管理器里有 `stzb-warroom.exe`、没有窗口；双击 exe 能打开窗口。
 9. 打开“关闭窗口后继续在后台运行”，关窗口后程序和托盘图标仍在；单击托盘图标能重新打开窗口，右键“退出”能退出。
@@ -157,5 +162,5 @@ GitHub 上构建的包里没有 Wireshark 安装程序。要放的话，下载 z
 | 状态栏提示“网络组件没能启动” | Npcap 没装好或没重启。重装 Wireshark 并勾选 Npcap，或单独装 Npcap，然后重启 |
 | 双击 exe 没反应 | 多半是被杀毒软件隔离了，把文件夹加入信任后重新解压 |
 | 已经装了 Wireshark 还提示没找到 | “设置 → 手动选择”，选 Wireshark 安装文件夹里的 `dumpcap.exe`。如果找不到这个文件，说明装的是便携版或者没装完整，要用官网的 “Windows x64 Installer” 重新安装。把诊断信息发给维护者，可以帮助改进自动查找 |
-| 窗口打开是普通浏览器标签页 | 这台电脑没有找到 Edge，用了默认浏览器，功能一样 |
+| 窗口打开是普通浏览器标签页 | 程序文件夹里的 `window` 文件夹不见了（多半被杀毒软件隔离或解压不完整），用了默认浏览器，功能一样。重新解压整个 zip 即可 |
 | 想用命令行排查 | exe 后面带参数时等同于 `python -m stzb_warroom`，例如 `stzb-warroom.exe --help`。窗口程序没有控制台，看不到输出，排查建议在装了 Python 的电脑上直接用 `python -m stzb_warroom capture` |

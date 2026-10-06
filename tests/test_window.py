@@ -187,14 +187,14 @@ class PageServerTests(unittest.TestCase):
         self.window.opener = lambda: opened.append(1)
         with unittest.mock.patch.object(winsys, "focus_window", lambda title: front.append(title) or True):
             self.assertEqual(self.window.show(), "opened")
-            self.assertEqual(self.window.show(), "opening")  # clicked again while Edge starts
+            self.assertEqual(self.window.show(), "opening")  # clicked again while the window starts
             self.window.page_open("a")
             self.assertEqual(self.window.show(), "front")
             self.assertEqual(front, [webui.TITLE])
             self.window.act("closing", {"page": "a"})  # closed to the tray
             self.assertEqual(self.window.show(), "opened")
         self.assertEqual(opened, [1, 1])
-        with unittest.mock.patch.object(webui, "OPENING", -1):  # Edge never came: open again
+        with unittest.mock.patch.object(webui, "OPENING", -1):  # the window never came: open again
             self.assertEqual(self.window.show(), "opened")
 
     def test_a_second_start_asks_the_first_to_show_its_window(self):
@@ -229,6 +229,12 @@ class PageServerTests(unittest.TestCase):
         bad = json.dumps({"action": "rm -rf"})
         status, _, data = self.request("POST", "/api/action", {**self.cookie(), **json_type, **origin}, bad)
         self.assertEqual(status, 400)
+
+    def test_the_window_is_electron_from_source_too(self):
+        with unittest.mock.patch.dict("os.environ", {"ST_ELECTRON": "/opt/electron/electron"}):
+            command = winsys.window_command()
+        self.assertEqual(command[0], "/opt/electron/electron")
+        self.assertTrue((Path(command[1]) / "main.js").is_file())
 
     def test_only_the_ui_folder_is_served(self):
         self.assertEqual(self.request("GET", "/ui/app.css")[0], 200)

@@ -1,4 +1,4 @@
-"""What the window needs from Windows: start at login, a file picker, Edge, Npcap, the tray icon,
+"""What the window needs from Windows: start at login, a file picker, the window (Electron), Npcap, the tray icon,
 bringing the window to the front.
 
 Everything here does nothing (or says "not available") on other systems, where the window
@@ -6,6 +6,7 @@ is only used for development.
 """
 
 import os
+import shutil
 import subprocess
 import sys
 import threading
@@ -62,38 +63,41 @@ def npcap_installed():
         return False
 
 
-def edge():
-    """msedge.exe, or None."""
-    if not WINDOWS:
-        return None
-    import winreg
-    for root in (winreg.HKEY_CURRENT_USER, winreg.HKEY_LOCAL_MACHINE):
-        try:
-            with winreg.OpenKey(root, r"SOFTWARE\Microsoft\Windows\CurrentVersion\App Paths\msedge.exe") as key:
-                path = winreg.QueryValueEx(key, "")[0].strip('"')
-            if os.path.isfile(path):
-                return path
-        except OSError:
-            pass
-    for name in ("ProgramFiles(x86)", "ProgramFiles", "LOCALAPPDATA"):
-        path = os.path.join(os.environ.get(name, ""), "Microsoft", "Edge", "Application", "msedge.exe")
-        if os.environ.get(name) and os.path.isfile(path):
-            return path
+def window_command():
+    """How to start the window: [its exe] in the package, [electron, the electron folder] from
+    source (ST_ELECTRON, else electron on PATH), or None."""
+    exe = frozen_folder() / "window" / ("stzb-window.exe" if WINDOWS else "stzb-window")
+    if exe.is_file():
+        return [str(exe)]
+    source = Path(__file__).resolve().parent.parent / "electron"
+    electron = os.environ.get("ST_ELECTRON") or shutil.which("electron")
+    if electron and (source / "main.js").is_file():
+        return [electron, str(source)]
     return None
 
 
-def open_window(url, profile):
-    """Show `url` as an app window (Edge without its address bar), else in the default browser.
+_OPENED = []  # the windows started, closed with the program
 
-    `profile`: Edge's data folder for this app, apart from the player's own browsing.
+
+def open_window(url, profile):
+    """Show `url` in the program's own window (Electron), else in the default browser.
+
+    `profile`: the window's data folder.
     """
-    path = edge()
-    if path:
-        subprocess.Popen([path, f"--app={url}", f"--user-data-dir={profile}", "--no-first-run",
-                          "--no-default-browser-check", "--window-size=1200,820", "--disable-features=Translate"])
+    command = window_command()
+    if command:
+        _OPENED.append(subprocess.Popen([*command, url, f"--profile={profile}"]))
         return
     import webbrowser
     webbrowser.open(url)
+
+
+def close_windows():
+    """Close the windows this program started (it is quitting, their page goes with it)."""
+    while _OPENED:
+        process = _OPENED.pop()
+        if process.poll() is None:
+            process.terminate()
 
 
 def sharp():
@@ -112,8 +116,8 @@ def sharp():
     user32.SetProcessDPIAware()
 
 
-def _edge_windows(title):
-    """The visible windows titled `title` that Edge (or Chrome) draws."""
+def _windows(title):
+    """The visible windows titled `title` that Electron (or a Chromium browser) draws."""
     import ctypes
     api = _api()
     user32, found = api.user32, []
@@ -131,37 +135,15 @@ def _edge_windows(title):
 
 
 def focus_window(title):
-    """Bring the open window titled `title` (Edge's app window) to the front: True, or False if none."""
+    """Bring the open window titled `title` (the program's window) to the front: True, or False if none."""
     if not WINDOWS:
         return False
-    found = _edge_windows(title)
+    found = _windows(title)
     if not found:
         return False
     user32, hwnd = _api().user32, found[0]
     user32.ShowWindow(hwnd, 9 if user32.IsIconic(hwnd) else 5)  # SW_RESTORE, SW_SHOW
     user32.SetForegroundWindow(hwnd)
-    return True
-
-
-_ICONS = {}
-
-
-def give_icon(title, icon):
-    """Give Edge's window titled `title` the icons in `icon` (an .ico file), each at the size
-    the taskbar and title bar want: Edge would stretch the page's 16-pixel icon. True if found."""
-    if not WINDOWS:
-        return False
-    found = _edge_windows(title)
-    if not found:
-        return False
-    user32 = _api().user32
-    for kind, metric in ((1, 11), (0, 49)):  # ICON_BIG at SM_CXICON, ICON_SMALL at SM_CXSMICON
-        side = user32.GetSystemMetrics(metric)
-        if (kind, side) not in _ICONS:  # kept for good: the windows go on using them
-            _ICONS[kind, side] = user32.LoadImageW(None, str(icon), 1, side, side, 0x0010)  # LR_LOADFROMFILE
-        if _ICONS[kind, side]:
-            for hwnd in found:
-                user32.SendMessageW(hwnd, 0x0080, kind, _ICONS[kind, side])  # WM_SETICON
     return True
 
 
@@ -342,7 +324,7 @@ _API = None
 
 
 def _api():
-    """user32/shell32/kernel32 with the signatures the tray and Edge's window need (64-bit safe)."""
+    """user32/shell32/kernel32 with the signatures the tray and the window need (64-bit safe)."""
     global _API
     if _API is not None:
         return _API

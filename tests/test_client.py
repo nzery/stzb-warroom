@@ -272,7 +272,6 @@ class LocalTests(unittest.TestCase):
     def test_windows_helpers_answer(self):
         self.assertIn(winsys.npcap_installed(), (True, False))
         self.assertFalse(winsys.autostart())  # not a packaged exe
-        winsys.edge()  # a path or None, without raising
 
     def test_dumpcap_is_looked_for_in_order(self):
         picked = self.folder / "dumpcap"

@@ -84,6 +84,8 @@ export ST_SERVER=https://...  ST_CLIENT_TOKEN=sta_...   # 服务器地址和 Tok
 python3 -m stzb_warroom gui        # 和 Windows 一样的窗口；也可以用 capture（只上报）+ notify（终端里看通知）
 ```
 
+窗口用 [Electron](https://www.electronjs.org/) 显示：装了 `electron` 命令（如 `npm install -g electron`），或用环境变量 `ST_ELECTRON` 指向它；都没有时在默认浏览器里打开。
+
 开机自动运行：`deploy/client-services.sh install`，用法见脚本开头。
 
 ## 遇到问题
