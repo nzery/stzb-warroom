@@ -122,7 +122,7 @@ class App:
                 "hints": [dict(hint, token=mask(token)) for token, hint in self.hints.items()],
                 "notices": [n for n in self.notices if n["seq"] > notices_after],
                 "logs": [line for line in self.logs if line["seq"] > logs_after],
-                "settings": {"keep_running": self.settings.get("keep_running", False),
+                "settings": {"keep_running": self.settings["keep_running"],
                              "autostart": winsys.autostart(), "autostart_available": winsys.autostart_command() is not None,
                              "dumpcap": self.find_dumpcap()[0], "dumpcap_picked": self._picked(),
                              "state_dir": str(self.state_dir), "windows": winsys.WINDOWS},
@@ -141,7 +141,7 @@ class App:
             value = json.loads(self.settings_path.read_text(encoding="utf-8"))
         except (OSError, ValueError):
             value = {}
-        return value if isinstance(value, dict) else {}
+        return {"keep_running": True, **(value if isinstance(value, dict) else {})}
 
     def set_setting(self, name, value):
         if name == "autostart":
@@ -210,7 +210,8 @@ class App:
 
     def remove_token(self, index):
         with self.lock:
-            token = self.tokens.pop(index)
+            token = self._token(index)
+            self.tokens.pop(index)
             self.accounts.pop(token, None)
             self.hints.pop(token, None)
             self._save_tokens()
@@ -314,9 +315,9 @@ class App:
             session = self.session = {"stop": stop, "uploader": None, "tokens": list(self.tokens)}
             self.capture.update(state="starting", error=None, hint=None, since=time.time(), dumpcap=dumpcap)
             self.hints.clear()
-        session["thread"] = threading.Thread(target=self._capture, args=(session, dumpcap), name="capture",
-                                             daemon=True)
-        session["thread"].start()
+            session["thread"] = threading.Thread(target=self._capture, args=(session, dumpcap), name="capture",
+                                                 daemon=True)
+            session["thread"].start()
         notify.start(self.server, session["tokens"], self.state_dir, stop, prompt_for=self.prompt_for,
                      show=self.on_notice, warn=lambda text: self.log(text, "warn"))
         self.touch()
@@ -335,6 +336,8 @@ class App:
                         started=started)
         except Exception as exc:
             error = str(exc) or type(exc).__name__
+        finally:
+            session["stop"].set()  # also stop notifications when setup failed before capture began
         with self.lock:
             if session is self.session:
                 self.session = None

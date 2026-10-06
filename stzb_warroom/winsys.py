@@ -271,7 +271,7 @@ class Tray:
             handle = user32.CreatePopupMenu()
             user32.AppendMenuW(handle, 0, self.OPEN, "打开窗口")
             user32.AppendMenuW(handle, 0x0800, 0, None)  # MF_SEPARATOR
-            user32.AppendMenuW(handle, 0, self.QUIT, "退出（停止上报）")
+            user32.AppendMenuW(handle, 0, self.QUIT, "退出")
             point = wintypes.POINT()
             user32.GetCursorPos(ctypes.byref(point))
             user32.SetForegroundWindow(self.hwnd)  # or the menu would not close on a click elsewhere

@@ -9,8 +9,8 @@ everything through ``POST /api/action``.
 One window per computer: a second start finds the first through ``window.json`` in the
 state folder and asks it to show its window. Showing it (a start, the tray icon) brings an
 open window to the front, and opens one only when none is open or opening. When the last page
-closes (it says so as it goes, else its events stream breaks), the program ends, unless it was
-started at login (``--background``) or the player chose to keep it running. On Windows an icon
+closes (it says so as it goes, else its events stream breaks), the program stays running by
+default. The player can disable this, except when started at login (``--background``). On Windows an icon
 in the notification area shows the window again or quits.
 """
 
@@ -92,7 +92,10 @@ class Handler(BaseHTTPRequestHandler):
             return self.send(403, {"error": "forbidden"})
         if url.path == "/api/state":
             query = parse_qs(url.query)
-            numbers = [int(query.get(name, ["0"])[0] or 0) for name in ("n", "l")]
+            try:
+                numbers = [int(query.get(name, ["0"])[0] or 0) for name in ("n", "l")]
+            except ValueError:
+                return self.send(400, {"error": "bad cursor"})
             return self.send(200, self.server.app.snapshot(*numbers))
         if url.path == "/api/events":
             return self.events(parse_qs(url.query).get("page", [""])[0] or secrets.token_hex(8))
@@ -209,6 +212,8 @@ class Window(ThreadingHTTPServer):
     def act(self, action, body):
         app = self.app
         index = body.get("index")
+        if action in ("remove_token", "bark_bind", "bark_unbind", "bark_test") and type(index) is not int:
+            raise ValueError("没有这个账号")
         actions = {
             "start": app.start,
             "stop": app.stop,
@@ -229,8 +234,8 @@ class Window(ThreadingHTTPServer):
             "diagnostics": app.diagnostics,
             "open_installer": lambda: open_installer(),
         }
-        if action not in actions:
-            raise ValueError(f"unknown action {action}")
+        if not isinstance(action, str) or action not in actions:
+            raise ValueError("unknown action")
         return actions[action]()
 
     def quit(self):
@@ -304,7 +309,7 @@ def main(server, state_dir, background=False, show=None):
     try:
         while not app.quit.wait(1):
             # Started at login it stays, as does a player's choice to keep it running.
-            if window.closed() and not (background or app.settings.get("keep_running")):
+            if window.closed() and not (background or app.settings["keep_running"]):
                 window.quit()
     except KeyboardInterrupt:
         window.quit()

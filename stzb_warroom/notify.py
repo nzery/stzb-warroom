@@ -91,6 +91,8 @@ class Follower:
             value = json.loads(self.path.read_text())
         except (OSError, ValueError):
             value = {}
+        if not isinstance(value, dict):
+            value = {}
         self.epoch, self.after = value.get("epoch"), value.get("after")
 
     def print(self, notice):

@@ -98,6 +98,30 @@ class AppTests(unittest.TestCase):
         app.add_token(f" {GOOD} , {NEW} ")
         self.assertEqual(app.tokens, [GOOD, NEW])
 
+    def test_background_default_and_saved_choice(self):
+        app = self.app()
+        self.assertTrue(app.snapshot()["settings"]["keep_running"])
+        app.set_setting("keep_running", False)
+        self.assertFalse(self.app().snapshot()["settings"]["keep_running"])
+        app.set_setting("keep_running", True)
+        self.assertTrue(self.app().snapshot()["settings"]["keep_running"])
+
+    def test_bad_account_index_does_not_remove_another_account(self):
+        app = self.app(saved=f"{GOOD},{NEW}")
+        for index in (-1, 2):
+            with self.subTest(index=index), self.assertRaises(ValueError):
+                app.remove_token(index)
+        self.assertEqual(app.tokens, [GOOD, NEW])
+
+    def test_capture_setup_failure_stops_notification_workers(self):
+        app = self.app(saved=GOOD)
+        session = app.session = {"stop": threading.Event(), "uploader": None, "tokens": app.tokens}
+        with unittest.mock.patch.object(appmod, "run_capture", side_effect=RuntimeError("locked")):
+            app._capture(session, "dumpcap")
+        self.assertTrue(session["stop"].is_set())
+        self.assertIsNone(app.session)
+        self.assertEqual(app.capture["state"], "error")
+
     def test_accounts_show_what_the_server_says_and_never_a_whole_token(self):
         app = self.app(saved=f"{GOOD},{BAD},{NEW},{TAKEN}")
         app.check_accounts()
@@ -230,6 +254,18 @@ class PageServerTests(unittest.TestCase):
         status, _, data = self.request("POST", "/api/action", {**self.cookie(), **json_type, **origin}, bad)
         self.assertEqual(status, 400)
 
+    def test_malformed_actions_and_cursors_return_errors(self):
+        headers = {**self.cookie(), "Content-Type": "application/json",
+                   "Origin": f"http://127.0.0.1:{self.port}"}
+        for body in ({"action": []}, {"action": "remove_token"},
+                     {"action": "remove_token", "index": -1},
+                     {"action": "remove_token", "index": 3},
+                     {"action": "remove_token", "index": False}):
+            with self.subTest(body=body):
+                self.assertEqual(self.request("POST", "/api/action", headers, json.dumps(body))[0], 400)
+        self.assertEqual(self.app.tokens, [GOOD])
+        self.assertEqual(self.request("GET", "/api/state?n=invalid", self.cookie())[0], 400)
+
     def test_the_window_is_electron_from_source_too(self):
         with unittest.mock.patch.dict("os.environ", {"ST_ELECTRON": "/opt/electron/electron"}):
             command = winsys.window_command()
@@ -259,4 +295,3 @@ class TrayTests(unittest.TestCase):
         tray.close()
         tray.thread.join(5)
         self.assertFalse(tray.thread.is_alive())
-

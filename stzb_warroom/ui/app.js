@@ -68,7 +68,10 @@ function schedule() {
   if (!timer) timer = setTimeout(() => { timer = null; refresh(); }, 60);
 }
 
+let refreshing = false;
 async function refresh() {
+  if (refreshing) return;
+  refreshing = true;
   try {
     const response = await fetch(`/api/state?n=${S.n}&l=${S.l}`);
     if (!response.ok) throw new Error(response.status);
@@ -86,6 +89,8 @@ async function refresh() {
     render();
   } catch {
     /* the events stream reports a program that is gone */
+  } finally {
+    refreshing = false;
   }
 }
 
@@ -483,7 +488,6 @@ $('opt-desktop').addEventListener('change', async (e) => {
 
 $('set-autostart').addEventListener('change', (e) => act('set_setting', { name: 'autostart', value: e.target.checked }).catch(() => {}));
 $('set-keep').addEventListener('change', (e) => act('set_setting', { name: 'keep_running', value: e.target.checked }).catch(() => {}));
-$('quit').addEventListener('click', () => { if (confirm('退出后不再上报，确定退出吗？')) act('quit').catch(() => {}); });
 $('pick-dumpcap').addEventListener('click', (e) => withBusy(e.currentTarget, '等待选择', async () => {
   const path = await act('pick_dumpcap');
   if (path) { toast('已选择 ' + path); if (S.data && S.data.capture.state !== 'running') act('start', {}, { quiet: true }).catch(() => {}); }

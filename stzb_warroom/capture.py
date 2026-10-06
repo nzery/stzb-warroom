@@ -139,6 +139,7 @@ class Capture:
         self.process = None
         self.error = None
         self.stderr = collections.deque(maxlen=20)
+        self.threads = []
 
     def start(self, timeout=15):
         if self.dumpcap is None:
@@ -160,8 +161,10 @@ class Capture:
                                         stdout=subprocess.PIPE, stderr=subprocess.PIPE,
                                         creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
         ready = threading.Event()
-        threading.Thread(target=self._read_stderr, args=(ready,), daemon=True).start()
-        threading.Thread(target=self._read_packets, daemon=True).start()
+        self.threads = [threading.Thread(target=self._read_stderr, args=(ready,), daemon=True),
+                        threading.Thread(target=self._read_packets, daemon=True)]
+        for thread in self.threads:
+            thread.start()
         if not ready.wait(timeout) or self.process.poll() is not None:
             self.close()
             raise RuntimeError("dumpcap did not start capturing: " + " | ".join(self.stderr))
@@ -197,3 +200,10 @@ class Capture:
                 self.process.wait(5)
             except subprocess.TimeoutExpired:
                 self.process.kill()
+                self.process.wait()
+        # Drain buffered packets before the runner closes their queue database.
+        for thread in self.threads:
+            thread.join()
+        if self.process:
+            self.process.stdout.close()
+            self.process.stderr.close()

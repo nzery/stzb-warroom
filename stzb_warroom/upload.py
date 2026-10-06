@@ -65,35 +65,54 @@ class Queue:
 
     def add(self, stream_id, seq, row):
         with self.lock:
-            if self.db.execute("SELECT count(*) FROM rows").fetchone()[0] >= MAX_QUEUED:
-                if time.time() - self.full_logged > 60:
-                    self.full_logged = time.time()
-                    print("upload queue full: new frames are dropped until the server is reachable",
-                          file=sys.stderr, flush=True)
-                return False
-            self.db.execute("INSERT INTO rows VALUES (?,?,?)", (stream_id, seq, json.dumps(row)))
-            self.db.commit()
-            return True
+            if self._room(1):
+                self.db.execute("INSERT INTO rows VALUES (?,?,?)", (stream_id, seq, json.dumps(row)))
+                self.db.commit()
+                return True
+        self._warn_full()
+        return False
 
-    def new_reports(self, role, stream_id, channel, reports):
-        """{channel: [report]} of the reports this role has not sent as they are now. A report
-        once seen in the alliance list stays an alliance report."""
-        result = {}
-        with self.lock:
+    def _room(self, count):
+        return self.db.execute("SELECT count(*) FROM rows").fetchone()[0] + count <= MAX_QUEUED
+
+    def _warn_full(self):
+        # Logging may acquire the window's lock; never do it while holding the queue lock.
+        if time.time() - self.full_logged > 60:
+            self.full_logged = time.time()
+            print("upload queue full: new frames are dropped until the server is reachable",
+                  file=sys.stderr, flush=True)
+
+    def add_reports(self, role, stream_id, seq, captured_at, channel, reports):
+        """Queue reports and their deduplication records in one transaction; return rows added.
+
+        A full queue must not mark unsaved reports as already sent.
+        """
+        groups = {}
+        with self.lock, self.db:
             for report in reports:
                 battle_id = int(report["battle_id"])
                 text = json.dumps(report, ensure_ascii=False, sort_keys=True)
                 row = self.db.execute("SELECT channel,digest FROM reports WHERE role=? AND battle_id=?",
-                                      (role, battle_id)).fetchone()
+                                      (role, battle_id)).fetchone() if role else None
                 merged = "alliance" if row and "alliance" in (row[0], channel) else channel
                 digest = hashlib.sha256((merged + text).encode()).hexdigest()
                 if row and row[1] == digest:
                     continue
-                self.db.execute("INSERT OR REPLACE INTO reports VALUES (?,?,?,?,?)",
-                                (role, battle_id, merged, digest, stream_id))
-                result.setdefault(merged, []).append(report)
-            self.db.commit()
-        return result
+                if role:
+                    self.db.execute("INSERT OR REPLACE INTO reports VALUES (?,?,?,?,?)",
+                                    (role, battle_id, merged, digest, stream_id))
+                groups.setdefault(merged, []).append(report)
+            full = not self._room(len(groups))
+            if full:
+                self.db.rollback()
+            else:
+                for offset, (name, items) in enumerate(groups.items()):
+                    row = {"captured_at": captured_at, "channel": name, "reports": items}
+                    self.db.execute("INSERT INTO rows VALUES (?,?,?)", (stream_id, seq + offset, json.dumps(row)))
+        if full:
+            self._warn_full()
+            return 0
+        return len(groups)
 
     def batch(self):
         """(stream_id, first seq, rows) of the oldest stream, or None."""
@@ -164,8 +183,7 @@ class Uploader:
         for ends, at, client, frame in self.splitter.feed(captured_at, linktype, packet):
             if message_id(frame, client) in self.drop["client" if client else "server"]:
                 continue
-            for row in self.rows(ends, at, client, frame):
-                self.add(ends, row)
+            self.add_frame(ends, at, client, frame)
         now = time.monotonic()
         if now - self.swept > 60:
             self.swept = now
@@ -174,17 +192,16 @@ class Uploader:
                     del self.links[ends]
                     self.splitter.forget(ends)
 
-    def rows(self, ends, at, client, frame):
+    def add_frame(self, ends, at, client, frame):
         channel = None if client else BATTLE_LISTS.get(message_id(frame, client))
         if channel is None:
-            return [frame_row(at, client, frame)]
+            self.add(ends, frame_row(at, client, frame))
+            return
         reports = battle_reports(body(frame, client)[1])
         if not reports:
-            return []
-        stream_id = self.stream(ends)[0]
-        role = self.roles.get(stream_id)
-        groups = self.queue.new_reports(role, stream_id, channel, reports) if role else {channel: reports}
-        return [{"captured_at": at, "channel": name, "reports": items} for name, items in groups.items()]
+            return
+        link = self.stream(ends)
+        link[1] += self.queue.add_reports(self.roles.get(link[0]), link[0], link[1] + 1, at, channel, reports)
 
     def connections(self, within=300):
         """Open game connections seen in the last `within` seconds (a closed one, as after

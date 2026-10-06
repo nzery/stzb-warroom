@@ -1,6 +1,7 @@
 import base64
 import io
 import json
+import sqlite3
 import struct
 import tempfile
 import threading
@@ -11,7 +12,7 @@ from pathlib import Path
 from urllib.error import HTTPError
 
 from stzb_warroom import api, vault, winsys
-from stzb_warroom.capture import command_folder, find_dumpcap
+from stzb_warroom.capture import Capture, command_folder, find_dumpcap
 from stzb_warroom.frames import Splitter, body
 from stzb_warroom.notify import Follower, follow_prompts, render
 from stzb_warroom.runner import lock
@@ -172,8 +173,56 @@ class UploadTests(unittest.TestCase):
     def test_battle_reports_are_found_anywhere_in_a_list(self):
         self.assertEqual([r["battle_id"] for r in battle_reports([0, {"x": [report(5)]}, {"battle_id": 1}])], [5])
 
+    def test_full_queue_does_not_remember_reports_that_were_not_saved(self):
+        self.queue.add("other", 1, {"frame": "occupied"})
+        with unittest.mock.patch("stzb_warroom.upload.MAX_QUEUED", 1):
+            self.assertEqual(self.queue.add_reports(7, "stream", 1, 1.0, "personal", [report(5)]), 0)
+        self.queue.drop("other")
+        self.assertEqual(self.queue.add_reports(7, "stream", 1, 1.0, "personal", [report(5)]), 1)
+        self.assertEqual(self.queue.batch()[2][0]["reports"], [report(5)])
+        self.assertEqual(self.queue.add_reports(7, "stream", 2, 2.0, "personal", [report(5)]), 0)
+
+    def test_report_groups_are_queued_together_or_retried_together(self):
+        self.queue.add_reports(7, "stream", 1, 1.0, "alliance", [report(5)])
+        self.queue.acknowledge("stream", 1)
+        with unittest.mock.patch("stzb_warroom.upload.MAX_QUEUED", 1):
+            self.assertEqual(self.queue.add_reports(7, "stream", 2, 2.0, "personal",
+                                                     [report(5, hp=1), report(6)]), 0)
+        self.assertEqual(self.queue.add_reports(7, "stream", 2, 2.0, "personal",
+                                                 [report(5, hp=1), report(6)]), 2)
+        self.assertEqual([r["channel"] for r in self.queue.batch()[2]], ["alliance", "personal"])
+
+    def test_failed_report_insert_rolls_back_deduplication(self):
+        self.queue.add("stream", 1, {"frame": "occupied"})
+        with self.assertRaises(sqlite3.IntegrityError):
+            self.queue.add_reports(7, "stream", 1, 1.0, "personal", [report(5)])
+        self.queue.acknowledge("stream", 1)
+        self.assertEqual(self.queue.add_reports(7, "stream", 2, 2.0, "personal", [report(5)]), 1)
+
+    def test_full_queue_logs_without_holding_database_lock(self):
+        def log(*args, **kwargs):
+            acquired = self.queue.lock.acquire(blocking=False)
+            if acquired:
+                self.queue.lock.release()
+            self.assertTrue(acquired, "logging under the queue lock can deadlock the window")
+        with unittest.mock.patch("stzb_warroom.upload.MAX_QUEUED", 0), \
+                unittest.mock.patch("builtins.print", side_effect=log) as printed:
+            self.assertFalse(self.queue.add("stream", 1, {}))
+            self.queue.full_logged = 0
+            self.assertEqual(self.queue.add_reports(7, "stream", 1, 1.0, "personal", [report(5)]), 0)
+            self.assertEqual(printed.call_count, 2)
+
 
 class NotifyTests(unittest.TestCase):
+    def test_non_object_cursor_file_is_recovered(self):
+        with tempfile.TemporaryDirectory() as folder:
+            path = Path(folder) / "cursor.json"
+            for data in ("null", "[]", "42"):
+                path.write_text(data)
+                follower = Follower(None, "t", path)
+                self.assertIsNone(follower.after)
+                self.assertIsNone(follower.epoch)
+
     def test_render_tags_colours_and_strips_control_characters(self):
         text = render({"time": 1790000000, "tag": "敌袭", "level": "alarm", "title": "x\033[2J",
                        "body": "a\n\nb", "role": 7}, color=False, label=True)
@@ -230,6 +279,25 @@ class NotifyTests(unittest.TestCase):
                 self.assertEqual(shown, ["x", None])
 
 class LocalTests(unittest.TestCase):
+    def test_capture_close_waits_for_buffered_packets(self):
+        capture = Capture(lambda *_: None)
+        process = capture.process = unittest.mock.Mock()
+        process.poll.return_value = None
+        terminated = threading.Event()
+        process.terminate.side_effect = terminated.set
+        finished = []
+        def read_buffered():
+            terminated.wait(5)
+            finished.append((process.stdout.close.called, process.stderr.close.called))
+        reader = threading.Thread(target=read_buffered)
+        capture.threads = [reader]
+        reader.start()
+        capture.close()
+        self.assertFalse(reader.is_alive())
+        self.assertEqual(finished, [(False, False)])
+        process.stdout.close.assert_called_once()
+        process.stderr.close.assert_called_once()
+
     def setUp(self):
         folder = tempfile.TemporaryDirectory()
         self.addCleanup(folder.cleanup)
