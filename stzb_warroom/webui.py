@@ -33,6 +33,7 @@ from .app import App
 UI = Path(__file__).resolve().parent / "ui"
 TITLE = "率土战局"  # the page's <title>, which names Edge's window
 OPENING = 15  # seconds a window may take to open (Edge starting) before another is opened
+ICON_AFTER = (0.3, 1.5, 4)  # seconds between giving a newly opened window our icon
 CLOSED_AFTER = 3  # seconds without any page open before the program ends (a reload comes back sooner)
 KEEP_ALIVE = 2  # seconds between writes to a quiet events stream, which find a page that is gone
 COOKIE = "stzb_key"
@@ -175,6 +176,15 @@ class Window(ThreadingHTTPServer):
         with self.count_lock:
             self.open_pages.add(page)
             self.seen_page, self.alone_since, self.opened_at = True, None, None
+        if winsys.WINDOWS:
+            threading.Thread(target=self.give_icon, name="icon", daemon=True).start()
+
+    def give_icon(self):
+        """Our own icon on Edge's window, sharp on the taskbar; again a little later, as Edge
+        sets the page's icon once it has it."""
+        for wait in ICON_AFTER:
+            time.sleep(wait)
+            winsys.give_icon(TITLE, UI / "icon.ico")
 
     def show(self):
         """Bring the window to the front, or open one if none is open or on its way."""

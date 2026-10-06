@@ -112,12 +112,9 @@ def sharp():
     user32.SetProcessDPIAware()
 
 
-def focus_window(title):
-    """Bring the open window titled `title` (Edge's app window) to the front: True, or False if none."""
-    if not WINDOWS:
-        return False
+def _edge_windows(title):
+    """The visible windows titled `title` that Edge (or Chrome) draws."""
     import ctypes
-    from ctypes import wintypes
     api = _api()
     user32, found = api.user32, []
 
@@ -127,15 +124,44 @@ def focus_window(title):
         user32.GetClassNameW(hwnd, kind, len(kind))
         if name.value == title and kind.value.startswith("Chrome_WidgetWin") and user32.IsWindowVisible(hwnd):
             found.append(hwnd)
-            return False
         return True
 
     user32.EnumWindows(api.WNDENUMPROC(visit), 0)
+    return found
+
+
+def focus_window(title):
+    """Bring the open window titled `title` (Edge's app window) to the front: True, or False if none."""
+    if not WINDOWS:
+        return False
+    found = _edge_windows(title)
     if not found:
         return False
-    hwnd = found[0]
+    user32, hwnd = _api().user32, found[0]
     user32.ShowWindow(hwnd, 9 if user32.IsIconic(hwnd) else 5)  # SW_RESTORE, SW_SHOW
     user32.SetForegroundWindow(hwnd)
+    return True
+
+
+_ICONS = {}
+
+
+def give_icon(title, icon):
+    """Give Edge's window titled `title` the icons in `icon` (an .ico file), each at the size
+    the taskbar and title bar want: Edge would stretch the page's 16-pixel icon. True if found."""
+    if not WINDOWS:
+        return False
+    found = _edge_windows(title)
+    if not found:
+        return False
+    user32 = _api().user32
+    for kind, metric in ((1, 11), (0, 49)):  # ICON_BIG at SM_CXICON, ICON_SMALL at SM_CXSMICON
+        side = user32.GetSystemMetrics(metric)
+        if (kind, side) not in _ICONS:  # kept for good: the windows go on using them
+            _ICONS[kind, side] = user32.LoadImageW(None, str(icon), 1, side, side, 0x0010)  # LR_LOADFROMFILE
+        if _ICONS[kind, side]:
+            for hwnd in found:
+                user32.SendMessageW(hwnd, 0x0080, kind, _ICONS[kind, side])  # WM_SETICON
     return True
 
 
@@ -316,7 +342,7 @@ _API = None
 
 
 def _api():
-    """user32/shell32/kernel32 with the signatures the tray and focus_window need (64-bit safe)."""
+    """user32/shell32/kernel32 with the signatures the tray and Edge's window need (64-bit safe)."""
     global _API
     if _API is not None:
         return _API
@@ -367,6 +393,7 @@ def _api():
         (user32.IsWindowVisible, wintypes.BOOL, [wintypes.HWND]),
         (user32.IsIconic, wintypes.BOOL, [wintypes.HWND]),
         (user32.ShowWindow, wintypes.BOOL, [wintypes.HWND, ctypes.c_int]),
+        (user32.SendMessageW, LRESULT, [wintypes.HWND, wintypes.UINT, wintypes.WPARAM, wintypes.LPARAM]),
         (user32.CreatePopupMenu, wintypes.HMENU, []),
         (user32.AppendMenuW, wintypes.BOOL, [wintypes.HMENU, wintypes.UINT, ctypes.c_size_t, wintypes.LPCWSTR]),
         (user32.TrackPopupMenu, wintypes.BOOL, [wintypes.HMENU, wintypes.UINT, ctypes.c_int, ctypes.c_int,
