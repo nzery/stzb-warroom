@@ -317,6 +317,11 @@ function renderAccounts(d) {
     else if (a.state === 'pending') problem = '<div class="account-problem warn">这个 Token 需要管理员审批，审批后才能看到这个账号的通知和推送。可以先联系管理员。</div>';
     else if (a.state === 'no_role') problem = '<div class="account-problem warn">还没有收到这个 Token 的游戏登录。保持程序运行，登录一次游戏就好。</div>';
     else if (a.state === 'offline') problem = `<div class="account-problem warn">暂时连不上服务器（${esc(a.error || '')}），稍后会自动重试。</div>`;
+    // The server gives the link of the account's website once the account is set up.
+    const site = a.state !== 'invalid' && /^https:\/\//.test(a.site || '') ? `<div class="bark"><div class="label"><b>战局网站</b>网页</div>
+      <div class="value"><small>这个账号所在的战局网站。链接请只发给自己人，拿到链接的人都能看。</small></div>
+      <div class="row-actions"><a class="btn primary small" href="${esc(a.site)}" target="_blank" rel="noopener">打开</a>
+      <button class="btn ghost small" data-copy-site="${index}" type="button">复制链接</button></div></div>` : '';
     let bark = '';
     if (a.state !== 'invalid') {
       if (a.bark && a.bark.bound) {
@@ -336,7 +341,7 @@ function renderAccounts(d) {
         <div class="who"><b>${esc(title)}</b><small>${esc(role || '还没有角色信息')} · ${a.name ? esc(a.name) + ' · ' : ''}<span class="token-text">${esc(a.token)}</span></small></div>
         <span class="state ${cls}">${label}</span>
         <button class="btn ghost small" data-action="remove_token" data-index="${index}" data-confirm="删除这个 Token？删除后这个账号的数据不再上传。">删除</button></div>
-      ${problem}${bark}</div>`;
+      ${problem}${site}${bark}</div>`;
   }).join('') || '<div class="card empty">还没有账号。在下面添加管理员发给你的 Token。</div>';
   document.querySelectorAll('[data-bark-input]').forEach((input) => { input.value = typed[input.dataset.barkInput] || ''; });
 }
@@ -418,6 +423,12 @@ document.addEventListener('click', async (event) => {
     S.dismissed.add(dismiss.closest('.banner').dataset.id);
     store.set('dismissed', [...S.dismissed].slice(-50));
     return render();
+  }
+  const copy = event.target.closest('[data-copy-site]');
+  if (copy) {
+    try { await navigator.clipboard.writeText(S.data.tokens[Number(copy.dataset.copySite)].site); toast('链接已复制'); }
+    catch { toast('复制失败，请点“打开”后在浏览器里复制地址', true); }
+    return;
   }
   const button = event.target.closest('[data-action]');
   if (!button) return;
