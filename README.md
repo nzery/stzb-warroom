@@ -3,7 +3,7 @@
 率土游戏助手的电脑客户端。玩《率土之滨》时开着它，助手就能看懂你这边的战局：敌军打过来时告诉你来的是什么队、
 几点到、派哪队去接，手机上也能收到推送。
 
-它不会操作游戏，也不会向游戏发送任何东西。使用前要找同盟管理员要一个 Token。
+它不会操作游戏，也不会向游戏发送任何东西。使用前向同盟要一个邀请码（或找管理员要一个 Token）。
 
 **看看效果：** [示例页面](https://stzb.nzery.dev/01pParvhKyCFSzTqPvm_HdDTfR587oszEzsLvRIdS8c/)，直观看到助手整理出的战局。
 
@@ -47,7 +47,8 @@
 1. 先装 [Wireshark](https://www.wireshark.org/download.html)（选 “Windows x64 Installer”），安装时保持勾选 Npcap，装完重启一次电脑。
 2. 从 [Releases](https://github.com/nzery/stzb-warroom/releases/latest) 下载 `stzb-warroom-windows.zip`，解压到一个固定的文件夹。
 3. 双击 `stzb-warroom.exe`，打开“率土战局”窗口。
-4. 在“账号与推送”里粘贴 Token，点“添加”。在这台电脑上玩几个游戏账号，就加几个 Token（一次加一个，加好后先登录那个账号）。
+4. 在“账号与推送”里粘贴同盟发的邀请码（`stj_` 开头）或管理员给的 Token（`sta_` 开头），点“添加”。在这台电脑上玩几个游戏账号，就加几次（一次加一个，加好后先登录那个账号）。
+   用邀请码加入后显示“等待核验”：正常登录游戏玩一会儿，同盟里的人在地图上看到你后会自动开始，不用找人审批。
 5. 登录游戏，“概览”里显示“正在上报”就说明一切正常。
 6. 账号正常后，账号下面会出现“战局网站”，点“打开”就能在浏览器里看战局，也可以“复制链接”发到手机上打开。
 7. 想在 iPhone 上收到推送：安装 Bark，把 Bark 里的地址粘贴到账号下面，点“绑定”，收到测试通知就成功了。
@@ -82,6 +83,7 @@ Token 加密保存在这台电脑上，下次打开自动开始。更详细的�
 
 ```sh
 export ST_SERVER=https://...  ST_CLIENT_TOKEN=sta_...   # 服务器地址和 Token 找管理员要
+python3 -m stzb_warroom join stj_...   # 或者用同盟的邀请码加入：Token 自动加到 ~/.config/environment.d 里（不显示出来）
 python3 -m stzb_warroom gui        # 和 Windows 一样的窗口；也可以用 capture（只上报）+ notify（终端里看通知）
 ```
 
@@ -92,7 +94,8 @@ python3 -m stzb_warroom gui        # 和 Windows 一样的窗口；也可以用 
 ## 遇到问题
 
 - 窗口顶部的红色提示条会说明问题和处理办法，按提示操作即可。
-- “Token 无效”：Token 复制错了或已停用，找管理员要正确的 Token。
+- “Token 无效”：Token 复制错了或已停用，找管理员要正确的 Token，或向同盟要新的邀请码。
+- “等待核验”一直不过：确认角色在邀请的同盟里并登录过游戏；3 天内没核验通过会失效，到时向同盟要新的邀请码。
 - 其他问题：把“诊断”页的诊断信息发给管理员。
 
 ## 开发

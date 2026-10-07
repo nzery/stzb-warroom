@@ -308,12 +308,13 @@ function renderAccounts(d) {
   const typed = {};
   document.querySelectorAll('[data-bark-input]').forEach((input) => { typed[input.dataset.barkInput] = input.value; });
   $('account-list').innerHTML = d.tokens.map((a, index) => {
-    const [label, cls] = ACCOUNT_STATES[a.state] || ['', ''];
+    const [label, cls] = a.state === 'pending' && a.pending ? ['等待核验', 'warn'] : ACCOUNT_STATES[a.state] || ['', ''];
     const role = a.role ? a.role.label : '';
     const title = a.state === 'invalid' ? '无效的 Token' : a.role ? roleName(role) : (a.name || '新账号');
     let problem = '';
     if (a.state === 'problem') problem = `<div class="account-problem"><b>${esc(a.problem.title)}</b><br>${esc(a.problem.text)}</div>`;
     else if (a.state === 'invalid') problem = '<div class="account-problem">服务器不认这个 Token（可能复制错了，或已被管理员停用）。这个账号的数据不会上传。请找管理员要正确的 Token，删掉这个后重新添加。</div>';
+    else if (a.state === 'pending' && a.pending) problem = `<div class="account-problem warn"><b>${esc(a.pending.title)}</b><br>${esc(a.pending.text)}</div>`;
     else if (a.state === 'pending') problem = '<div class="account-problem warn">这个 Token 需要管理员审批，审批后才能看到这个账号的通知和推送。可以先联系管理员。</div>';
     else if (a.state === 'no_role') problem = '<div class="account-problem warn">还没有收到这个 Token 的游戏登录。保持程序运行，登录一次游戏就好。</div>';
     else if (a.state === 'offline') problem = `<div class="account-problem warn">暂时连不上服务器（${esc(a.error || '')}），稍后会自动重试。</div>`;
@@ -449,9 +450,9 @@ document.addEventListener('submit', async (event) => {
     const input = $('add-token');
     const button = form.querySelector('button');
     try {
-      await withBusy(button, '添加中', () => act('add_token', { token: input.value }));
+      const result = await withBusy(button, '添加中', () => act('add_token', { token: input.value }));
       input.value = '';
-      toast('已添加，正在检查这个 Token');
+      toast(result && result.joined ? result.joined : '已添加，正在检查这个 Token');
       S.accountsKey = '';
     } catch { /* shown */ }
   } else if (form.dataset.barkForm !== undefined) {

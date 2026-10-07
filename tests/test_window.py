@@ -15,6 +15,7 @@ from stzb_warroom.app import App
 
 GOOD, BAD, NEW, TAKEN = "sta_" + "a" * 43, "sta_" + "b" * 43, "sta_" + "c" * 43, "sta_" + "d" * 43
 ROLE = {"id": 7, "label": "甲 · 某盟 · 服务器 1"}
+INVITE = "stj_" + "i" * 22
 
 
 class Response(io.BytesIO):
@@ -46,6 +47,11 @@ class FakeServer:
             return {"name": "n", "approved": True, "role": None, "bark": {"bound": False},
                     "problem": {"title": "角色 7 已被另一个 Token 绑定", "text": "角色 7 已被同域的另一个 Token 绑定"}}
         return {"name": "n", "approved": True, "role": ROLE, "bark": {"bound": False}}
+
+    def join(self, code):
+        if code != INVITE:
+            raise ValueError("邀请码无效")
+        return {"token": NEW, "text": "已加入「某盟」"}
 
     def open(self, path, token, body=None, timeout=45, method=None):
         self.calls.append((method, path, body))
@@ -97,6 +103,14 @@ class AppTests(unittest.TestCase):
                 app.add_token(text)
         app.add_token(f" {GOOD} , {NEW} ")
         self.assertEqual(app.tokens, [GOOD, NEW])
+
+    def test_an_invitation_code_is_traded_for_a_token(self):
+        app = self.app()
+        self.assertEqual(app.add_token(f" {INVITE} "), {"joined": "已加入「某盟」"})
+        self.assertEqual(app.tokens, [NEW])
+        with self.assertRaisesRegex(ValueError, "邀请码无效"):
+            app.add_token("stj_" + "x" * 22)
+        self.assertEqual(app.tokens, [NEW])
 
     def test_background_default_and_saved_choice(self):
         app = self.app()

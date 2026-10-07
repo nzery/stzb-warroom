@@ -18,7 +18,7 @@ from pathlib import Path
 from urllib.error import HTTPError
 
 from . import __version__, notify, vault, winsys
-from .api import client_tokens, site
+from .api import client_tokens, invite_code, site
 from .capture import find_dumpcap
 from .runner import run_capture
 
@@ -195,18 +195,28 @@ class App:
             self.log(f"Token 没能保存：{exc}", "error")
 
     def add_token(self, text):
+        """Add the pasted tokens, or join with a pasted invitation code (the server gives a token).
+        Returns what the server said about the joining, if any."""
+        code = invite_code(text)
+        joined = None
+        if code:
+            joined = self.server.join(code)
+            text = joined["token"]
         try:
             new = client_tokens(text)
         except SystemExit:
-            raise ValueError("请粘贴管理员发给你的 Token")
+            raise ValueError("请粘贴同盟发的邀请码（stj_ 开头）或管理员发给你的 Token（sta_ 开头）")
         bad = [token for token in new if not token.startswith("sta_") or len(token) != 47]
         if bad:
-            raise ValueError("Token 应该是 sta_ 开头的 47 个字符，请检查有没有复制完整")
+            raise ValueError("Token 应该是 sta_ 开头的 47 个字符（邀请码是 stj_ 开头的 26 个字符），请检查有没有复制完整")
         with self.lock:
             self.tokens = list(dict.fromkeys(self.tokens + new))
             self._save_tokens()
         self.log(f"已添加 Token {', '.join(mask(token) for token in new)}")
+        if joined:
+            self.log(joined.get("text") or "已用邀请码加入")
         self.restart()
+        return {"joined": joined.get("text") if joined else None}
 
     def remove_token(self, index):
         with self.lock:

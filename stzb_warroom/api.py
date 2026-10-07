@@ -1,4 +1,5 @@
-"""The server's address (ST_SERVER, or the one the package was built for) and the tokens (ST_CLIENT_TOKEN)."""
+"""The server's address (ST_SERVER, or the one the package was built for), the tokens (ST_CLIENT_TOKEN),
+and joining an alliance with an invitation code (which gives a token)."""
 
 import gzip
 import json
@@ -8,7 +9,10 @@ import ssl
 import sys
 from pathlib import Path
 from urllib import request
+from urllib.error import HTTPError
 from urllib.parse import urlsplit
+
+INVITE = re.compile(r"stj_[A-Za-z0-9_-]{22}")
 
 
 def packaged():
@@ -29,6 +33,12 @@ def default_server():
 def site():
     """The website the window links to (ST_SITE, else the package's); None when there is none."""
     return os.environ.get("ST_SITE") or packaged().get("site")
+
+
+def invite_code(text):
+    """The invitation code in what the player pasted, or None when it is not one."""
+    text = str(text or "").strip()
+    return text if INVITE.fullmatch(text) else None
 
 
 def client_tokens(value=None):
@@ -68,3 +78,24 @@ class Server:
     def json(self, path, tokens, body=None, compress=False, timeout=45):
         with self.open(path, tokens, body, compress, timeout) as response:
             return json.load(response)
+
+    def join(self, code, timeout=30):
+        """Trade an invitation code for a new token -> {"token", "scope", "text"}.
+        ValueError with the server's own message when it is refused or unreachable."""
+        data = json.dumps({"code": code}).encode()
+        try:
+            with self.opener.open(request.Request(self.origin + "/v1/client/join", data=data, method="POST",
+                                                  headers={"Content-Type": "application/json"}),
+                                  timeout=timeout) as response:
+                reply = json.load(response)
+        except HTTPError as exc:
+            try:
+                message = json.loads(exc.read() or b"{}").get("error")
+            except (OSError, ValueError):
+                message = None
+            raise ValueError(message or f"服务器返回 HTTP {exc.code}") from None
+        except (OSError, ValueError) as exc:
+            raise ValueError(f"连不上服务器：{exc}") from None
+        if not isinstance(reply, dict) or not str(reply.get("token") or "").startswith("sta_"):
+            raise ValueError("服务器的回复不对，请稍后再试")
+        return reply

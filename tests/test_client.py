@@ -360,3 +360,55 @@ class LocalTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class JoinTests(unittest.TestCase):
+    CODE = "stj_" + "a" * 22
+    TOKEN = "sta_" + "t" * 43
+
+    def server(self, reply=None, error=None):
+        server = api.Server("https://example.test")
+        sent = []
+
+        class Opener:
+            def open(self, req, timeout=None):
+                sent.append((req.full_url, req.get_method(), json.loads(req.data), req.headers))
+                if error:
+                    raise HTTPError(req.full_url, error[0], "x", {}, io.BytesIO(json.dumps(error[1]).encode()))
+                return io.BytesIO(json.dumps(reply).encode())
+
+        server.opener = Opener()
+        return server, sent
+
+    def test_a_code_is_traded_for_a_token_without_any_token(self):
+        self.assertEqual(api.invite_code(f" {self.CODE} "), self.CODE)
+        self.assertIsNone(api.invite_code(self.TOKEN))
+        server, sent = self.server({"token": self.TOKEN, "text": "已加入"})
+        self.assertEqual(server.join(self.CODE)["token"], self.TOKEN)
+        url, method, body, headers = sent[0]
+        self.assertEqual((url, method, body), ("https://example.test/v1/client/join", "POST", {"code": self.CODE}))
+        self.assertNotIn("Authorization", headers)
+
+    def test_a_refusal_is_the_servers_own_words(self):
+        server, _ = self.server(error=(403, {"error": "邀请码无效"}))
+        with self.assertRaisesRegex(ValueError, "邀请码无效"):
+            server.join(self.CODE)
+        server, _ = self.server({"error": "nothing"})
+        with self.assertRaises(ValueError):
+            server.join(self.CODE)
+
+    def test_the_token_goes_into_the_file_that_sets_it(self):
+        from stzb_warroom.__main__ import add_to_file, token_file
+        with tempfile.TemporaryDirectory() as folder:
+            folder = Path(folder)
+            self.assertEqual(token_file(folder), folder / "90-stzb.conf")
+            (folder / "10-other.conf").write_text("PATH=/x\n")
+            (folder / "50-tokens.conf").write_text("ST_SERVER=https://s\nST_CLIENT_TOKEN=sta_old\n")
+            path = token_file(folder)
+            self.assertEqual(path, folder / "50-tokens.conf")
+            add_to_file(path, self.TOKEN)
+            add_to_file(path, self.TOKEN)
+            self.assertEqual(path.read_text(), f"ST_SERVER=https://s\nST_CLIENT_TOKEN=sta_old,{self.TOKEN}\n")
+            self.assertEqual(path.stat().st_mode & 0o777, 0o600)
+            add_to_file(folder / "90-stzb.conf", self.TOKEN)
+            self.assertEqual((folder / "90-stzb.conf").read_text(), f"ST_CLIENT_TOKEN={self.TOKEN}\n")
