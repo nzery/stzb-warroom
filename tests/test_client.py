@@ -1,6 +1,7 @@
 import base64
 import io
 import json
+import os
 import sqlite3
 import struct
 import tempfile
@@ -409,6 +410,7 @@ class JoinTests(unittest.TestCase):
             add_to_file(path, self.TOKEN)
             add_to_file(path, self.TOKEN)
             self.assertEqual(path.read_text(), f"ST_SERVER=https://s\nST_CLIENT_TOKEN=sta_old,{self.TOKEN}\n")
-            self.assertEqual(path.stat().st_mode & 0o777, 0o600)
+            if os.name != "nt":  # Windows has no such mode bits
+                self.assertEqual(path.stat().st_mode & 0o777, 0o600)
             add_to_file(folder / "90-stzb.conf", self.TOKEN)
             self.assertEqual((folder / "90-stzb.conf").read_text(), f"ST_CLIENT_TOKEN={self.TOKEN}\n")
