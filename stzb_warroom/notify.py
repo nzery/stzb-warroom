@@ -119,6 +119,9 @@ class Follower:
                     self.show(data)
                     self.after = int(event_id)
                     self.save()
+                elif kind == "cursor":  # read past other events: a reconnect need not rescan them
+                    self.after = int(event_id)
+                    self.save()
                 elif kind == "reset":  # the event log was rebuilt: start from its newest event
                     self.after = self.epoch = None
                     return
