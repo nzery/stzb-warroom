@@ -40,7 +40,7 @@
 
 ## 开始使用（Windows）
 
-不用装 Python，用下面的公共域邀请码就能直接开始：
+公共域邀请码：
 
 ```
 stj_6_P0QPrwxPEFsXNapoHCMA
@@ -104,6 +104,7 @@ python3 -m stzb_warroom gui                  # 和 Windows 一样的窗口；也
 ## 申请自己的域
 
 想要只有你们同盟自己看得到的私有域（还有智能问答），发邮件到 <admin@nzery.dev> 找管理员申请域账号。
+注：服务器容量有限，先到先得
 
 ## 开发
 
