@@ -77,9 +77,11 @@ async function refresh() {
     if (!response.ok) throw new Error(response.status);
     const data = await response.json();
     for (const notice of data.notices) {
+      if (!live(notice)) continue;
       S.notices.push(notice);
       if (S.loaded) announce(notice);
     }
+    S.notices = S.notices.filter(live);
     if (S.notices.length > 500) S.notices.splice(0, S.notices.length - 500);
     if (data.notices.length) S.n = data.notices[data.notices.length - 1].seq;
     if (data.logs.length) { S.logs.push(...data.logs); S.l = data.logs[data.logs.length - 1].seq; appendLogs(data.logs); }
@@ -174,12 +176,22 @@ function beep() {
     }
   } catch { /* no audio */ }
 }
+// A notice is shown until the time the server gave it (`expires`, epoch seconds), then cleared.
+function live(notice) {
+  return typeof notice.expires !== 'number' || notice.expires * 1000 > Date.now();
+}
+setInterval(() => {
+  const before = S.notices.length;
+  S.notices = S.notices.filter(live);
+  if (S.notices.length !== before) render();
+}, 15000);
 function announce(notice) {
   if (notice.level !== 'alarm') return;
   if (store.get('sound', true)) beep();
   if (store.get('desktop', false) && 'Notification' in window && Notification.permission === 'granted' && document.hidden) {
     const who = roleOf(notice);
-    new Notification(`【${notice.tag || '通知'}】${who ? who + ' · ' : ''}${notice.title || ''}`, { body: notice.body || '', tag: `n${notice.seq}` });
+    const shown = new Notification(`【${notice.tag || '通知'}】${who ? who + ' · ' : ''}${notice.title || ''}`, { body: notice.body || '', tag: `n${notice.seq}` });
+    if (typeof notice.expires === 'number') setTimeout(() => shown.close(), Math.max(0, notice.expires * 1000 - Date.now()));
   }
 }
 

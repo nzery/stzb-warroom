@@ -42,6 +42,13 @@ async function main() {
   resolveFetch({ ok: true, json: async () => ({ notices: [{ seq: 2 }], logs: [] }) });
   await recovery;
   assert.equal(vm.runInContext('S.notices.length', context), 2);
+  // a notice past the time the server gave it is dropped, an old one already held as well
+  vm.runInContext('S.notices[0].expires = Date.now() / 1000 - 1', context);
+  const expiring = vm.runInContext('refresh()', context);
+  resolveFetch({ ok: true, json: async () => ({ notices: [{ seq: 3, expires: Date.now() / 1000 + 600 },
+    { seq: 4, expires: Date.now() / 1000 - 5 }], logs: [] }) });
+  await expiring;
+  assert.deepEqual(Array.from(vm.runInContext('S.notices.map((n) => n.seq)', context)), [2, 3]);
   console.log('UI startup and refresh regression checks passed');
 }
 main().catch((error) => { console.error(error); process.exitCode = 1; });

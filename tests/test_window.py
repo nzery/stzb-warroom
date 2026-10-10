@@ -4,6 +4,7 @@ import io
 import json
 import tempfile
 import threading
+import time
 import unittest
 import unittest.mock
 from http.client import HTTPConnection
@@ -147,6 +148,12 @@ class AppTests(unittest.TestCase):
         self.assertEqual(snapshot["tokens"][1]["token"], "sta_…bbbb")
         self.assertEqual(snapshot["notices"][0]["title"], "t")
         self.assertEqual(app.snapshot(notices_after=snapshot["notices"][0]["seq"])["notices"], [])
+        # notices leave once past the time the server gave them
+        app.on_notice({"title": "过期", "level": "info", "expires": time.time() - 1})
+        app.on_notice({"title": "将过期", "level": "info", "expires": time.time() + 600})
+        self.assertEqual([n["title"] for n in app.snapshot()["notices"]], ["t", "将过期"])
+        app.notices[-1]["expires"] = time.time() - 1
+        self.assertEqual([n["title"] for n in app.snapshot()["notices"]], ["t"])
         text = json.dumps(snapshot) + app.diagnostics()
         for token in (GOOD, BAD, NEW, TAKEN):
             self.assertNotIn(token, text)

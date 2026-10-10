@@ -60,6 +60,11 @@ class Lines:
         pass
 
 
+def expired(notice, now):
+    expires = notice.get("expires")
+    return isinstance(expires, (int, float)) and not isinstance(expires, bool) and expires <= now
+
+
 class App:
     def __init__(self, server, state_dir, opener=None):
         self.server, self.state_dir = server, Path(state_dir)
@@ -110,6 +115,7 @@ class App:
 
     def snapshot(self, notices_after=0, logs_after=0):
         with self.lock:
+            self._drop_expired()
             uploader = self.session and self.session.get("uploader")
             stats = {"pending": uploader.queue.pending() if uploader and self.capture["state"] == "running" else None,
                      "uploaded": uploader.uploaded if uploader else 0,
@@ -287,7 +293,17 @@ class App:
 
     # notifications and prompts ------------------------------------------------------
 
+    def _drop_expired(self):
+        """Notices past the time the server gave them (``expires``) are no longer shown."""
+        now = time.time()
+        if any(expired(n, now) for n in self.notices):
+            kept = [n for n in self.notices if not expired(n, now)]
+            self.notices.clear()
+            self.notices.extend(kept)
+
     def on_notice(self, notice):
+        if expired(notice, time.time()):
+            return
         with self.lock:
             self.seq += 1
             self.notices.append(dict(notice, seq=self.seq, time=notice.get("time") or time.time()))
