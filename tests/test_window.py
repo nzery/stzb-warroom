@@ -188,8 +188,13 @@ class AppTests(unittest.TestCase):
 
     def test_newer_releases_are_noticed(self):
         app = self.app()
-        self.assertEqual(app.check_update(), {"latest": "9.0.0", "newer": True})
-        self.assertEqual(app.snapshot()["update"], {"version": "9.0.0", "url": "u"})
+        with unittest.mock.patch.object(appmod.updates, "site", lambda: None):
+            self.assertEqual(app.check_update(), {"latest": "9.0.0", "newer": True})
+        self.assertEqual(app.snapshot()["update"], {"version": "9.0.0", "url": "u", "code_only": False,
+                                                    "state": "available", "error": None})
+        with self.assertRaisesRegex(ValueError, "还没有下载好"):
+            app.restart_for_update()
+        self.assertFalse(app.relaunch)
 
 
 class PageServerTests(unittest.TestCase):

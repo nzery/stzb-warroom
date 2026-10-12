@@ -49,7 +49,7 @@ stj_6_P0QPrwxPEFsXNapoHCMA
 ```
 
 1. 先装 [Wireshark](https://www.wireshark.org/download.html)（选 “Windows x64 Installer”），安装时保持勾选 Npcap，装完重启一次电脑。
-2. 从 [Releases](https://github.com/nzery/stzb-warroom/releases/latest) 下载 `stzb-warroom-windows.zip`，解压到一个固定的文件夹。
+2. 下载 [stzb-warroom-windows.zip](https://stzb.nzery.dev/download/stzb-warroom-windows.zip)（GitHub 慢的话用这个；也可以从 [Releases](https://github.com/nzery/stzb-warroom/releases/latest) 下载），解压到一个固定的文件夹。以后有新版本，窗口里会提示，一般只需点“立即重启”。
 3. 双击 `stzb-warroom.exe`，打开“率土战局”窗口。
 4. 在“账号与推送”里粘贴邀请码（私有域用同盟发的 `stj_` 邀请码或管理员给的 `sta_` Token），点“添加”。在这台电脑上玩几个游戏账号，就加几次（一次加一个，加好后先登录那个账号）。
 5. 登录游戏，角色认领成功后自动开始，“概览”里显示“正在上报”就说明一切正常。

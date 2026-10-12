@@ -13,16 +13,16 @@ import platform
 import sys
 import threading
 import time
+import zipfile
 from datetime import datetime
 from pathlib import Path
 from urllib.error import HTTPError
 
-from . import __version__, notify, vault, winsys
+from . import __version__, notify, update as updates, vault, winsys
 from .api import client_tokens, invite_code, site
 from .capture import find_dumpcap
 from .runner import run_capture
 
-RELEASES = "https://api.github.com/repos/nzery/stzb-warroom/releases/latest"
 ACCOUNT_EVERY = 60  # seconds between two looks at the accounts' status
 UPDATE_EVERY = 6 * 3600
 HINTS = (  # what a player can do about a capture failure, from its text
@@ -68,7 +68,7 @@ def expired(notice, now):
 class App:
     def __init__(self, server, state_dir, opener=None):
         self.server, self.state_dir = server, Path(state_dir)
-        self.opener = opener or server.opener.open  # for the release check
+        self.opener = opener or server.opener.open  # for the release check and its download
         self.vault_path = self.state_dir / "tokens.bin"
         self.dumpcap_path = self.state_dir / "dumpcap.txt"
         self.settings_path = self.state_dir / "settings.json"
@@ -82,7 +82,9 @@ class App:
         self.accounts = {}  # token -> what /v1/client/status said, or why it could not
         self.capture = {"state": "stopped", "error": None, "hint": None, "since": None, "dumpcap": None}
         self.session = None
-        self.update = None  # {"version", "url"} of a newer release
+        self.update = None  # a newer release: {"version", "url", "code_only", "state", "error"}
+        self.update_lock = threading.Lock()  # one download at a time
+        self.relaunch = False  # start again once quit (to run the code an update downloaded)
         self.quit = threading.Event()
         self.poke = threading.Event()  # look at the accounts now
         self.settings = self._read_settings()
@@ -401,17 +403,46 @@ class App:
     # release check, diagnostics -----------------------------------------------------
 
     def check_update(self):
-        try:
-            with self.opener(RELEASES, timeout=15) as response:
-                release = json.load(response)
-        except (OSError, ValueError) as exc:
-            raise ValueError(f"检查更新失败：{exc}")
-        tag = str(release.get("tag_name") or "").lstrip("v")
-        newer = _version(tag) > _version(__version__)
+        """Look for a newer release. When only its code is needed it is downloaded right away
+        (in the background) and runs from the next start; otherwise the player downloads it."""
+        release = updates.latest(self.opener)
+        newer = updates.newer(release)
+        update = None
+        if newer:
+            code_only = updates.code_only(release)
+            update = {"version": release["version"], "url": release["url"], "code_only": code_only,
+                      "state": "ready" if code_only and updates.installed(release) else
+                      "downloading" if code_only else "available", "error": None}
         with self.lock:
-            self.update = {"version": tag, "url": release.get("html_url")} if newer else None
+            busy = self.update and self.update["state"] == "downloading" and update and \
+                self.update["version"] == update["version"]
+            if not busy:
+                self.update = update
+        if update and update["state"] == "downloading" and not busy:
+            threading.Thread(target=self._download_update, args=(release,), name="update", daemon=True).start()
         self.touch()
-        return {"latest": tag, "newer": newer}
+        return {"latest": release["version"], "newer": newer}
+
+    def _download_update(self, release):
+        with self.update_lock:
+            try:
+                updates.install(release, self.opener)
+                state, error = "ready", None
+                self.log(f"新版本 {release['version']} 已下载，重启程序后生效")
+            except (OSError, ValueError, zipfile.BadZipFile) as exc:
+                state, error = "failed", str(exc)
+                self.log(f"下载新版本失败：{exc}", "warn")
+        with self.lock:
+            if self.update and self.update["version"] == release["version"]:
+                self.update.update(state=state, error=error)
+        self.touch()
+
+    def restart_for_update(self):
+        """Quit and start again, running the code the update downloaded."""
+        with self.lock:
+            if not (self.update and self.update["state"] == "ready"):
+                raise ValueError("新版本还没有下载好")
+            self.relaunch = True
 
     def diagnostics(self):
         """Text to send to the maintainer: no token, no device key."""
@@ -472,10 +503,3 @@ class App:
         self.quit.set()
         self.poke.set()
         self.touch()
-
-
-def _version(text):
-    try:
-        return tuple(int(part) for part in text.split("."))
-    except ValueError:
-        return ()

@@ -43,7 +43,10 @@ stzb-warroom/
 4. **写配置**：把 `-Server`（默认取环境变量 `ST_SERVER`，必填）和 `-Site`（默认取 `ST_SITE`，可选）写进 exe 旁边的
    `config.json`（UTF-8，无 BOM）。地址不进源码，换服务器时也可以直接改这个文件。
 5. **复制附带文件**：`使用说明.txt`，以及 `-Include` 指定的文件。
-6. **压缩**：用 Python 的 `zipfile` 压成 `build\stzb-warroom-windows.zip`，中文文件名带 UTF-8 标记，各种解压工具都能正确识别。
+6. **发布文件**（`release.py`）：算出这个包的“运行环境”（runtime，见下文），和版本号一起写进 `config.json`；
+   用 Python 的 `zipfile` 压出完整包 `build\stzb-warroom-windows.zip`（中文文件名带 UTF-8 标记，各种解压工具都能正确识别）、
+   只含程序代码的 `build\stzb-warroom-app.zip`（`stzb_warroom` 的源码和页面，不到 1 MB），以及记着两者大小和 SHA-256 的
+   `build\release.json`。
 
 Electron 的版本和 SHA-256 写在 `build.ps1` 的 `$electronVersion` 和 `$downloads` 里，升级时改这两处。
 
@@ -54,6 +57,24 @@ Electron 的版本和 SHA-256 写在 `build.ps1` 的 `$electronVersion` 和 `$do
 - 不带参数，或只带 `--background`：打开窗口（`--background` 是开机启动用的，先不显示窗口）；
 - 带其他参数：等同于 `python -m stzb_warroom …`，比如 `stzb-warroom.exe --help`。exe 没有控制台，看不到输出，
   命令行排查建议在装了 Python 的电脑上直接用 `python -m stzb_warroom`。
+
+### 只下载程序代码的更新
+
+完整包约 150 MB，绝大部分是 Python 运行时和 Electron，它们很少变。`release.py` 把“只更新代码改变不了的东西”算成一个
+runtime 指纹：构建用的 Python 和 PyInstaller 版本、PyInstaller 打进 exe 的模块列表（`stzb_warroom` 以外）、`_internal` 和
+`window` 里的文件名、Electron 版本、`launcher.py` 和 `window\resources\app` 里各文件的内容。代码改了而这些都没变的两个
+版本 runtime 相同。
+
+- 窗口每 6 小时（和“关于”里的“检查更新”）读网站的 `<site>/download/latest.json`（网站从 GitHub Releases 同步来，
+  国内下载快）；没有网站或读不到时退回 GitHub。
+- 新版本与本机 exe 的 runtime 相同：后台下载 `stzb-warroom-app.zip`，核对大小和 SHA-256，解压到
+  `%LOCALAPPDATA%\stzb-warroom\app\<版本>`，写 `app\current.json`；窗口提示“重启程序后生效”，可以点“立即重启”。
+  下次启动时 `launcher.py` 先从这里加载 `stzb_warroom`，代码连导入都失败就退回 exe 自带的代码，并把那个版本记进
+  `app\failed.json`，以后不再自动下载它（改为提示下载完整包）。
+- runtime 不同（升级了 Python、Electron、`main.js`、`launcher.py`，或新代码用到了 exe 里没有的模块）：提示下载完整包，
+  链接也指向网站。
+
+所以改 `electron/main.js` 或 `launcher.py` 的版本，玩家要下载完整包；只改 `stzb_warroom` 的版本只下载代码。
 
 ### 窗口怎么跑起来
 
@@ -92,7 +113,7 @@ Electron 的版本和 SHA-256 写在 `build.ps1` 的 `$electronVersion` 和 `$do
 没设 `ST_SERVER` 构建会失败。
 
 **手动构建：** Actions → 左边选 “windows” → “Run workflow”。跑完后在这次运行页面底部 Artifacts 里下载
-`stzb-warroom-windows`（GitHub 会自动压成 zip）。手动构建的版本号是 `0.0.0`。
+`stzb-warroom-windows`（GitHub 会自动压成 zip）和 `stzb-warroom-release`（代码包与 `release.json`）。手动构建的版本号是 `0.0.0`。
 
 **发版本：**
 
@@ -101,7 +122,8 @@ git tag v1.0.2
 git push origin v1.0.2
 ```
 
-推送 `v*` tag 会自动构建，版本号取自 tag，并在 Releases 创建同名版本，附上 `stzb-warroom-windows.zip`。
+推送 `v*` tag 会自动构建，版本号取自 tag，并在 Releases 创建同名版本，附上 `stzb-warroom-windows.zip`、
+`stzb-warroom-app.zip` 和 `release.json`。网站约 10 分钟内同步过去，之后窗口才会提示更新。
 
 GitHub 上构建的包里没有 Wireshark 安装程序。要放的话，解压后把安装程序放进 `stzb-warroom` 文件夹再重新压缩。
 

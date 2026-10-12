@@ -231,12 +231,17 @@ class Window(ThreadingHTTPServer):
             "forget_dumpcap": app.forget_dumpcap,
             "open_folder": lambda: winsys.open_folder(app.state_dir),
             "check_update": app.check_update,
+            "restart_for_update": lambda: self.restart_for_update(),
             "diagnostics": app.diagnostics,
             "open_installer": lambda: open_installer(),
         }
         if not isinstance(action, str) or action not in actions:
             raise ValueError("unknown action")
         return actions[action]()
+
+    def restart_for_update(self):
+        self.app.restart_for_update()
+        threading.Thread(target=self.quit, daemon=True).start()
 
     def quit(self):
         self.app.shutdown()
@@ -282,10 +287,13 @@ def ask_to_show(state_dir):
         return False
 
 
-def main(server, state_dir, background=False, show=None):
-    """Run the window until it is closed (or quit). `show(url, profile)` opens the page."""
+def main(server, state_dir, background=False, show=None, after=None):
+    """Run the window until it is closed (or quit). `show(url, profile)` opens the page.
+    `after`: the process this one restarts (for an update), which must be gone first."""
     show = show or winsys.open_window
     state_dir = Path(state_dir)
+    if after:
+        winsys.wait_exit(after, timeout=30)
     url = running_window(state_dir)
     if url:
         if not background and not ask_to_show(state_dir):
@@ -318,3 +326,5 @@ def main(server, state_dir, background=False, show=None):
         winsys.close_windows()
         marker.unlink(missing_ok=True)
     sys.stdout, sys.stderr = sys.__stdout__, sys.__stderr__
+    if app.relaunch:
+        winsys.relaunch()

@@ -49,6 +49,13 @@ async function main() {
     { seq: 4, expires: Date.now() / 1000 - 5 }], logs: [] }) });
   await expiring;
   assert.deepEqual(Array.from(vm.runInContext('S.notices.map((n) => n.seq)', context)), [2, 3]);
+  // every update state has its banner; a downloaded one restarts, the others link the whole package
+  for (const state of ['available', 'downloading', 'ready', 'failed']) {
+    const html = vm.runInContext(`updateBanner({ version: '9.0.0', url: 'https://site.test/x.zip', state: '${state}', error: 'e' })`, context);
+    assert.equal(html.includes('restart_for_update'), state === 'ready', state);
+    assert.equal(html.includes('https://site.test/x.zip'), state === 'available' || state === 'failed', state);
+    assert.ok(vm.runInContext(`UPDATE_STATE['${state}']('9.0.0')`, context).includes('9.0.0'));
+  }
   console.log('UI startup and refresh regression checks passed');
 }
 main().catch((error) => { console.error(error); process.exitCode = 1; });

@@ -100,6 +100,32 @@ def close_windows():
             process.terminate()
 
 
+def relaunch():
+    """Start the program again (it is quitting to run the code an update downloaded); the new
+    one waits for this one to be gone, so the capture and the window are free."""
+    if getattr(sys, "frozen", False):
+        subprocess.Popen([sys.executable, "gui", "--after", str(os.getpid())], close_fds=True)
+
+
+def wait_exit(pid, timeout):
+    """Wait (at most `timeout` seconds) for the process `pid` to end."""
+    if WINDOWS:
+        kernel32 = _api().kernel32
+        handle = kernel32.OpenProcess(0x00100000, False, pid)  # SYNCHRONIZE
+        if handle:
+            kernel32.WaitForSingleObject(handle, int(timeout * 1000))
+            kernel32.CloseHandle(handle)
+        return
+    import time
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline:
+        try:
+            os.kill(pid, 0)
+        except OSError:
+            return
+        time.sleep(0.2)
+
+
 def sharp():
     """Draw this process's own windows (tray icon, its menu, the file picker) at the screen's
     real scale; unaware, Windows stretches them, blurred, on a screen above 100%."""
@@ -385,6 +411,9 @@ def _api():
         (user32.SetForegroundWindow, wintypes.BOOL, [wintypes.HWND]),
         (shell32.Shell_NotifyIconW, wintypes.BOOL, [wintypes.DWORD, ctypes.POINTER(NOTIFYICONDATAW)]),
         (kernel32.GetModuleHandleW, wintypes.HMODULE, [wintypes.LPCWSTR]),
+        (kernel32.OpenProcess, wintypes.HANDLE, [wintypes.DWORD, wintypes.BOOL, wintypes.DWORD]),
+        (kernel32.WaitForSingleObject, wintypes.DWORD, [wintypes.HANDLE, wintypes.DWORD]),
+        (kernel32.CloseHandle, wintypes.BOOL, [wintypes.HANDLE]),
     ]
     for function, restype, argtypes in signatures:
         function.restype, function.argtypes = restype, argtypes

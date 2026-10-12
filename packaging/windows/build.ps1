@@ -1,4 +1,5 @@
-# Build the Windows package: build\stzb-warroom-windows.zip (a folder with stzb-warroom.exe).
+# Build the Windows package: build\stzb-warroom-windows.zip (a folder with stzb-warroom.exe), and for
+# updates build\stzb-warroom-app.zip (only the program's code) and build\release.json (release.py).
 #
 #   powershell -ExecutionPolicy Bypass -File packaging\windows\build.ps1 -Server https://api.example.com
 #   powershell -ExecutionPolicy Bypass -File packaging\windows\build.ps1 -Server ... -Include D:\Wireshark-4.6.9-x64.exe
@@ -72,7 +73,7 @@ if ($Site) { $config.site = $Site }
 # Without a BOM: Windows PowerShell 5's UTF8 encoding would write one.
 [IO.File]::WriteAllText("$root\$package\config.json", (ConvertTo-Json $config), (New-Object Text.UTF8Encoding $false))
 foreach ($file in $Include) { Copy-Item $file $package }
-# zipfile writes the Chinese file names with the UTF-8 flag, which every unzip tool reads.
-python -c "import shutil; shutil.make_archive('build/stzb-warroom-windows', 'zip', 'build/dist', 'stzb-warroom')"
-if ($LASTEXITCODE) { throw "zip failed" }
-Write-Host "built build\stzb-warroom-windows.zip"
+# The runtime (what an update of the code alone cannot change) into config.json, then the zips.
+python packaging\windows\release.py --version $Version --electron $electronVersion
+if ($LASTEXITCODE) { throw "release files failed" }
+Write-Host "built build\stzb-warroom-windows.zip, build\stzb-warroom-app.zip, build\release.json"

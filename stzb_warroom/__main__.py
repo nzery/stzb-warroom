@@ -107,6 +107,7 @@ def main(argv=None):
     show.add_argument("--color", choices=("auto", "always", "never"), default="auto")
     window = commands.add_parser("gui", help="capture, upload, notifications and Bark in a window")
     window.add_argument("--background", action="store_true", help="no window until the program is started again")
+    window.add_argument("--after", type=int, help=argparse.SUPPRESS)  # the process this one restarts
     joining = commands.add_parser("join", help="join an alliance with its invitation code (adds a token)")
     joining.add_argument("code", help="the invitation code (stj_...)")
     joining.add_argument("--env-file", help="the environment.d file to add the token to "
@@ -120,7 +121,7 @@ def main(argv=None):
         return join(args)
     if args.command == "gui":
         from . import webui
-        return webui.main(Server(args.server), args.state_dir, background=args.background)
+        return webui.main(Server(args.server), args.state_dir, background=args.background, after=args.after)
     notify.run(Server(args.server), client_tokens(), args.state_dir,
                color=None if args.color == "auto" else args.color == "always")
 

@@ -210,7 +210,7 @@ function render() {
   $('about-version').textContent = d.app_version;
   $('site-link').classList.toggle('hidden', !d.site);
   if (d.site) $('site-link').href = d.site;
-  $('update-state').textContent = d.update ? `有新版本 ${d.update.version}` : '';
+  $('update-state').textContent = d.update ? UPDATE_STATE[d.update.state](d.update.version) : '';
 }
 
 function captureView(d) {
@@ -267,9 +267,27 @@ function renderBanners(d) {
   for (const hint of d.hints) {
     if (!S.dismissed.has(hint.id)) parts.push(banner('warn', 'info', esc(hint.text), '', hint.id));
   }
-  if (d.update) parts.push(banner('info', 'info', `发现新版本 <b>${esc(d.update.version)}</b>，建议更新。`, `<a class="btn" href="${esc(d.update.url)}" target="_blank" rel="noopener">下载</a>`));
+  if (d.update) parts.push(updateBanner(d.update));
   const html = parts.join('');
   if ($('banners').dataset.html !== html) { $('banners').innerHTML = html; $('banners').dataset.html = html; }
+}
+
+const UPDATE_STATE = {
+  available: (v) => `有新版本 ${v}`,
+  downloading: (v) => `正在下载新版本 ${v}…`,
+  ready: (v) => `新版本 ${v} 已下载，重启程序后生效`,
+  failed: (v) => `新版本 ${v} 自动下载失败`,
+};
+
+function updateBanner(u) {
+  const v = `<b>${esc(u.version)}</b>`;
+  const download = `<a class="btn" href="${esc(u.url)}" target="_blank" rel="noopener">下载</a>`;
+  switch (u.state) {
+    case 'downloading': return banner('info', 'clock', `正在下载新版本 ${v}…`);
+    case 'ready': return banner('info', 'info', `新版本 ${v} 已下载，重启程序后生效。`, '<button class="btn primary" data-action="restart_for_update">立即重启</button>');
+    case 'failed': return banner('warn', 'info', `新版本 ${v} 自动下载失败（${esc(u.error || '')}），稍后会再试，也可以下载完整安装包。`, download);
+    default: return banner('info', 'info', `发现新版本 ${v}，请下载完整安装包，解压后替换原来的程序文件夹。`, download);
+  }
 }
 
 function renderOverview(d) {
