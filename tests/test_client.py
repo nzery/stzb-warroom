@@ -91,8 +91,9 @@ def accept(role=None, drop=None):
                          "role": role, "drop": drop or {"client": [], "server": []}}
 
 
-def refuse(code):
-    return HTTPError("https://example.test", code, "", {}, io.BytesIO(b'{"error": "x"}'))
+def refuse(code, retry=None):
+    body = {"error": "x", **({"retry": retry} if retry else {})}
+    return HTTPError("https://example.test", code, "", {}, io.BytesIO(json.dumps(body).encode()))
 
 
 class UploadTests(unittest.TestCase):
@@ -163,6 +164,40 @@ class UploadTests(unittest.TestCase):
         uploader.run()
         self.assertIsNotNone(self.queue.batch())
         self.assertIn("401", str(uploader.error))
+
+    def test_a_stream_held_back_waits_alone_while_the_others_go_on(self):
+        uploader = self.uploader(refuse(503, retry="stream"), accept(role=8), accept(role=7))
+        self.feed(uploader, (server_frame(9, [1]), False), port=50000)
+        self.feed(uploader, (server_frame(9, [2]), False), port=50001)
+        waiting, other = [link[0] for link in uploader.links.values()]
+        self.assertTrue(uploader.upload_once())  # the oldest stream: its token awaits approval
+        self.assertTrue(uploader.upload_once())
+        self.assertEqual(uploader.server.requests[1][2]["stream_id"], other)
+        self.assertFalse(uploader.upload_once())  # only the held-back stream is left, not yet due
+        uploader.waiting[waiting][0] = 0
+        self.assertTrue(uploader.upload_once())
+        self.assertEqual(uploader.server.requests[2][2]["stream_id"], waiting)
+        self.assertIsNone(self.queue.batch())
+        self.assertEqual(uploader.waiting, {})
+
+    def test_a_whole_service_outage_still_waits_for_everything(self):
+        uploader = self.uploader(refuse(503))
+        self.feed(uploader, (server_frame(9, [1]), False))
+        with self.assertRaises(HTTPError):
+            uploader.upload_once()
+        self.assertEqual(uploader.waiting, {})
+
+    def test_the_queue_is_kept_only_for_its_server_and_tokens(self):
+        self.queue.bind("https://a.test", ["t1"])
+        self.queue.add("s", 1, {"frame": "x"})
+        self.queue.add_reports(7, "s", 2, 1.0, "personal", [report(5)])
+        self.assertEqual(self.queue.bind("https://a.test", ["t1", "t2"]), 0)  # a token added
+        self.assertEqual(self.queue.pending(), 2)
+        self.assertEqual(self.queue.bind("https://a.test", ["t2"]), 2)  # t1 taken out
+        self.assertIsNone(self.queue.batch())
+        self.assertEqual(self.queue.add_reports(7, "s2", 1, 1.0, "personal", [report(5)]), 1)  # sent again
+        self.assertEqual(self.queue.bind("https://b.test", ["t2"]), 1)  # another server
+        self.assertEqual(self.queue.pending(), 0)
 
     def test_the_server_drop_list_is_applied(self):
         uploader = self.uploader(accept(drop={"client": [], "server": [9]}))

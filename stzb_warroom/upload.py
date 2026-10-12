@@ -4,6 +4,8 @@ Each game connection is a stream of rows numbered from 1: a row is an exact game
 list that were not sent before. The server decides whose data a connection is (with
 several tokens, which one) and tells back its role, the key of the report deduplication
 here. The queue survives restarts and server outages; rows are deleted once acknowledged.
+It is kept only for the server and the tokens it was filled for (`Queue.bind`). A stream the
+server holds back (its token awaits approval) waits on its own while the others go on.
 """
 
 import base64
@@ -26,6 +28,7 @@ MAX_ROWS = 100  # per request, as the server takes them
 MAX_BODY = 3 * 1024 * 1024
 MAX_QUEUED = 50000
 LINK_IDLE = 3600  # a connection unseen this long is forgotten
+WAIT_FIRST, WAIT_MAX = 15, 300  # a held-back stream is tried again after this, doubling up to the max
 
 
 def battle_reports(value):
@@ -59,9 +62,27 @@ class Queue:
         self.db.execute("CREATE TABLE IF NOT EXISTS reports (role INTEGER NOT NULL, battle_id INTEGER NOT NULL, "
                         "channel TEXT NOT NULL, digest TEXT NOT NULL, stream_id TEXT NOT NULL, "
                         "PRIMARY KEY(role, battle_id))")
+        self.db.execute("CREATE TABLE IF NOT EXISTS meta (key TEXT PRIMARY KEY, value TEXT NOT NULL)")
         self.db.commit()
         self.lock = threading.Lock()
         self.full_logged = 0
+
+    def bind(self, server, tokens):
+        """Keep the queued rows only for the server and the tokens they were captured for:
+        another server, or a token taken out, empties the queue and forgets the reports sent,
+        so nothing goes where the player no longer sends it. Added tokens keep it.
+        Returns the rows dropped."""
+        tokens = sorted(hashlib.sha256(token.encode()).hexdigest() for token in tokens)
+        with self.lock, self.db:
+            row = self.db.execute("SELECT value FROM meta WHERE key='scope'").fetchone()
+            old = json.loads(row[0]) if row else None
+            dropped = 0
+            if old is not None and (old.get("server") != server or not set(old.get("tokens") or ()) <= set(tokens)):
+                dropped = self.db.execute("DELETE FROM rows").rowcount
+                self.db.execute("DELETE FROM reports")
+            self.db.execute("INSERT OR REPLACE INTO meta VALUES ('scope', ?)",
+                            (json.dumps({"server": server, "tokens": tokens}),))
+        return dropped
 
     def add(self, stream_id, seq, row):
         with self.lock:
@@ -114,10 +135,15 @@ class Queue:
             return 0
         return len(groups)
 
-    def batch(self):
-        """(stream_id, first seq, rows) of the oldest stream, or None."""
+    def batch(self, skip=()):
+        """(stream_id, first seq, rows) of the oldest stream not in `skip`, or None."""
         with self.lock:
-            first = self.db.execute("SELECT stream_id FROM rows ORDER BY rowid LIMIT 1").fetchone()
+            if skip:
+                first = next(((stream_id,) for stream_id, _first in self.db.execute(
+                    "SELECT stream_id, min(rowid) AS first FROM rows GROUP BY stream_id ORDER BY first")
+                    if stream_id not in skip), None)
+            else:
+                first = self.db.execute("SELECT stream_id FROM rows ORDER BY rowid LIMIT 1").fetchone()
             if first is None:
                 return None
             rows = self.db.execute("SELECT seq,row FROM rows WHERE stream_id=? ORDER BY seq LIMIT ?",
@@ -165,17 +191,21 @@ class Uploader:
 
     def __init__(self, queue, server, tokens, log=None):
         self.queue, self.server, self.tokens = queue, server, tokens
+        self.log = log or (lambda **fields: print(json.dumps(fields, ensure_ascii=False), flush=True))
+        dropped = queue.bind(server.origin, tokens)
+        if dropped:
+            self.log(event="queue_reset", reason="server or tokens changed", rows=dropped)
         self.splitter = Splitter()
         self.links = {}  # connection -> [stream id, last seq, last seen]
         self.roles = {}  # stream id -> role, as the server said
         self.dead = set()  # streams the server refused: their connection starts a new one
         self.drop = {"client": set(), "server": set()}  # message ids the server does not want
+        self.waiting = {}  # stream id -> [monotonic time to try again, wait]: held back by the server
         self.swept = time.monotonic()
         self.stop = threading.Event()
         self.error = None
         self.uploaded_at = None  # time of the last acknowledged batch
         self.uploaded = 0  # rows acknowledged since the start
-        self.log = log or (lambda **fields: print(json.dumps(fields, ensure_ascii=False), flush=True))
 
     # capture thread -----------------------------------------------------------------
 
@@ -227,7 +257,8 @@ class Uploader:
 
     def upload_once(self):
         """Send one batch; False when the queue is empty."""
-        batch = self.queue.batch()
+        now = time.monotonic()
+        batch = self.queue.batch({stream_id for stream_id, (until, _wait) in self.waiting.items() if until > now})
         if batch is None:
             return False
         stream_id, start, rows = batch
@@ -235,18 +266,25 @@ class Uploader:
             result = self.server.json(PATH, self.tokens, {"stream_id": stream_id, "start_seq": start,
                                                           "frames": rows}, compress=True, timeout=30)
         except HTTPError as exc:
-            if exc.code == 401:
-                raise
+            if exc.code == 503 and _reply(exc).get("retry") == "stream":
+                # Only this stream waits (its token awaits approval): the others go on meanwhile.
+                wait = min(WAIT_MAX, self.waiting[stream_id][1] * 2) if stream_id in self.waiting else WAIT_FIRST
+                if stream_id not in self.waiting:
+                    self.log(event="stream_waiting", reason=_error(exc))
+                self.waiting[stream_id] = [time.monotonic() + wait, wait]
+                return True
             if exc.code not in (400, 409):
                 raise
             # The server will never take this stream (a gap, invalid data): it would block the rest.
             self.dead.add(stream_id)
+            self.waiting.pop(stream_id, None)
             self.log(event="stream_dropped", status=exc.code, reason=_error(exc),
                      rows=self.queue.drop(stream_id))
             return True
         if result.get("stream_id") != stream_id or type(result.get("cursor")) is not int:
             raise ValueError("server did not acknowledge the batch")
         self.queue.acknowledge(stream_id, result["cursor"])
+        self.waiting.pop(stream_id, None)
         self.uploaded_at = time.time()
         self.uploaded += len(rows)
         if type(result.get("role")) is int:
@@ -281,8 +319,16 @@ class Uploader:
             self.stop.wait(0.1 if busy else 1 if last_error is None else 10)
 
 
+def _reply(exc):
+    """The JSON body of an HTTP error ({} when there is none); read once, kept on the error."""
+    if not hasattr(exc, "reply"):
+        try:
+            value = json.loads(exc.read() or b"{}")
+        except (OSError, ValueError, AttributeError):
+            value = {}
+        exc.reply = value if isinstance(value, dict) else {}
+    return exc.reply
+
+
 def _error(exc):
-    try:
-        return json.loads(exc.read() or b"{}").get("error", "")
-    except (OSError, ValueError, AttributeError):
-        return ""
+    return str(_reply(exc).get("error", ""))
