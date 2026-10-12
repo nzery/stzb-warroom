@@ -73,13 +73,22 @@ class LatestTests(unittest.TestCase):
         self.assertEqual(release["url"], SITE + "/download/stzb-warroom-9.0.0-windows.zip")
         self.assertEqual(release["app"]["url"], SITE + "/download/stzb-warroom-9.0.0-app.zip")
         self.assertEqual(release["runtime"], "r1")
+        self.assertEqual(release["notes"], "")
         self.assertTrue(opener.agents[0].startswith(f"stzb-warroom/{update.__version__} ("))
 
     def test_github_when_the_site_does_not_answer(self):
-        opener = Opener({update.GITHUB: {"tag_name": "v9.1.0", "html_url": "page"}}, down=(SITE,))
-        self.assertEqual(update.latest(opener), {"version": "9.1.0", "runtime": None, "url": "page", "app": None})
+        opener = Opener({update.GITHUB: {"tag_name": "v9.1.0", "html_url": "page", "body": "本次更新……"}}, down=(SITE,))
+        self.assertEqual(update.latest(opener), {"version": "9.1.0", "runtime": None, "url": "page", "app": None,
+                                                 "notes": "本次更新……"})
         with self.assertRaisesRegex(ValueError, "检查更新失败"):
             update.latest(Opener({}))
+
+    def test_the_release_notes_come_along_without_the_changelog_link(self):
+        notes = "本次更新新增通知设置。\r\n\r\n- 第一条\r\n\r\n**Full Changelog**: https://x/compare/a...b"
+        opener = Opener({SITE + "/download/latest.json": dict(index(), notes=notes)})
+        self.assertEqual(update.latest(opener)["notes"], "本次更新新增通知设置。\n\n- 第一条")
+        self.assertEqual(update.notes("x" * 9000), "x" * update.NOTES_LIMIT)
+        self.assertEqual(update.notes(None), "")
 
     def test_a_file_elsewhere_is_refused(self):
         bad = index()

@@ -272,3 +272,9 @@ input[type=text]:focus, input[type=password]:focus { border-color: var(--gold2);
   .hero { flex-wrap: wrap; }
   .bark { flex-wrap: wrap; }
 }
+
+/* a release's notes in the update banners */
+.release-notes { margin-top: 6px; }
+.release-notes summary { cursor: pointer; color: var(--gold); font-size: 13px; }
+.notes-body { margin-top: 6px; white-space: pre-wrap; color: var(--muted); font-size: 13px; line-height: 1.6;
+  max-height: 260px; overflow-y: auto; }

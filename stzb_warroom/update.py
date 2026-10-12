@@ -26,7 +26,14 @@ from .runner import state_dir
 
 GITHUB = "https://api.github.com/repos/nzery/stzb-warroom/releases/latest"
 APP_LIMIT = 20 * 1024 * 1024  # the code is well under 1 MB
+NOTES_LIMIT = 8000  # characters of a release's notes shown to the player
 SHA256 = set("0123456789abcdef")
+
+
+def notes(text):
+    """What a release says it changed, for the player (GitHub's changelog link left out)."""
+    lines = str(text or "").replace("\r\n", "\n").split("\n")
+    return "\n".join(line for line in lines if not line.startswith("**Full Changelog**")).strip()[:NOTES_LIMIT]
 
 
 def version(text):
@@ -49,7 +56,8 @@ def folder():
 
 def latest(opener):
     """The newest release -> {"version", "runtime", "url" (the whole package, or its page),
-    "app": {"url", "sha256", "size"} or None}. ValueError when neither place answers."""
+    "app": {"url", "sha256", "size"} or None, "notes" (what it changed, may be "")}.
+    ValueError when neither place answers."""
     errors = []
     origin = site()
     if origin:
@@ -63,7 +71,7 @@ def latest(opener):
         with get(opener, GITHUB, 15) as response:
             release = json.load(response)
         return {"version": str(release["tag_name"]).lstrip("v"), "runtime": None,
-                "url": release.get("html_url"), "app": None}
+                "url": release.get("html_url"), "app": None, "notes": notes(release.get("body"))}
     except (OSError, ValueError, KeyError, TypeError, AttributeError) as exc:
         errors.append(exc)
     raise ValueError(f"检查更新失败：{errors[0]}")
@@ -83,7 +91,8 @@ def _from_site(index, release):
         raise ValueError("bad version")
     app = release.get("app")
     return {"version": str(release["version"]), "runtime": release.get("runtime") or None,
-            "url": file(release["full"])["url"], "app": file(app) if app else None}
+            "url": file(release["full"])["url"], "app": file(app) if app else None,
+            "notes": notes(release.get("notes"))}
 
 
 def code_only(release, place=None):

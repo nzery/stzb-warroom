@@ -271,6 +271,10 @@ function renderBanners(d) {
     if (!S.dismissed.has(hint.id)) parts.push(banner('warn', 'info', esc(hint.text), '', hint.id));
   }
   if (d.update) parts.push(updateBanner(d.update));
+  // The first start of a new version: what it brought, until the player closes it.
+  if (d.updated && !S.dismissed.has('updated-' + d.updated.version)) {
+    parts.push(banner('info', 'check', `<b>已更新到 ${esc(d.updated.version)}</b>${releaseNotes(d.updated.notes, true)}`, '', 'updated-' + d.updated.version));
+  }
   const html = parts.join('');
   if ($('banners').dataset.html !== html) { $('banners').innerHTML = html; $('banners').dataset.html = html; }
 }
@@ -282,14 +286,21 @@ const UPDATE_STATE = {
   failed: (v) => `新版本 ${v} 自动下载失败`,
 };
 
+// A release's notes, as it wrote them (the server's text), folded unless `open`.
+function releaseNotes(notes, open = false) {
+  if (!notes) return '';
+  return `<details class="release-notes"${open ? ' open' : ''}><summary>这次更新了什么</summary><div class="notes-body">${esc(notes)}</div></details>`;
+}
+
 function updateBanner(u) {
   const v = `<b>${esc(u.version)}</b>`;
+  const notes = releaseNotes(u.notes);
   const download = `<a class="btn" href="${esc(u.url)}" target="_blank" rel="noopener">下载</a>`;
   switch (u.state) {
-    case 'downloading': return banner('info', 'clock', `正在下载新版本 ${v}…`);
-    case 'ready': return banner('info', 'info', `新版本 ${v} 已下载，重启程序后生效。`, '<button class="btn primary" data-action="restart_for_update">立即重启</button>');
-    case 'failed': return banner('warn', 'info', `新版本 ${v} 自动下载失败（${esc(u.error || '')}），稍后会再试，也可以下载完整安装包。`, download);
-    default: return banner('info', 'info', `发现新版本 ${v}，请下载完整安装包，解压后替换原来的程序文件夹。`, download);
+    case 'downloading': return banner('info', 'clock', `正在下载新版本 ${v}…${notes}`);
+    case 'ready': return banner('info', 'info', `新版本 ${v} 已下载，重启程序后生效。${notes}`, '<button class="btn primary" data-action="restart_for_update">立即重启</button>');
+    case 'failed': return banner('warn', 'info', `新版本 ${v} 自动下载失败（${esc(u.error || '')}），稍后会再试，也可以下载完整安装包。${notes}`, download);
+    default: return banner('info', 'info', `发现新版本 ${v}，请下载完整安装包，解压后替换原来的程序文件夹。${notes}`, download);
   }
 }
 

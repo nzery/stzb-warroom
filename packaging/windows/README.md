@@ -125,7 +125,8 @@ git push origin v1.0.2
 
 `notes.txt` 第一行是 Release 的标题（`率土战局 v1.0.2`），空一行后是给玩家看的更新说明：一句话概括，然后每条变化写清在哪里、
 怎么用、要注意什么，最后写下载和更新方法（照 v1.3.2、v1.5.0 的写法）。Release 页面原样显示这段说明；tag 没有说明时构建失败，
-不会只发出一个 “Full Changelog” 链接。
+不会只发出一个 “Full Changelog” 链接。网站同步时把它一起放进 `latest.json`（`notes`），窗口在提示“发现新版本 / 新版本已下载”时可以展开“这次更新了什么”，
+第一次以新版本启动时再显示一次“已更新到 x.y.z”和这段说明（关掉后不再出现），所以要写给玩家看。
 
 推送 `v*` tag 会自动构建，版本号取自 tag，并在 Releases 创建同名版本，附上 `stzb-warroom-windows.zip`、
 `stzb-warroom-app.zip` 和 `release.json`。网站约 10 分钟内同步过去，之后窗口才会提示更新。

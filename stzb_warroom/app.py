@@ -139,6 +139,7 @@ class App:
                              "dumpcap": self.find_dumpcap()[0], "dumpcap_picked": self._picked(),
                              "state_dir": str(self.state_dir), "windows": winsys.WINDOWS},
                 "update": self.update,
+                "updated": self._updated(),
                 "notice_prefs": dict(self.notice_prefs),
             }
 
@@ -166,6 +167,13 @@ class App:
         else:
             raise ValueError(f"unknown setting {name}")
         self.touch()
+
+    def _updated(self):
+        """{"version", "notes"} when this is the version whose notes were kept before updating, else None."""
+        kept = self.settings.get("update_notes")
+        if isinstance(kept, dict) and kept.get("version") == __version__ and kept.get("notes"):
+            return {"version": kept["version"], "notes": str(kept["notes"])}
+        return None
 
     def _write_settings(self):
         self.settings_path.parent.mkdir(parents=True, exist_ok=True)
@@ -492,12 +500,21 @@ class App:
             code_only = updates.code_only(release)
             update = {"version": release["version"], "url": release["url"], "code_only": code_only,
                       "state": "ready" if code_only and updates.installed(release) else
-                      "downloading" if code_only else "available", "error": None}
+                      "downloading" if code_only else "available", "error": None,
+                      "notes": release.get("notes") or ""}
         with self.lock:
             busy = self.update and self.update["state"] == "downloading" and update and \
                 self.update["version"] == update["version"]
             if not busy:
                 self.update = update
+            # Kept, so the first start of that version says what it brought (``updated``); also when this
+            # already is the newest version and nothing was kept for it (updated by a version before this one).
+            kept = self.settings.get("update_notes")
+            kept = kept if isinstance(kept, dict) else {}
+            target = update or (release if release["version"] == __version__ else None)
+            if target and release.get("notes") and kept.get("version") != target["version"]:
+                self.settings["update_notes"] = {"version": target["version"], "notes": release["notes"]}
+                self._write_settings()
         if update and update["state"] == "downloading" and not busy:
             threading.Thread(target=self._download_update, args=(release,), name="update", daemon=True).start()
         self.touch()

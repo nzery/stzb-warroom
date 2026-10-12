@@ -92,7 +92,7 @@ class AppTests(unittest.TestCase):
         if saved:
             vault.save(self.folder / "tokens.bin", saved)
         with unittest.mock.patch.dict("os.environ", {"ST_CLIENT_TOKEN": env}):
-            app = App(self.server, self.folder, opener=lambda *a, **k: Response(b'{"tag_name": "v9.0.0", "html_url": "u"}'))
+            app = App(self.server, self.folder, opener=lambda *a, **k: Response('{"tag_name": "v9.0.0", "html_url": "u", "body": "本次更新……"}'.encode()))
         app.find_dumpcap = lambda: (None, ["nowhere"])  # never capture in tests
         return app
 
@@ -225,7 +225,22 @@ class AppTests(unittest.TestCase):
         with unittest.mock.patch.object(appmod.updates, "site", lambda: None):
             self.assertEqual(app.check_update(), {"latest": "9.0.0", "newer": True})
         self.assertEqual(app.snapshot()["update"], {"version": "9.0.0", "url": "u", "code_only": False,
-                                                    "state": "available", "error": None})
+                                                    "state": "available", "error": None, "notes": "本次更新……"})
+        self.assertIsNone(app.snapshot()["updated"])  # still the old version
+        # the first start of that version says what it brought
+        with unittest.mock.patch.object(appmod, "__version__", "9.0.0"):
+            self.assertEqual(self.app().snapshot()["updated"], {"version": "9.0.0", "notes": "本次更新……"})
+        with unittest.mock.patch.object(appmod, "__version__", "9.0.1"):
+            self.assertIsNone(self.app().snapshot()["updated"])
+        # updated by a version that kept nothing: the newest release's notes, once it is this version
+        (self.folder / "settings.json").unlink()
+        with unittest.mock.patch.object(appmod, "__version__", "9.0.0"), \
+                unittest.mock.patch.object(appmod.updates, "__version__", "9.0.0"), \
+                unittest.mock.patch.object(appmod.updates, "site", lambda: None):
+            fresh = self.app()
+            self.assertIsNone(fresh.snapshot()["updated"])
+            self.assertEqual(fresh.check_update(), {"latest": "9.0.0", "newer": False})
+            self.assertEqual(fresh.snapshot()["updated"], {"version": "9.0.0", "notes": "本次更新……"})
         with self.assertRaisesRegex(ValueError, "还没有下载好"):
             app.restart_for_update()
         self.assertFalse(app.relaunch)
