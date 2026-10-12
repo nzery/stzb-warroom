@@ -119,9 +119,13 @@ runtime 指纹：构建用的 Python 和 PyInstaller 版本、PyInstaller 打进
 **发版本：**
 
 ```sh
-git tag v1.0.2
+git tag -a v1.0.2 -F notes.txt   # 必须是带说明的 tag
 git push origin v1.0.2
 ```
+
+`notes.txt` 第一行是 Release 的标题（`率土战局 v1.0.2`），空一行后是给玩家看的更新说明：一句话概括，然后每条变化写清在哪里、
+怎么用、要注意什么，最后写下载和更新方法（照 v1.3.2、v1.5.0 的写法）。Release 页面原样显示这段说明；tag 没有说明时构建失败，
+不会只发出一个 “Full Changelog” 链接。
 
 推送 `v*` tag 会自动构建，版本号取自 tag，并在 Releases 创建同名版本，附上 `stzb-warroom-windows.zip`、
 `stzb-warroom-app.zip` 和 `release.json`。网站约 10 分钟内同步过去，之后窗口才会提示更新。

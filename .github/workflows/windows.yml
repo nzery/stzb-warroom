@@ -44,8 +44,21 @@ jobs:
           path: |
             build/stzb-warroom-app.zip
             build/release.json
+      # The release page says what the annotated tag says: its first line is the title, the rest the
+      # notes for players (git tag -a vX.Y.Z -F notes.txt). Generated notes are only a changelog link.
       - name: Release
         if: startsWith(github.ref, 'refs/tags/')
+        shell: bash
         env:
           GH_TOKEN: ${{ github.token }}
-        run: gh release create "${{ github.ref_name }}" build/stzb-warroom-windows.zip build/stzb-warroom-app.zip build/release.json --generate-notes
+          TAG: ${{ github.ref_name }}
+        run: |
+          git fetch --force origin "refs/tags/$TAG:refs/tags/$TAG"
+          title=$(git for-each-ref "refs/tags/$TAG" --format='%(contents:subject)')
+          git for-each-ref "refs/tags/$TAG" --format='%(contents:body)' > build/notes.md
+          if [ "$(git cat-file -t "refs/tags/$TAG")" != tag ] || ! grep -q '[^[:space:]]' build/notes.md; then
+            echo "the tag has no release notes: make it with git tag -a $TAG -F <notes>" >&2
+            exit 1
+          fi
+          gh release create "$TAG" build/stzb-warroom-windows.zip build/stzb-warroom-app.zip build/release.json \
+            --title "$title" --notes-file build/notes.md
