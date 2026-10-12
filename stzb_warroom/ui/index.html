@@ -18,6 +18,7 @@
     <nav id="nav">
       <button class="nav-item active" data-page="overview"><i data-icon="home"></i><span>概览</span></button>
       <button class="nav-item" data-page="notices"><i data-icon="bell"></i><span>通知</span><b class="badge" id="badge-notices"></b></button>
+      <button class="nav-item" data-page="prefs"><i data-icon="sliders"></i><span>通知设置</span></button>
       <button class="nav-item" data-page="accounts"><i data-icon="user"></i><span>账号与推送</span><b class="badge alert" id="badge-accounts"></b></button>
       <button class="nav-item" data-page="settings"><i data-icon="gear"></i><span>设置</span></button>
       <button class="nav-item" data-page="diagnostics"><i data-icon="pulse"></i><span>诊断</span></button>
@@ -81,6 +82,10 @@
         </div>
       </div>
       <div id="notice-list" class="notice-list"></div>
+    </section>
+
+    <section class="page" id="page-prefs">
+      <div id="prefs"></div>
     </section>
 
     <section class="page" id="page-accounts">

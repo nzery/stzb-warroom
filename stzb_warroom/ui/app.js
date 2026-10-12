@@ -15,6 +15,7 @@ const ICONS = {
   pause: '<path d="M9 5v14M15 5v14"/>',
   wave: '<path d="M2 12c2-4 4-4 6 0s4 4 6 0 4-4 6 0"/>',
   clock: '<circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/>',
+  sliders: '<path d="M4 6h10M18 6h2M4 12h4M12 12h8M4 18h12"/><circle cx="16" cy="6" r="2"/><circle cx="10" cy="12" r="2"/><circle cx="18" cy="18" r="2"/>',
   question: '<circle cx="12" cy="12" r="9"/><path d="M9.5 9.5a2.5 2.5 0 1 1 3.5 2.3c-.6.3-1 .8-1 1.5V14M12 17v.5"/>',
 };
 const icon = (name) => `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">${ICONS[name] || ''}</svg>`;
@@ -28,6 +29,7 @@ const store = {
 const PAGES = {
   overview: ['概览', '上报游戏数据，接收战局通知'],
   notices: ['通知', '服务器根据你的战局生成的通知'],
+  prefs: ['通知设置', '要哪些通知、过滤哪些敌军、推送哪些到手机'],
   accounts: ['账号与推送', 'Token、角色与 iPhone 推送（Bark）'],
   settings: ['设置', '启动方式、网络组件与数据'],
   diagnostics: ['诊断', '检查运行环境，查看运行日志'],
@@ -42,7 +44,7 @@ const ACCOUNT_STATES = {
 const S = {
   data: null, page: 'overview', filter: 'all', notices: [], logs: [], n: 0, l: 0,
   hiddenBefore: store.get('hiddenBefore', 0), dismissed: new Set(store.get('dismissed', [])),
-  seenNotices: store.get('seenNotices', 0), loaded: false, accountsKey: '', busy: new Set(),
+  seenNotices: store.get('seenNotices', 0), loaded: false, accountsKey: '', prefsKey: '', busy: new Set(),
 };
 
 // ---------------------------------------------------------------- server
@@ -205,6 +207,7 @@ function render() {
   renderOverview(d);
   if (S.page === 'notices') renderNotices();
   renderAccounts(d);
+  renderPrefs(d);
   renderSettings(d);
   renderChecks(d);
   $('about-version').textContent = d.app_version;
@@ -377,6 +380,33 @@ function renderAccounts(d) {
   document.querySelectorAll('[data-bark-input]').forEach((input) => { input.value = typed[input.dataset.barkInput] || ''; });
 }
 
+// The notice settings: the page as the server gives it (texts and all), the same for every account.
+function renderPrefs(d) {
+  const p = d.notice_prefs || {};
+  const key = JSON.stringify([p, d.tokens.length]);
+  if (key === S.prefsKey) return;
+  S.prefsKey = key;
+  if (!p.groups) {
+    $('prefs').innerHTML = `<div class="card empty">${esc(!d.tokens.length ? '先到“账号与推送”添加账号，再来设置通知。' : p.error || '正在读取通知设置…')}</div>`;
+    return;
+  }
+  const values = p.values || {};
+  const item = (it) => {
+    const head = `<div><b>${esc(it.label)}</b><p>${esc(it.help)}</p></div>`;
+    if (it.type === 'switch') {
+      return `<div class="setting">${head}<label class="switch"><input type="checkbox" data-pref="${esc(it.key)}"${values[it.key] ? ' checked' : ''}><span></span></label></div>`;
+    }
+    return `<div class="setting column">${head}<div class="options">${(it.options || []).map((o) => {
+      const on = o.value === values[it.key];
+      return `<label class="option${on ? ' active' : ''}"><input type="radio" name="pref-${esc(it.key)}" data-pref="${esc(it.key)}" value="${esc(o.value)}"${on ? ' checked' : ''}>
+        <span><b>${esc(o.label)}</b><small>${esc(o.help)}</small></span></label>`;
+    }).join('')}</div></div>`;
+  };
+  $('prefs').innerHTML = (p.note ? `<p class="muted prefs-note">${esc(p.note)}</p>` : '')
+    + (p.error ? banner('warn', 'info', esc(p.error)) : '')
+    + p.groups.map((g) => `<div class="card settings"><h3>${esc(g.title)}</h3>${g.items.map(item).join('')}</div>`).join('');
+}
+
 function renderSettings(d) {
   const s = d.settings;
   const autostart = $('set-autostart');
@@ -526,6 +556,20 @@ $('opt-desktop').addEventListener('change', async (e) => {
     if (!e.target.checked) toast('没有得到弹窗权限', true);
   }
   store.set('desktop', e.target.checked);
+});
+
+document.addEventListener('change', async (event) => {
+  const input = event.target.closest('[data-pref]');
+  if (!input) return;
+  const value = input.type === 'checkbox' ? input.checked : input.value;
+  document.querySelectorAll('[data-pref]').forEach((node) => { node.disabled = true; });
+  try {
+    await act('set_notice_pref', { key: input.dataset.pref, value });
+    toast('已保存，这台电脑上的所有账号都按这个设置');
+  } catch { /* shown */ } finally {
+    S.prefsKey = '';  // drawn again from what was saved (or what was there before)
+    render();
+  }
 });
 
 $('set-autostart').addEventListener('change', (e) => act('set_setting', { name: 'autostart', value: e.target.checked }).catch(() => {}));

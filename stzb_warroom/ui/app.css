@@ -205,6 +205,16 @@ input[type=text]:focus, input[type=password]:focus { border-color: var(--gold2);
 .setting:last-child { border-bottom: 0; padding-bottom: 2px; }
 .setting p { margin: 3px 0 0; color: var(--muted); font-size: 13px; line-height: 1.55; }
 .path { font-family: Consolas, "Cascadia Mono", monospace; font-size: 12px !important; word-break: break-all; }
+.setting.column { flex-direction: column; align-items: stretch; gap: 10px; }
+.options { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 8px; }
+.option { display: flex; align-items: flex-start; gap: 10px; padding: 10px 12px; border-radius: 8px;
+  border: 1px solid var(--line2); background: var(--panel2); cursor: pointer; }
+.option:hover { background: var(--hover); }
+.option.active { border-color: var(--gold2); background: #24392f; }
+.option input { accent-color: var(--gold); margin: 3px 0 0; flex: none; }
+.option b { font-weight: 600; }
+.option small { display: block; margin-top: 3px; color: var(--muted); font-size: 12px; line-height: 1.5; }
+.prefs-note { margin: 0 0 14px; font-size: 13px; line-height: 1.6; }
 .switch { position: relative; flex: none; width: 44px; height: 24px; cursor: pointer; }
 .switch input { opacity: 0; width: 0; height: 0; }
 .switch span { position: absolute; inset: 0; border-radius: 12px; background: #33463f; transition: background .2s; }

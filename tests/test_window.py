@@ -38,10 +38,19 @@ class FakeServer:
 
     def __init__(self):
         self.calls = []
+        self.prefs = {}  # token -> its notice settings on the server
 
     def json(self, path, token, body=None, timeout=45):
         if token == BAD:
             raise HTTPError(path, 401, "unauthorized", {}, io.BytesIO(b"{}"))
+        if path == "/v1/client/notice-prefs":
+            self.calls.append(("POST" if body is not None else "GET", path, token, body))
+            values = self.prefs.setdefault(token, {"mode": "passive", "skip_spartan": True})
+            if body is not None:
+                if body["values"].get("mode") not in ("passive", "active"):
+                    raise HTTPError(path, 400, "bad", {}, io.BytesIO('{"error": "提醒方式 的取值不对"}'.encode()))
+                values.update(body["values"])
+            return {"note": "说明", "groups": [{"title": "敌情", "items": []}], "values": dict(values)}
         if token == NEW:
             return {"name": "n", "approved": False, "role": None, "bark": {"bound": False}}
         if token == TAKEN:
@@ -165,6 +174,31 @@ class AppTests(unittest.TestCase):
         self.assertEqual(len(app.snapshot()["hints"]), 1)
         show(None, None)
         self.assertEqual(app.snapshot()["hints"], [])
+
+    def test_notice_settings_are_the_same_for_every_account(self):
+        app = self.app(saved=f"{GOOD},{NEW},{BAD}")
+        app.check_accounts()
+        prefs = app.snapshot()["notice_prefs"]
+        self.assertEqual((prefs["note"], prefs["values"]), ("说明", {"mode": "passive", "skip_spartan": True}))
+        self.assertIsNone(prefs["error"])  # the invalid token is not asked
+        self.assertEqual(app.set_notice_pref("skip_spartan", False), {"mode": "passive", "skip_spartan": False})
+        self.assertEqual(self.server.prefs[GOOD], self.server.prefs[NEW])
+        self.assertNotIn(BAD, self.server.prefs)
+        with self.assertRaisesRegex(ValueError, "取值不对"):
+            app.set_notice_pref("mode", "sometimes")
+        with self.assertRaisesRegex(ValueError, "没有这个设置"):
+            app.set_notice_pref("nonsense", True)
+        # the choice is kept here: a token added later, or changed elsewhere, is given it
+        self.server.prefs[NEW]["skip_spartan"] = True
+        again = self.app()
+        again.add_token(THIRD := "sta_" + "e" * 43)
+        again.check_accounts()
+        self.assertFalse(self.server.prefs[NEW]["skip_spartan"])
+        self.assertFalse(self.server.prefs[THIRD]["skip_spartan"])
+        posts = [c for c in self.server.calls if c[0] == "POST" and c[1] == "/v1/client/notice-prefs"]
+        again.check_accounts()  # nothing differs any more: nothing is sent
+        self.assertEqual(len([c for c in self.server.calls if c[0] == "POST" and c[1] == "/v1/client/notice-prefs"]),
+                         len(posts))
 
     def test_bark_is_bound_through_the_server(self):
         app = self.app(saved=GOOD)

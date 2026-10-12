@@ -227,6 +227,7 @@ class Window(ThreadingHTTPServer):
             "bark_unbind": lambda: app.bark_unbind(int(index)),
             "bark_test": lambda: app.bark_test(int(index)),
             "set_setting": lambda: app.set_setting(body.get("name"), body.get("value")),
+            "set_notice_pref": lambda: app.set_notice_pref(body.get("key"), body.get("value")),
             "pick_dumpcap": app.pick_dumpcap,
             "forget_dumpcap": app.forget_dumpcap,
             "open_folder": lambda: winsys.open_folder(app.state_dir),

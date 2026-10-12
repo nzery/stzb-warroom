@@ -3,7 +3,9 @@
 It runs the same capture and upload as ``capture`` (runner.run_capture) and follows the
 same notifications and prompts as ``notify``, for the tokens the player typed in (kept
 encrypted, vault.py). Everything shown about an account (its name, role, approval, Bark
-binding) comes from the server (``/v1/client/status``); Bark is bound there too.
+binding) comes from the server (``/v1/client/status``); Bark is bound there too. So does the
+notice settings page (``/v1/client/notice-prefs``): the player's choice is kept here and given
+to every token, so all the accounts of this computer follow the same settings.
 """
 
 import collections
@@ -24,6 +26,7 @@ from .capture import find_dumpcap
 from .runner import run_capture
 
 ACCOUNT_EVERY = 60  # seconds between two looks at the accounts' status
+PREFS = "/v1/client/notice-prefs"
 UPDATE_EVERY = 6 * 3600
 HINTS = (  # what a player can do about a capture failure, from its text
     ("another capture process", "已经有一个程序在上报（可能是另一个窗口），先关掉它。"),
@@ -81,6 +84,7 @@ class App:
         self.hints = {}  # token -> {"id", "text", "time"}
         self.accounts = {}  # token -> what /v1/client/status said, or why it could not
         self.capture = {"state": "stopped", "error": None, "hint": None, "since": None, "dumpcap": None}
+        self.notice_prefs = {"note": None, "groups": None, "values": None, "error": None}  # as the server gave it
         self.session = None
         self.update = None  # a newer release: {"version", "url", "code_only", "state", "error"}
         self.update_lock = threading.Lock()  # one download at a time
@@ -135,6 +139,7 @@ class App:
                              "dumpcap": self.find_dumpcap()[0], "dumpcap_picked": self._picked(),
                              "state_dir": str(self.state_dir), "windows": winsys.WINDOWS},
                 "update": self.update,
+                "notice_prefs": dict(self.notice_prefs),
             }
 
     def _account(self, token):
@@ -157,11 +162,14 @@ class App:
         elif name == "keep_running":
             with self.lock:
                 self.settings["keep_running"] = bool(value)
-                self.settings_path.parent.mkdir(parents=True, exist_ok=True)
-                self.settings_path.write_text(json.dumps(self.settings), encoding="utf-8")
+                self._write_settings()
         else:
             raise ValueError(f"unknown setting {name}")
         self.touch()
+
+    def _write_settings(self):
+        self.settings_path.parent.mkdir(parents=True, exist_ok=True)
+        self.settings_path.write_text(json.dumps(self.settings), encoding="utf-8")
 
     def _picked(self):
         try:
@@ -263,6 +271,78 @@ class App:
                 if token in self.tokens:
                     self.accounts[token] = value
         self.touch()
+        self.sync_notice_prefs()
+
+    # notice settings ----------------------------------------------------------------
+
+    def _chosen_prefs(self):
+        value = self.settings.get("notice_prefs")
+        return value if isinstance(value, dict) else None
+
+    def _prefs_request(self, token, body=None):
+        """The server's settings page for a token (saving `body` first); ValueError says why not."""
+        try:
+            value = self.server.json(PREFS, token, body, timeout=20)
+        except HTTPError as exc:
+            if exc.code == 404:
+                raise ValueError("服务器还不支持通知设置")
+            try:
+                message = json.loads(exc.read() or b"{}").get("error")
+            except (OSError, ValueError):
+                message = None
+            raise ValueError(message or f"服务器返回 HTTP {exc.code}")
+        except OSError as exc:
+            raise ValueError(f"连不上服务器：{exc}")
+        if not isinstance(value, dict) or not isinstance(value.get("values"), dict):
+            raise ValueError("服务器的回复不对")
+        return value
+
+    def sync_notice_prefs(self):
+        """Read the settings page, and give the player's choice to any token that holds other values
+        (one added since, or changed elsewhere). Before any choice, the first token's are shown."""
+        chosen, page, errors = self._chosen_prefs(), None, []
+        for token in list(self.tokens):
+            if (self.accounts.get(token) or {}).get("state") == "invalid":
+                continue
+            try:
+                value = self._prefs_request(token)
+                if chosen is not None and any(key in value["values"] and value["values"][key] != wanted
+                                              for key, wanted in chosen.items()):
+                    value = self._prefs_request(token, {"values": chosen})
+                page = page or value
+            except ValueError as exc:
+                errors.append(f"{mask(token)}：{exc}")
+        with self.lock:
+            if page is not None:
+                self.notice_prefs = {"note": page.get("note"), "groups": page.get("groups"),
+                                     "values": page["values"], "error": None}
+            self.notice_prefs["error"] = "；".join(errors) or None
+        self.touch()
+
+    def set_notice_pref(self, key, value):
+        """The player changed one setting: saved here and given to every token."""
+        with self.lock:
+            values = dict(self.notice_prefs.get("values") or {})
+        if not isinstance(key, str) or key not in values:
+            raise ValueError("没有这个设置")
+        values[key] = value
+        page, errors = None, []
+        for token in list(self.tokens):
+            if (self.accounts.get(token) or {}).get("state") == "invalid":
+                continue
+            try:
+                page = self._prefs_request(token, {"values": values})
+            except ValueError as exc:
+                errors.append(f"{mask(token)}：{exc}")
+        if page is None:
+            raise ValueError("没能保存：" + ("；".join(errors) or "没有可用的账号"))
+        with self.lock:
+            self.settings["notice_prefs"] = page["values"]
+            self._write_settings()
+            self.notice_prefs = {"note": page.get("note"), "groups": page.get("groups"), "values": page["values"],
+                                 "error": ("有账号没保存上，稍后自动重试：" + "；".join(errors)) if errors else None}
+        self.touch()
+        return page["values"]
 
     def _bark(self, method, path, index, body=None):
         token = self._token(index)
