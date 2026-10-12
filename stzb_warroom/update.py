@@ -12,11 +12,13 @@ import hashlib
 import io
 import json
 import os
+import platform
 import shutil
 import sys
 import zipfile
 from pathlib import Path, PurePosixPath
 from urllib.parse import urljoin
+from urllib.request import Request
 
 from . import __version__
 from .api import packaged, site
@@ -34,6 +36,12 @@ def version(text):
         return ()
 
 
+def get(opener, url, timeout):
+    """Open `url` saying which version asks (the website counts the clients by version)."""
+    agent = f"stzb-warroom/{__version__} ({platform.system()} {platform.release()}; runtime {packaged().get('runtime') or '-'})"
+    return opener(Request(url, headers={"User-Agent": agent}), timeout=timeout)
+
+
 def folder():
     """Where updates of the code go; the launcher looks in the same place."""
     return state_dir() / "app"
@@ -47,12 +55,12 @@ def latest(opener):
     if origin:
         index = origin.rstrip("/") + "/download/latest.json"
         try:
-            with opener(index, timeout=15) as response:
+            with get(opener, index, 15) as response:
                 return _from_site(index, json.load(response))
         except (OSError, ValueError, KeyError, TypeError, AttributeError) as exc:
             errors.append(exc)
     try:
-        with opener(GITHUB, timeout=15) as response:
+        with get(opener, GITHUB, 15) as response:
             release = json.load(response)
         return {"version": str(release["tag_name"]).lstrip("v"), "runtime": None,
                 "url": release.get("html_url"), "app": None}
@@ -109,7 +117,7 @@ def install(release, opener, place=None):
         return
     app = release["app"]
     try:
-        with opener(app["url"], timeout=60) as response:
+        with get(opener, app["url"], 60) as response:
             data = response.read(APP_LIMIT + 1)
     except OSError as exc:
         raise ValueError(f"下载更新失败：{exc}") from None

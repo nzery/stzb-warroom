@@ -48,10 +48,12 @@ class Opener:
     """The site's latest.json and files, and GitHub's release; `down` names what does not answer."""
 
     def __init__(self, files, down=()):
-        self.files, self.down, self.opened = files, down, []
+        self.files, self.down, self.opened, self.agents = files, down, [], []
 
-    def __call__(self, url, timeout=None):
+    def __call__(self, request, timeout=None):
+        url = request.full_url
         self.opened.append(url)
+        self.agents.append(request.get_header("User-agent"))
         if any(url.startswith(prefix) for prefix in self.down) or url not in self.files:
             raise OSError("unreachable")
         value = self.files[url]
@@ -71,6 +73,7 @@ class LatestTests(unittest.TestCase):
         self.assertEqual(release["url"], SITE + "/download/stzb-warroom-9.0.0-windows.zip")
         self.assertEqual(release["app"]["url"], SITE + "/download/stzb-warroom-9.0.0-app.zip")
         self.assertEqual(release["runtime"], "r1")
+        self.assertTrue(opener.agents[0].startswith(f"stzb-warroom/{update.__version__} ("))
 
     def test_github_when_the_site_does_not_answer(self):
         opener = Opener({update.GITHUB: {"tag_name": "v9.1.0", "html_url": "page"}}, down=(SITE,))

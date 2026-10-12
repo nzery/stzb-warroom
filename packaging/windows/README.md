@@ -67,6 +67,7 @@ runtime 指纹：构建用的 Python 和 PyInstaller 版本、PyInstaller 打进
 
 - 窗口每 6 小时（和“关于”里的“检查更新”）读网站的 `<site>/download/latest.json`（网站从 GitHub Releases 同步来，
   国内下载快）；没有网站或读不到时退回 GitHub。
+  请求带 `User-Agent: stzb-warroom/<版本> (<系统>; runtime <指纹>)`，网站据此统计各版本的客户端。
 - 新版本与本机 exe 的 runtime 相同：后台下载 `stzb-warroom-app.zip`，核对大小和 SHA-256，解压到
   `%LOCALAPPDATA%\stzb-warroom\app\<版本>`，写 `app\current.json`；窗口提示“重启程序后生效”，可以点“立即重启”。
   下次启动时 `launcher.py` 先从这里加载 `stzb_warroom`，代码连导入都失败就退回 exe 自带的代码，并把那个版本记进
