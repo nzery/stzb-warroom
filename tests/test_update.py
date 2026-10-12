@@ -220,7 +220,7 @@ class RuntimeTests(unittest.TestCase):
         return self.release.runtime(package, work, "44.5.1")
 
     def test_only_what_the_code_cannot_change_counts(self):
-        base = ["encodings", "json", "stzb_warroom", "stzb_warroom.app"]
+        base = ["json", "stzb_warroom", "stzb_warroom.app"] + [f"m{n}" for n in range(20)]
         first = self.build("a", base)
         self.assertEqual(self.build("b", base + ["stzb_warroom.update"]), first)
         self.assertNotEqual(self.build("c", base + ["sqlite3"]), first)

@@ -54,9 +54,11 @@ def runtime(package, work, electron):
     tocs = sorted(Path(work).glob("PYZ-*.toc"))
     if len(tocs) != 1:
         raise SystemExit(f"expected one PYZ table of contents in {work}, found {len(tocs)}")
-    found = modules(tocs[0])
-    if "stzb_warroom.app" not in found or "encodings" not in found:
-        raise SystemExit(f"{tocs[0]} does not list the modules it should")
+    found = modules(tocs[0])  # (the bootstrap modules, e.g. encodings, are in _internal/base_library.zip)
+    if "stzb_warroom.app" not in found or len(found) < 20:
+        head = tocs[0].read_text(encoding="utf-8")[:600]
+        raise SystemExit(f"{tocs[0]} does not list the modules it should ({len(found)} found):\n{head}")
+    print(f"{len(found)} modules in the exe")
     files = []
     for path in sorted(Path(package).rglob("*")):
         name = path.relative_to(package).as_posix()
