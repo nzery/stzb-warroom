@@ -69,6 +69,12 @@ async function main() {
   for (const part of ['data-prole="8"', 'data-pfilter="kind" data-value="npc"', 'data-ppage="3"', 'lv good', '打不过：孙权', '第 2 / 3 页']) {
     assert.ok(drawn.includes(part), part);
   }
+  // an attack's lineup is a small table, its texts escaped; another notice is its body
+  const attack = vm.runInContext(`noticeBody({ body: '全文', view: { head: '22:49 到', note: '阵容（战报见过 6 次）',
+    foot: '守军 <曹彰队>', table: { columns: ['武将', '红', '战法'], rows: [['庞统(蜀步)', '4', '密谋定蜀']] } } })`, context);
+  for (const part of ['<th>武将</th>', '<td>庞统(蜀步)</td>', '22:49 到', '守军 &lt;曹彰队&gt;']) assert.ok(attack.includes(part), part);
+  assert.ok(!attack.includes('全文'));
+  assert.ok(vm.runInContext(`noticeBody({ body: '<b>' })`, context).includes('&lt;b&gt;'));
   console.log('UI startup and refresh regression checks passed');
 }
 main().catch((error) => { console.error(error); process.exitCode = 1; });

@@ -349,6 +349,17 @@ function renderOverview(d) {
     : '<div class="empty">还没有通知。登录游戏并上报后，敌袭等通知会显示在这里。</div>';
 }
 
+// An attack's lineup comes as a small table (`view`, the server's); any other notice is its text.
+function noticeBody(n) {
+  const v = n.view;
+  if (!v || !v.table) return n.body ? `<div class="body">${esc(n.body)}</div>` : '';
+  const rows = v.table.rows || [];
+  const table = rows.length ? `<div class="vtable"><table><thead><tr>${v.table.columns.map((h) => `<th>${esc(h)}</th>`).join('')}</tr></thead>
+    <tbody>${rows.map((row) => `<tr>${row.map((c) => `<td>${esc(c)}</td>`).join('')}</tr>`).join('')}</tbody></table></div>` : '';
+  const text = (t) => (t ? `<div class="line">${esc(t)}</div>` : '');
+  return `<div class="body view">${text(v.head)}${text(v.note)}${table}${text(v.foot)}</div>`;
+}
+
 function renderNotices() {
   const list = S.notices.filter((n) => n.seq > S.hiddenBefore && (S.filter === 'all' || n.level === S.filter)).reverse();
   const html = list.length ? list.map((n) => {
@@ -356,7 +367,7 @@ function renderNotices() {
     return `<article class="notice ${esc(n.level)}"><span class="tag ${esc(n.level)}">${esc(n.tag || '通知')}</span>
       <div class="title">${who && S.data.tokens.length > 1 ? `<span class="who">${esc(who)}</span>` : ''}${esc(n.title)}</div>
       <span class="when" title="${clock(n.time, true)}">${clock(n.time)}</span>
-      ${n.body ? `<div class="body">${esc(n.body)}</div>` : ''}</article>`;
+      ${noticeBody(n)}</article>`;
   }).join('') : `<div class="card empty">${S.filter === 'all' ? '还没有通知' : '没有这一类的通知'}</div>`;
   if ($('notice-list').dataset.html !== html) { $('notice-list').innerHTML = html; $('notice-list').dataset.html = html; }
   if (S.notices.length) { S.seenNotices = S.notices[S.notices.length - 1].seq; store.set('seenNotices', S.seenNotices); }
