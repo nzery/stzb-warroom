@@ -169,9 +169,10 @@ nav { display: grid; gap: 4px; }
 .notice .body { grid-column: 2 / 4; color: #c4cdc3; white-space: pre-wrap; line-height: 1.65; font-size: 13px; }
 .notice .body.view { white-space: normal; }
 .notice .body.view .line { white-space: pre-wrap; }
-.notice .body.view .vtable { margin: 6px 0; max-width: 640px; }
-.notice .body.view .vtable td, .notice .body.view .vtable th { padding: 4px 10px; }
-.notice .body.view .vtable td:nth-child(2) { text-align: center; }
+.notice .body.view .vtable { margin: 6px 0; overflow: hidden; }
+.notice .body.view .vtable table.fit { table-layout: fixed; width: 100%; }
+.notice .body.view .vtable td, .notice .body.view .vtable th { padding: 4px 10px; white-space: nowrap;
+  overflow: hidden; text-overflow: ellipsis; }
 .notice .who { color: var(--gold); font-weight: 400; margin-right: 6px; }
 
 /* accounts */

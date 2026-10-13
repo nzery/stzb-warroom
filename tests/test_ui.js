@@ -69,16 +69,17 @@ async function main() {
   for (const part of ['data-prole="8"', 'data-pfilter="kind" data-value="npc"', 'data-ppage="3"', 'lv good', '打不过：孙权', '第 2 / 3 页']) {
     assert.ok(drawn.includes(part), part);
   }
-  // an attack's lineup is a small table, its texts escaped; another notice is its body
-  const attack = vm.runInContext(`noticeBody({ body: '全文', view: { head: '22:49 到', note: '阵容（战报见过 6 次）',
-    foot: '守军 <曹彰队>', table: { columns: ['武将', '红', '战法'], rows: [['庞统(蜀步)', '4', '密谋定蜀']] } } })`, context);
-  for (const part of ['<th>武将</th>', '<td>庞统(蜀步)</td>', '22:49 到', '守军 &lt;曹彰队&gt;']) assert.ok(attack.includes(part), part);
-  assert.ok(!attack.includes('全文'));
+  // enemy armies are a table, a row an army, each row on one line; texts escaped; another notice is its body
   assert.ok(vm.runInContext(`noticeBody({ body: '<b>' })`, context).includes('&lt;b&gt;'));
+  assert.ok(vm.runInContext(`noticeBody({ body: '旧格式', view: { head: 'x' } })`, context).includes('旧格式'));
   const place = vm.runInContext(`noticeBody({ body: '全文', view: { blocks: [{ text: '1. 甲 驻守' },
     { table: { columns: ['武将', '红', '战法'], rows: [['曹操', '1', '<x>']] } }, { text: '2. 乙' }] } })`, context);
-  for (const part of ['1. 甲 驻守', '<td>曹操</td>', '&lt;x&gt;', '2. 乙']) assert.ok(place.includes(part), part);
+  for (const part of ['1. 甲 驻守', '>曹操</td>', '&lt;x&gt;', '2. 乙']) assert.ok(place.includes(part), part);
   assert.ok(!place.includes('全文'));
+  assert.ok(place.includes('<td title="&lt;x&gt;">') && place.includes('<colgroup>'), 'one line, the whole text on hover');
+  const widths = vm.runInContext(`noticeTable({ columns: ['玩家', '阵容'], rows: [['甲', '庞统 红4、程昱 红1、刘备 红5']] })`, context)
+    .match(/width:([\d.]+)%/g).map((w) => parseFloat(w.slice(6)));
+  assert.ok(widths[1] > widths[0] && Math.abs(widths[0] + widths[1] - 100) < 0.5, String(widths));
   console.log('UI startup and refresh regression checks passed');
 }
 main().catch((error) => { console.error(error); process.exitCode = 1; });

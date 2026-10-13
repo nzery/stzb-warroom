@@ -349,21 +349,26 @@ function renderOverview(d) {
     : '<div class="empty">还没有通知。登录游戏并上报后，敌袭等通知会显示在这里。</div>';
 }
 
-// Enemy lineups come as small tables (`view`, the server's): an attack's head, note, table and foot,
-// or a place's blocks of text and tables, one table an army. Any other notice is its text.
+// Enemy armies come as a small table (`view.blocks`, the server's: text and tables in order), a row an
+// army. Each row stays on one line within the notice: columns share the width by their longest text,
+// and a cell too long for its column ends in … with the whole text on hover. Any other notice is its text.
+const textWidth = (value) => [...String(value)].reduce((n, ch) => n + (ch.charCodeAt(0) > 0xff ? 2 : 1), 0);
 function noticeTable(t) {
   const rows = (t && t.rows) || [];
-  return rows.length ? `<div class="vtable"><table><thead><tr>${t.columns.map((h) => `<th>${esc(h)}</th>`).join('')}</tr></thead>
-    <tbody>${rows.map((row) => `<tr>${row.map((c) => `<td>${esc(c)}</td>`).join('')}</tr>`).join('')}</tbody></table></div>` : '';
+  if (!rows.length) return '';
+  // +3: a cell's padding, about three half-width characters
+  const widths = t.columns.map((h, i) => 3 + Math.min(40, Math.max(4, textWidth(h), ...rows.map((row) => textWidth(row[i] ?? '')))));
+  const total = widths.reduce((a, b) => a + b, 0);
+  const cols = widths.map((w) => `<col style="width:${(w * 100 / total).toFixed(1)}%">`).join('');
+  const cellOf = (c) => `<td title="${esc(c)}">${esc(c)}</td>`;
+  return `<div class="vtable"><table class="fit"><colgroup>${cols}</colgroup><thead><tr>${t.columns.map((h) => `<th>${esc(h)}</th>`).join('')}</tr></thead>
+    <tbody>${rows.map((row) => `<tr>${row.map(cellOf).join('')}</tr>`).join('')}</tbody></table></div>`;
 }
 function noticeBody(n) {
   const v = n.view;
+  if (!v || !Array.isArray(v.blocks)) return n.body ? `<div class="body">${esc(n.body)}</div>` : '';
   const text = (t) => (t ? `<div class="line">${esc(t)}</div>` : '');
-  if (v && Array.isArray(v.blocks)) {
-    return `<div class="body view">${v.blocks.map((b) => (b.table ? noticeTable(b.table) : text(b.text))).join('')}</div>`;
-  }
-  if (!v || !v.table) return n.body ? `<div class="body">${esc(n.body)}</div>` : '';
-  return `<div class="body view">${text(v.head)}${text(v.note)}${noticeTable(v.table)}${text(v.foot)}</div>`;
+  return `<div class="body view">${v.blocks.map((b) => (b.table ? noticeTable(b.table) : text(b.text))).join('')}</div>`;
 }
 
 function renderNotices() {
