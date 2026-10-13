@@ -349,15 +349,21 @@ function renderOverview(d) {
     : '<div class="empty">还没有通知。登录游戏并上报后，敌袭等通知会显示在这里。</div>';
 }
 
-// An attack's lineup comes as a small table (`view`, the server's); any other notice is its text.
+// Enemy lineups come as small tables (`view`, the server's): an attack's head, note, table and foot,
+// or a place's blocks of text and tables, one table an army. Any other notice is its text.
+function noticeTable(t) {
+  const rows = (t && t.rows) || [];
+  return rows.length ? `<div class="vtable"><table><thead><tr>${t.columns.map((h) => `<th>${esc(h)}</th>`).join('')}</tr></thead>
+    <tbody>${rows.map((row) => `<tr>${row.map((c) => `<td>${esc(c)}</td>`).join('')}</tr>`).join('')}</tbody></table></div>` : '';
+}
 function noticeBody(n) {
   const v = n.view;
-  if (!v || !v.table) return n.body ? `<div class="body">${esc(n.body)}</div>` : '';
-  const rows = v.table.rows || [];
-  const table = rows.length ? `<div class="vtable"><table><thead><tr>${v.table.columns.map((h) => `<th>${esc(h)}</th>`).join('')}</tr></thead>
-    <tbody>${rows.map((row) => `<tr>${row.map((c) => `<td>${esc(c)}</td>`).join('')}</tr>`).join('')}</tbody></table></div>` : '';
   const text = (t) => (t ? `<div class="line">${esc(t)}</div>` : '');
-  return `<div class="body view">${text(v.head)}${text(v.note)}${table}${text(v.foot)}</div>`;
+  if (v && Array.isArray(v.blocks)) {
+    return `<div class="body view">${v.blocks.map((b) => (b.table ? noticeTable(b.table) : text(b.text))).join('')}</div>`;
+  }
+  if (!v || !v.table) return n.body ? `<div class="body">${esc(n.body)}</div>` : '';
+  return `<div class="body view">${text(v.head)}${text(v.note)}${noticeTable(v.table)}${text(v.foot)}</div>`;
 }
 
 function renderNotices() {

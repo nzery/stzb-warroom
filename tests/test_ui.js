@@ -75,6 +75,10 @@ async function main() {
   for (const part of ['<th>武将</th>', '<td>庞统(蜀步)</td>', '22:49 到', '守军 &lt;曹彰队&gt;']) assert.ok(attack.includes(part), part);
   assert.ok(!attack.includes('全文'));
   assert.ok(vm.runInContext(`noticeBody({ body: '<b>' })`, context).includes('&lt;b&gt;'));
+  const place = vm.runInContext(`noticeBody({ body: '全文', view: { blocks: [{ text: '1. 甲 驻守' },
+    { table: { columns: ['武将', '红', '战法'], rows: [['曹操', '1', '<x>']] } }, { text: '2. 乙' }] } })`, context);
+  for (const part of ['1. 甲 驻守', '<td>曹操</td>', '&lt;x&gt;', '2. 乙']) assert.ok(place.includes(part), part);
+  assert.ok(!place.includes('全文'));
   console.log('UI startup and refresh regression checks passed');
 }
 main().catch((error) => { console.error(error); process.exitCode = 1; });
