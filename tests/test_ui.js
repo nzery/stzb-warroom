@@ -56,6 +56,19 @@ async function main() {
     assert.equal(html.includes('https://site.test/x.zip'), state === 'available' || state === 'failed', state);
     assert.ok(vm.runInContext(`UPDATE_STATE['${state}']('9.0.0')`, context).includes('9.0.0'));
   }
+  // a page about the account's own armies is drawn as the server gave it, its texts escaped
+  vm.runInContext(`S.data = { tokens: [{ state: 'ok', role: { id: 7, label: '甲 · 某盟' } }, { state: 'ok', role: { id: 8, label: '乙' } }] };
+    S.personal.battles = { query: {}, role: 7, data: { note: '说明', filters: [{ key: 'kind', label: '对手', value: 'pvp',
+      options: [{ value: 'pvp', label: '打玩家' }, { value: 'npc', label: '打 NPC' }] }],
+      cards: [{ title: '<曹操队>', subtitle: null, tags: [{ text: '可以出征', level: 'good' }], stats: [{ label: '交换比', value: '1.50', level: 'good' }],
+        lines: [{ text: '打不过：孙权', level: 'bad' }], table: { columns: ['时间', '结果'], rows: [['10-13 09:00', { text: '胜', level: 'good' }]] } }],
+      empty: null, page: { page: 2, pages: 3, total: 50 } } };
+    renderPersonal('battles');`, context);
+  const drawn = nodes.get('personal-battles').innerHTML;
+  assert.ok(drawn.includes('&lt;曹操队&gt;') && !drawn.includes('<曹操队>'), 'texts are escaped');
+  for (const part of ['data-prole="8"', 'data-pfilter="kind" data-value="npc"', 'data-ppage="3"', 'lv good', '打不过：孙权', '第 2 / 3 页']) {
+    assert.ok(drawn.includes(part), part);
+  }
   console.log('UI startup and refresh regression checks passed');
 }
 main().catch((error) => { console.error(error); process.exitCode = 1; });
