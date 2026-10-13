@@ -160,10 +160,11 @@ nav { display: grid; gap: 4px; }
 .check { display: inline-flex; align-items: center; gap: 6px; color: var(--muted); font-size: 13px; cursor: pointer; user-select: none; }
 .check input { accent-color: var(--gold); width: 15px; height: 15px; }
 .notice-list { display: grid; gap: 10px; }
-.notice { display: grid; grid-template-columns: auto 1fr auto; gap: 4px 12px; padding: 14px 18px; border-radius: var(--radius);
+.notice { display: grid; grid-template-columns: 76px 1fr auto; gap: 4px 12px; padding: 14px 18px; border-radius: var(--radius);
   background: var(--panel); border: 1px solid var(--line); border-left: 3px solid var(--blue); }
 .notice.alarm { border-left-color: var(--red); background: linear-gradient(90deg, #2a1d1b, var(--panel) 45%); }
 .notice.warn { border-left-color: var(--amber); }
+.notice > .tag { justify-self: stretch; text-align: center; padding: 1px 4px; }
 .notice .title { font-weight: 600; line-height: 22px; min-width: 0; }
 .notice .when { color: var(--faint); font-size: 12px; line-height: 22px; font-variant-numeric: tabular-nums; }
 .notice .body { grid-column: 2 / 4; color: #c4cdc3; white-space: pre-wrap; line-height: 1.65; font-size: 13px; }
