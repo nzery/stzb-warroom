@@ -4,11 +4,15 @@ It runs the same capture and upload as ``capture`` (runner.run_capture) and foll
 same notifications and prompts as ``notify``, for the tokens the player typed in (kept
 encrypted, vault.py). Everything shown about an account (its name, role, approval, Bark
 binding) comes from the server (``/v1/client/status``); Bark is bound there too. So does the
-notice settings page (``/v1/client/notice-prefs``): the player's choice is kept here and given
-to every token, so all the accounts of this computer follow the same settings.
+notice settings page (``/v1/client/notice-prefs``): the player's choice is given to every token,
+so all the accounts of this computer follow the same settings. The server keeps them: the
+minute's look only reads them, and a choice is sent only when the player makes it, to a token
+added here since, or again to a token it did not reach; a change made elsewhere (another
+computer with the same token) is followed, not undone.
 """
 
 import collections
+import hashlib
 import json
 import os
 import platform
@@ -34,6 +38,11 @@ HINTS = (  # what a player can do about a capture failure, from its text
     ("dumpcap not found", "没有找到 Wireshark：到“设置”里安装或手动选择 dumpcap.exe。"),
     ("dumpcap", "网络组件没能启动：确认装了 Wireshark 并勾选了 Npcap，装好后重启电脑再试。"),
 )
+
+
+def tag(token):
+    """What settings.json keeps to know a token again, never the token itself."""
+    return hashlib.sha256(token.encode()).hexdigest()[:16]
 
 
 def mask(token):
@@ -234,8 +243,11 @@ class App:
         if bad:
             raise ValueError("Token 应该是 sta_ 开头的 47 个字符（邀请码是 stj_ 开头的 26 个字符），请检查有没有复制完整")
         with self.lock:
+            added = [token for token in new if token not in self.tokens]
             self.tokens = list(dict.fromkeys(self.tokens + new))
             self._save_tokens()
+            if self._chosen_prefs() is not None and added:  # given this computer's settings
+                self._prefs_due(add=added)
         self.log(f"已添加 Token {', '.join(mask(token) for token in new)}")
         if joined:
             self.log(joined.get("text") or "已用邀请码加入")
@@ -287,6 +299,16 @@ class App:
         value = self.settings.get("notice_prefs")
         return value if isinstance(value, dict) else None
 
+    def _prefs_due(self, add=()):
+        """The tags of the tokens still to be given the player's choice (kept in settings.json)."""
+        due = self.settings.get("notice_prefs_due")
+        due = set(due) if isinstance(due, list) else set()
+        if add and not {tag(t) for t in add} <= due:
+            due |= {tag(t) for t in add}
+            self.settings["notice_prefs_due"] = sorted(due)
+            self._write_settings()
+        return due
+
     def _prefs_request(self, token, body=None):
         """The server's settings page for a token (saving `body` first); ValueError says why not."""
         try:
@@ -306,24 +328,33 @@ class App:
         return value
 
     def sync_notice_prefs(self):
-        """Read the settings page, and give the player's choice to any token that holds other values
-        (one added since, or changed elsewhere). Before any choice, the first token's are shown."""
-        chosen, page, errors = self._chosen_prefs(), None, []
+        """Read the settings page; send the player's choice only to the tokens still due it (added
+        here since, or not reached when it was made). The first token's settings are shown, and
+        kept as this computer's choice: one made elsewhere is followed, not undone."""
+        with self.lock:
+            chosen, due = self._chosen_prefs(), self._prefs_due()
+        page, errors, left = None, [], set()  # left: the tags still due after this look
         for token in list(self.tokens):
             if (self.accounts.get(token) or {}).get("state") == "invalid":
                 continue
+            send = chosen is not None and tag(token) in due
             try:
-                value = self._prefs_request(token)
-                if chosen is not None and any(key in value["values"] and value["values"][key] != wanted
-                                              for key, wanted in chosen.items()):
-                    value = self._prefs_request(token, {"values": chosen})
+                value = self._prefs_request(token, {"values": chosen} if send else None)
                 page = page or value
             except ValueError as exc:
                 errors.append(f"{mask(token)}：{exc}")
+                if send:
+                    left.add(tag(token))
         with self.lock:
+            if left != due:  # sent, or a token gone or no longer valid
+                self.settings["notice_prefs_due"] = sorted(left)
+                self._write_settings()
             if page is not None:
                 self.notice_prefs = {"note": page.get("note"), "groups": page.get("groups"),
                                      "values": page["values"], "error": None}
+                if not left and page["values"] != chosen:
+                    self.settings["notice_prefs"] = page["values"]
+                    self._write_settings()
             self.notice_prefs["error"] = "；".join(errors) or None
         self.touch()
 
@@ -334,7 +365,7 @@ class App:
         if not isinstance(key, str) or key not in values:
             raise ValueError("没有这个设置")
         values[key] = value
-        page, errors = None, []
+        page, errors, failed = None, [], []
         for token in list(self.tokens):
             if (self.accounts.get(token) or {}).get("state") == "invalid":
                 continue
@@ -342,10 +373,12 @@ class App:
                 page = self._prefs_request(token, {"values": values})
             except ValueError as exc:
                 errors.append(f"{mask(token)}：{exc}")
+                failed.append(token)
         if page is None:
             raise ValueError("没能保存：" + ("；".join(errors) or "没有可用的账号"))
         with self.lock:
             self.settings["notice_prefs"] = page["values"]
+            self.settings["notice_prefs_due"] = sorted({tag(t) for t in failed})  # retried each minute
             self._write_settings()
             self.notice_prefs = {"note": page.get("note"), "groups": page.get("groups"), "values": page["values"],
                                  "error": ("有账号没保存上，稍后自动重试：" + "；".join(errors)) if errors else None}

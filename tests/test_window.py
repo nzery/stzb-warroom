@@ -188,17 +188,38 @@ class AppTests(unittest.TestCase):
             app.set_notice_pref("mode", "sometimes")
         with self.assertRaisesRegex(ValueError, "没有这个设置"):
             app.set_notice_pref("nonsense", True)
-        # the choice is kept here: a token added later, or changed elsewhere, is given it
-        self.server.prefs[NEW]["skip_spartan"] = True
+        posts = lambda: [c[2] for c in self.server.calls if c[0] == "POST" and c[1] == "/v1/client/notice-prefs"]
+        # a token added here is given this computer's choice, once
         again = self.app()
         again.add_token(THIRD := "sta_" + "e" * 43)
         again.check_accounts()
-        self.assertFalse(self.server.prefs[NEW]["skip_spartan"])
         self.assertFalse(self.server.prefs[THIRD]["skip_spartan"])
-        posts = [c for c in self.server.calls if c[0] == "POST" and c[1] == "/v1/client/notice-prefs"]
-        again.check_accounts()  # nothing differs any more: nothing is sent
-        self.assertEqual(len([c for c in self.server.calls if c[0] == "POST" and c[1] == "/v1/client/notice-prefs"]),
-                         len(posts))
+        self.assertEqual(posts()[-1], THIRD)
+        sent = len(posts())
+        again.check_accounts()
+        self.assertEqual(len(posts()), sent)
+        # changed elsewhere (another computer with the same token): followed, never sent back
+        for token in (GOOD, NEW, THIRD):
+            self.server.prefs[token]["skip_spartan"] = True
+        again.check_accounts()
+        again.check_accounts()
+        self.assertEqual(len(posts()), sent)
+        self.assertTrue(self.server.prefs[NEW]["skip_spartan"])
+        self.assertTrue(again.snapshot()["notice_prefs"]["values"]["skip_spartan"])
+        self.assertTrue(self.app().settings["notice_prefs"]["skip_spartan"])  # the choice follows it too
+        # a token the save did not reach is given it at the next look, and only it
+        real = self.server.json
+        self.server.json = lambda path, token, body=None, timeout=45: (
+            (_ for _ in ()).throw(OSError("down")) if token == NEW and body else real(path, token, body, timeout))
+        again.set_notice_pref("mode", "active")
+        self.assertIn("没保存上", again.snapshot()["notice_prefs"]["error"])
+        self.server.json = real
+        sent = len(posts())
+        later = self.app()  # even after a restart
+        later.check_accounts()
+        self.assertEqual(posts()[sent:], [NEW])
+        self.assertEqual(self.server.prefs[NEW]["mode"], "active")
+        self.assertNotIn(NEW, json.dumps(later.settings))
 
     def test_bark_is_bound_through_the_server(self):
         app = self.app(saved=GOOD)
