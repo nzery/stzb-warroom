@@ -173,6 +173,7 @@ nav { display: grid; gap: 4px; }
 .notice .body.view .vtable table.fit { table-layout: fixed; width: 100%; }
 .notice .body.view .vtable td, .notice .body.view .vtable th { padding: 4px 10px; white-space: nowrap;
   overflow: hidden; text-overflow: ellipsis; }
+.notice .body.view .vtable td.key { color: var(--gold); font-weight: 700; font-size: 14px; }
 .notice .who { color: var(--gold); font-weight: 400; margin-right: 6px; }
 
 /* accounts */

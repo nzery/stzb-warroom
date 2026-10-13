@@ -73,7 +73,8 @@ async function main() {
   assert.ok(vm.runInContext(`noticeBody({ body: '<b>' })`, context).includes('&lt;b&gt;'));
   assert.ok(vm.runInContext(`noticeBody({ body: '旧格式', view: { head: 'x' } })`, context).includes('旧格式'));
   const place = vm.runInContext(`noticeBody({ body: '全文', view: { blocks: [{ text: '1. 甲 驻守' },
-    { table: { columns: ['武将', '红', '战法'], rows: [['曹操', '1', '<x>']] } }, { text: '2. 乙' }] } })`, context);
+    { table: { columns: ['阵容', '玩家', '战法'], rows: [['曹操', '1', '<x>']], key: 0 } }, { text: '2. 乙' }] } })`, context);
+  assert.ok(place.includes('class="key">曹操</td>') && !place.includes('class="key">1<'), 'the key column stands out');
   for (const part of ['1. 甲 驻守', '>曹操</td>', '&lt;x&gt;', '2. 乙']) assert.ok(place.includes(part), part);
   assert.ok(!place.includes('全文'));
   assert.ok(place.includes('<td title="&lt;x&gt;">') && place.includes('<colgroup>'), 'one line, the whole text on hover');

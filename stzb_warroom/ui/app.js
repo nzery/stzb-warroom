@@ -351,7 +351,8 @@ function renderOverview(d) {
 
 // Enemy armies come as a small table (`view.blocks`, the server's: text and tables in order), a row an
 // army. Each row stays on one line within the notice: columns share the width by their longest text,
-// and a cell too long for its column ends in … with the whole text on hover. Any other notice is its text.
+// and a cell too long for its column ends in … with the whole text on hover. The table's `key` column (the
+// enemy lineup) stands out. Any other notice is its text.
 const textWidth = (value) => [...String(value)].reduce((n, ch) => n + (ch.charCodeAt(0) > 0xff ? 2 : 1), 0);
 function noticeTable(t) {
   const rows = (t && t.rows) || [];
@@ -360,7 +361,7 @@ function noticeTable(t) {
   const widths = t.columns.map((h, i) => 3 + Math.min(40, Math.max(4, textWidth(h), ...rows.map((row) => textWidth(row[i] ?? '')))));
   const total = widths.reduce((a, b) => a + b, 0);
   const cols = widths.map((w) => `<col style="width:${(w * 100 / total).toFixed(1)}%">`).join('');
-  const cellOf = (c) => `<td title="${esc(c)}">${esc(c)}</td>`;
+  const cellOf = (c, i) => `<td title="${esc(c)}"${i === t.key ? ' class="key"' : ''}>${esc(c)}</td>`;
   return `<div class="vtable"><table class="fit"><colgroup>${cols}</colgroup><thead><tr>${t.columns.map((h) => `<th>${esc(h)}</th>`).join('')}</tr></thead>
     <tbody>${rows.map((row) => `<tr>${row.map(cellOf).join('')}</tr>`).join('')}</tbody></table></div>`;
 }
