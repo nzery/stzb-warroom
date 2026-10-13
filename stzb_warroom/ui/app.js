@@ -17,6 +17,10 @@ const ICONS = {
   clock: '<circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/>',
   sliders: '<path d="M4 6h10M18 6h2M4 12h4M12 12h8M4 18h12"/><circle cx="16" cy="6" r="2"/><circle cx="10" cy="12" r="2"/><circle cx="18" cy="18" r="2"/>',
   question: '<circle cx="12" cy="12" r="9"/><path d="M9.5 9.5a2.5 2.5 0 1 1 3.5 2.3c-.6.3-1 .8-1 1.5V14M12 17v.5"/>',
+  shield: '<path d="M12 3 4 6v6c0 4.5 3.4 8 8 9 4.6-1 8-4.5 8-9V6z"/><path d="M9 12l2 2 4-4"/>',
+  swords: '<path d="M14.5 17.5 3 6V3h3l11.5 11.5"/><path d="M13 19l6-6M16 16l4 4M19 21l2-2"/><path d="M9.5 6.5 6 3"/>',
+  target: '<circle cx="12" cy="12" r="9"/><circle cx="12" cy="12" r="5"/><circle cx="12" cy="12" r="1"/>',
+  refresh: '<path d="M20 11a8 8 0 1 0-2.3 5.7"/><path d="M20 4v7h-7"/>',
 };
 const icon = (name) => `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">${ICONS[name] || ''}</svg>`;
 const $ = (id) => document.getElementById(id);
@@ -29,6 +33,9 @@ const store = {
 const PAGES = {
   overview: ['概览', '上报游戏数据，接收战局通知'],
   notices: ['通知', '服务器根据你的战局生成的通知'],
+  teams: ['我的队伍', '你每套配置的战绩，打得过谁、打不过谁'],
+  battles: ['对局记录', '你的部队上场的每一场战报'],
+  rivals: ['对手分析', '和你交过手的敌方阵容，你每支队伍打它们的结果'],
   prefs: ['通知设置', '要哪些通知、过滤哪些敌军、推送哪些到手机'],
   accounts: ['账号与推送', 'Token、角色与 iPhone 推送（Bark）'],
   settings: ['设置', '启动方式、网络组件与数据'],
@@ -45,7 +52,11 @@ const S = {
   data: null, page: 'overview', filter: 'all', notices: [], logs: [], n: 0, l: 0,
   hiddenBefore: store.get('hiddenBefore', 0), dismissed: new Set(store.get('dismissed', [])),
   seenNotices: store.get('seenNotices', 0), loaded: false, accountsKey: '', prefsKey: '', busy: new Set(),
+  // The pages about the account's own armies, as the server gave them: {query, data, error, loading, key} each.
+  personal: { teams: { query: {} }, battles: { query: {} }, rivals: { query: {} } },
+  personalRole: store.get('personalRole', null),
 };
+const PERSONAL = new Set(['teams', 'battles', 'rivals']);
 
 // ---------------------------------------------------------------- server
 
@@ -208,6 +219,12 @@ function render() {
   if (S.page === 'notices') renderNotices();
   renderAccounts(d);
   renderPrefs(d);
+  if (PERSONAL.has(S.page)) {
+    // Opened before the accounts were known, or its account changed: read it now.
+    const view = S.personal[S.page], account = personalAccount();
+    if (account && !view.loading && !view.error && view.role !== account.a.role.id) loadPersonal(S.page);
+    else renderPersonal(S.page);
+  }
   renderSettings(d);
   renderChecks(d);
   $('about-version').textContent = d.app_version;
@@ -418,6 +435,105 @@ function renderPrefs(d) {
     + p.groups.map((g) => `<div class="card settings"><h3>${esc(g.title)}</h3>${g.items.map(item).join('')}</div>`).join('');
 }
 
+// ---------------------------------------------------------------- the account's own armies
+// Pages the server makes (texts, filters and all): cards of tags, figures, lines and a table.
+
+// The accounts these pages can be about: approved, with a role the server has seen.
+function personalAccounts() {
+  return (S.data?.tokens || []).map((a, index) => ({ a, index })).filter(({ a }) => a.state === 'ok' && a.role);
+}
+function personalAccount() {
+  const list = personalAccounts();
+  return list.find(({ a }) => a.role.id === S.personalRole) || list[0] || null;
+}
+
+async function loadPersonal(page) {
+  const view = S.personal[page];
+  const account = personalAccount();
+  if (!account) { view.data = null; view.error = null; renderPersonal(page); return; }
+  view.loading = true;
+  renderPersonal(page);
+  const role = account.a.role.id;
+  try {
+    const data = await act('personal', { index: account.index, page, query: view.query }, { quiet: true });
+    if (personalAccount()?.a.role.id !== role) return;  // another account was chosen meanwhile
+    view.data = data; view.error = null; view.role = role;
+  } catch (error) {
+    view.error = error.message || String(error);
+  } finally {
+    view.loading = false;
+    renderPersonal(page);
+  }
+}
+
+const level = (value) => (['good', 'bad', 'warn', 'muted'].includes(value) ? ` ${value}` : '');
+function cell(value) {
+  if (value && typeof value === 'object') return `<span class="lv${level(value.level)}">${esc(value.text)}</span>`;
+  return esc(value);
+}
+
+function viewCard(c) {
+  const tags = (c.tags || []).map((t) => `<span class="vtag${level(t.level)}">${esc(t.text)}</span>`).join('');
+  const stats = (c.stats || []).map((t) => `<div class="vstat"><span>${esc(t.label)}</span><b class="lv${level(t.level)}">${esc(t.value)}</b></div>`).join('');
+  const lines = (c.lines || []).map((l) => `<li class="lv${level(l.level)}">${esc(l.text)}</li>`).join('');
+  const table = c.table && c.table.rows?.length ? `<div class="vtable"><table><thead><tr>${c.table.columns.map((h) => `<th>${esc(h)}</th>`).join('')}</tr></thead>
+    <tbody>${c.table.rows.map((row) => `<tr>${row.map((v) => `<td>${cell(v)}</td>`).join('')}</tr>`).join('')}</tbody></table></div>` : '';
+  return `<div class="card vcard"><div class="vhead"><div class="vtitle"><h3>${esc(c.title)}</h3>${c.subtitle ? `<small>${esc(c.subtitle)}</small>` : ''}</div>
+    ${tags ? `<div class="vtags">${tags}</div>` : ''}</div>
+    ${stats ? `<div class="vstats">${stats}</div>` : ''}${lines ? `<ul class="vlines">${lines}</ul>` : ''}${table}</div>`;
+}
+
+function renderPersonal(page) {
+  const view = S.personal[page];
+  const accounts = personalAccounts();
+  const account = personalAccount();
+  const key = JSON.stringify([view.data, view.error, view.loading, accounts.map(({ a }) => [a.role.id, a.role.label]), account?.a.role.id]);
+  const box = $('personal-' + page);
+  if (!box || key === view.key) return;
+  view.key = key;
+  if (!account) {
+    box.innerHTML = `<div class="card empty">${(S.data?.tokens || []).length ? '还没有可以查看的账号：Token 审批通过、登录过一次游戏后就能看。' : '先到“账号与推送”添加账号。'}</div>`;
+    return;
+  }
+  const d = view.data;
+  const who = accounts.length > 1 ? `<div class="vfilter"><span>账号</span><div class="chips">${accounts.map(({ a }) =>
+    `<button class="chip${a.role.id === account.a.role.id ? ' active' : ''}" data-prole="${esc(a.role.id)}">${esc(roleName(a.role.label))}</button>`).join('')}</div></div>` : '';
+  const filters = (d?.filters || []).map((f) => `<div class="vfilter"><span>${esc(f.label)}</span><div class="chips">${f.options.map((o) =>
+    `<button class="chip${o.value === f.value ? ' active' : ''}" data-pfilter="${esc(f.key)}" data-value="${esc(o.value)}">${esc(o.label)}</button>`).join('')}</div></div>`).join('');
+  const refresh = `<button class="btn ghost small" data-prefresh="1"${view.loading ? ' disabled' : ''}>${view.loading ? '<span class="spin"></span>读取中' : `${icon('refresh').replace('<svg', '<svg width="14" height="14"')}刷新`}</button>`;
+  const toolbar = `<div class="vtoolbar"><div class="vfilters">${who}${filters}</div>${refresh}</div>`;
+  let body;
+  if (view.error) body = banner('warn', 'info', esc(view.error));
+  else if (!d) body = '<div class="card empty">正在读取…</div>';
+  else body = (d.note ? `<p class="muted prefs-note">${esc(d.note)}</p>` : '')
+    + (d.cards.length ? d.cards.map(viewCard).join('') : `<div class="card empty">${esc(d.empty || '没有内容')}</div>`)
+    + (d.page && d.page.pages > 1 ? `<div class="pager"><button class="btn ghost small" data-ppage="${d.page.page - 1}"${d.page.page <= 1 ? ' disabled' : ''}>上一页</button>
+      <span>第 ${d.page.page} / ${d.page.pages} 页，共 ${d.page.total} 条</span>
+      <button class="btn ghost small" data-ppage="${d.page.page + 1}"${d.page.page >= d.page.pages ? ' disabled' : ''}>下一页</button></div>` : '');
+  box.innerHTML = toolbar + body;
+}
+
+function personalClick(event) {
+  if (!PERSONAL.has(S.page)) return false;
+  const view = S.personal[S.page];
+  const role = event.target.closest('[data-prole]');
+  const filter = event.target.closest('[data-pfilter]');
+  const pager = event.target.closest('[data-ppage]');
+  if (role) {
+    S.personalRole = Number(role.dataset.prole);
+    store.set('personalRole', S.personalRole);
+    for (const name of PERSONAL) S.personal[name] = { query: {} };  // its teams are other teams
+  } else if (filter) {
+    view.query = { ...view.query, [filter.dataset.pfilter]: filter.dataset.value, page: 1 };
+  } else if (pager) {
+    view.query = { ...view.query, page: Number(pager.dataset.ppage) };
+  } else if (!event.target.closest('[data-prefresh]')) {
+    return false;
+  }
+  loadPersonal(S.page);
+  return true;
+}
+
 function renderSettings(d) {
   const s = d.settings;
   const autostart = $('set-autostart');
@@ -473,6 +589,7 @@ function show(page) {
   history.replaceState(null, '', '#' + page);
   render();
   if (page === 'diagnostics') $('log').scrollTop = $('log').scrollHeight;
+  if (PERSONAL.has(page)) loadPersonal(page);  // read again each time it is opened
 }
 
 const MESSAGES = {
@@ -485,6 +602,7 @@ document.addEventListener('click', async (event) => {
   if (nav) return show(nav.dataset.page);
   const goto = event.target.closest('[data-goto]');
   if (goto) return show(goto.dataset.goto);
+  if (personalClick(event)) return;
   if (event.target.closest('[data-guide]')) {
     const guide = document.querySelector('.guide');
     guide.open = true;

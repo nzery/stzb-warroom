@@ -18,6 +18,9 @@
     <nav id="nav">
       <button class="nav-item active" data-page="overview"><i data-icon="home"></i><span>概览</span></button>
       <button class="nav-item" data-page="notices"><i data-icon="bell"></i><span>通知</span><b class="badge" id="badge-notices"></b></button>
+      <button class="nav-item" data-page="teams"><i data-icon="shield"></i><span>我的队伍</span></button>
+      <button class="nav-item" data-page="battles"><i data-icon="swords"></i><span>对局记录</span></button>
+      <button class="nav-item" data-page="rivals"><i data-icon="target"></i><span>对手分析</span></button>
       <button class="nav-item" data-page="prefs"><i data-icon="sliders"></i><span>通知设置</span></button>
       <button class="nav-item" data-page="accounts"><i data-icon="user"></i><span>账号与推送</span><b class="badge alert" id="badge-accounts"></b></button>
       <button class="nav-item" data-page="settings"><i data-icon="gear"></i><span>设置</span></button>
@@ -83,6 +86,10 @@
       </div>
       <div id="notice-list" class="notice-list"></div>
     </section>
+
+    <section class="page" id="page-teams"><div id="personal-teams"></div></section>
+    <section class="page" id="page-battles"><div id="personal-battles"></div></section>
+    <section class="page" id="page-rivals"><div id="personal-rivals"></div></section>
 
     <section class="page" id="page-prefs">
       <div id="prefs"></div>

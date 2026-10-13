@@ -9,6 +9,10 @@ so all the accounts of this computer follow the same settings. The server keeps 
 minute's look only reads them, and a choice is sent only when the player makes it, to a token
 added here since, or again to a token it did not reach; a change made elsewhere (another
 computer with the same token) is followed, not undone.
+
+The pages about an account's own armies (我的队伍, 对局记录, 对手分析) are the server's too
+(``/v1/client/personal/<page>``): asked for when the player opens one, passed to the window
+as they come, the page's filters and page number passed along unread.
 """
 
 import collections
@@ -23,6 +27,7 @@ import zipfile
 from datetime import datetime
 from pathlib import Path
 from urllib.error import HTTPError
+from urllib.parse import urlencode
 
 from . import __version__, notify, update as updates, vault, winsys
 from .api import client_tokens, invite_code, site
@@ -31,6 +36,8 @@ from .runner import run_capture
 
 ACCOUNT_EVERY = 60  # seconds between two looks at the accounts' status
 PREFS = "/v1/client/notice-prefs"
+PERSONAL = "/v1/client/personal/"
+PERSONAL_PAGES = ("teams", "battles", "rivals")
 UPDATE_EVERY = 6 * 3600
 HINTS = (  # what a player can do about a capture failure, from its text
     ("another capture process", "已经有一个程序在上报（可能是另一个窗口），先关掉它。"),
@@ -413,6 +420,35 @@ class App:
 
     def bark_test(self, index):
         return self._bark("POST", "/v1/client/bark/test", index, {})
+
+    # the account's own armies -------------------------------------------------------
+
+    def personal(self, index, page, query=None):
+        """One of the server's pages about the account's own armies, as it made it. `query`: the
+        page's filters and page number ({name: text or number}), sent along as they are."""
+        token = self._token(index)
+        if page not in PERSONAL_PAGES:
+            raise ValueError("没有这个页面")
+        query = {str(key)[:20]: str(value)[:40] for key, value in (query or {}).items()
+                 if isinstance(value, (str, int)) and not isinstance(value, bool)} if isinstance(query, dict) else {}
+        path = PERSONAL + page + ("?" + urlencode(sorted(query.items())[:10]) if query else "")
+        try:
+            value = self.server.json(path, token, timeout=30)
+        except HTTPError as exc:
+            if exc.code == 404:
+                raise ValueError("服务器还不支持这个页面")
+            if exc.code == 403:
+                raise ValueError("这个账号还没审批，或还没登录过游戏")
+            try:
+                message = json.loads(exc.read() or b"{}").get("error")
+            except (OSError, ValueError):
+                message = None
+            raise ValueError(message or f"服务器返回 HTTP {exc.code}")
+        except OSError as exc:
+            raise ValueError(f"连不上服务器：{exc}")
+        if not isinstance(value, dict):
+            raise ValueError("服务器的回复不对")
+        return value
 
     # notifications and prompts ------------------------------------------------------
 

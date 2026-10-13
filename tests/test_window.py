@@ -51,6 +51,11 @@ class FakeServer:
                     raise HTTPError(path, 400, "bad", {}, io.BytesIO('{"error": "提醒方式 的取值不对"}'.encode()))
                 values.update(body["values"])
             return {"note": "说明", "groups": [{"title": "敌情", "items": []}], "values": dict(values)}
+        if path.startswith("/v1/client/personal/"):
+            self.calls.append(("GET", path, token, None))
+            if token == NEW:
+                raise HTTPError(path, 403, "forbidden", {}, io.BytesIO(b'{"error": "account not bound to token"}'))
+            return {"note": "说明", "filters": [], "cards": [{"title": "曹操队"}], "empty": None, "page": None}
         if token == NEW:
             return {"name": "n", "approved": False, "role": None, "bark": {"bound": False}}
         if token == TAKEN:
@@ -220,6 +225,20 @@ class AppTests(unittest.TestCase):
         self.assertEqual(posts()[sent:], [NEW])
         self.assertEqual(self.server.prefs[NEW]["mode"], "active")
         self.assertNotIn(NEW, json.dumps(later.settings))
+
+    def test_the_pages_about_own_armies_are_the_servers(self):
+        app = self.app(saved=f"{GOOD},{NEW}")
+        page = app.personal(0, "battles", {"team": "ab12", "page": 2, "x": True, "y": None})
+        self.assertEqual(page["cards"], [{"title": "曹操队"}])
+        self.assertEqual(self.server.calls[-1][:3], ("GET", "/v1/client/personal/battles?page=2&team=ab12", GOOD))
+        app.personal(0, "teams")
+        self.assertEqual(self.server.calls[-1][1], "/v1/client/personal/teams")
+        with self.assertRaisesRegex(ValueError, "没有这个页面"):
+            app.personal(0, "../admin/tokens")
+        with self.assertRaisesRegex(ValueError, "还没审批"):
+            app.personal(1, "teams")
+        with self.assertRaisesRegex(ValueError, "没有这个账号"):
+            app.personal(5, "teams")
 
     def test_bark_is_bound_through_the_server(self):
         app = self.app(saved=GOOD)

@@ -212,7 +212,7 @@ class Window(ThreadingHTTPServer):
     def act(self, action, body):
         app = self.app
         index = body.get("index")
-        if action in ("remove_token", "bark_bind", "bark_unbind", "bark_test") and type(index) is not int:
+        if action in ("remove_token", "bark_bind", "bark_unbind", "bark_test", "personal") and type(index) is not int:
             raise ValueError("没有这个账号")
         actions = {
             "start": app.start,
@@ -228,6 +228,7 @@ class Window(ThreadingHTTPServer):
             "bark_test": lambda: app.bark_test(int(index)),
             "set_setting": lambda: app.set_setting(body.get("name"), body.get("value")),
             "set_notice_pref": lambda: app.set_notice_pref(body.get("key"), body.get("value")),
+            "personal": lambda: app.personal(int(index), body.get("page"), body.get("query")),
             "pick_dumpcap": app.pick_dumpcap,
             "forget_dumpcap": app.forget_dumpcap,
             "open_folder": lambda: winsys.open_folder(app.state_dir),
