@@ -23,6 +23,7 @@ import ssl
 import struct
 import threading
 import time
+import uuid
 from urllib.parse import urlsplit
 
 from .capture import GAME_PORT
@@ -39,6 +40,10 @@ MAX_PIPES = 8
 BLOCK_SECONDS = 600
 CONTROL_TIMEOUT = 90  # the relay pings every 25 s
 NAT64 = ipaddress.ip_network("64:ff9b::/96")
+# This run of the program: a relay lets one computer at a time serve a token's phone, and knows
+# this one by it when it reconnects (another computer gets 409 until this one is gone).
+INSTANCE = uuid.uuid4().hex
+BUSY_WAIT = 60  # seconds between two tries while another computer serves the phone
 
 
 class Refused(Exception):
@@ -247,8 +252,8 @@ class GameCheck:
 
 class Exit:
     """Keeps the connection to one relay; makes the game connections it asks for. `state` is
-    what the window shows: connecting, online, refused (the tokens are not allowed there),
-    unreachable or stopped."""
+    what the window shows: connecting, online, busy (another computer serves the phone now),
+    refused (the tokens are not allowed there), unreachable or stopped."""
 
     def __init__(self, server, tokens, log=None, enforce_game=True):
         self.origin = server.rstrip("/")
@@ -271,7 +276,8 @@ class Exit:
         wait = 2
         while not self.stop.is_set():
             try:
-                self.control = WebSocket(self.origin + "/relay/agent", {"Authorization": self.auth})
+                self.control = WebSocket(self.origin + "/relay/agent", {"Authorization": self.auth,
+                                                                        "X-Relay-Agent": INSTANCE})
                 self.control.sock.settimeout(CONTROL_TIMEOUT)
                 self._state("online")
                 self.log(event="relay_connected", relay=self.origin)
@@ -285,6 +291,11 @@ class Exit:
                     self._state("connecting")
                     self.log(event="relay_disconnected", relay=self.origin)
             except Refused as exc:
+                if exc.status == 409:
+                    self._state("busy")
+                    self.log(event="relay_busy", relay=self.origin)
+                    self.stop.wait(BUSY_WAIT)
+                    continue
                 self._state("refused")
                 self.log(event="relay_refused", relay=self.origin, status=exc.status)
                 wait = 300 if exc.status == 401 else wait
