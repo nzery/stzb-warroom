@@ -344,7 +344,8 @@ function renderOverview(d) {
     return `<div class="mini"><span class="main-text">${esc(a.role ? roleName(a.role.label) : a.name || a.token)}</span>${bark}<span class="state ${cls}">${label}</span></div>`;
   }).join('') : '<div class="empty">还没有账号</div>';
 
-  const recent = S.notices.filter((n) => n.seq > S.hiddenBefore).slice(-6).reverse();
+  const gone = withdrawnArmies();
+  const recent = S.notices.filter((n) => n.seq > S.hiddenBefore && !withdrawnAll(n, gone)).slice(-6).reverse();
   $('ov-notices').innerHTML = recent.length ? recent.map((n) => `<div class="mini"><span class="tag ${esc(n.level)}">${esc(n.tag || '通知')}</span><span class="main-text">${esc(n.title)}</span><span class="time">${clock(n.time)}</span></div>`).join('')
     : '<div class="empty">还没有通知。登录游戏并上报后，敌袭等通知会显示在这里。</div>';
 }
@@ -377,10 +378,21 @@ function noticeBody(n) {
 
 // A notice of raids still to come (`arrivals`, the server's, epoch seconds ascending) stays above
 // the others, the soonest first, counting down to its next one; once they have all landed it goes
-// back among the others by when it came.
-function nextArrival(n) {
+// back among the others by when it came. Armies a recall notice names (`withdrawn`) went back: they
+// are not counted down to, and a notice of `withdrawn_drops` (one attack) all of whose armies did goes.
+function withdrawnArmies() {
+  return new Set(S.notices.flatMap((n) => (Array.isArray(n.withdrawn) ? n.withdrawn : [])));
+}
+
+function nextArrival(n, gone) {
   const now = Date.now() / 1000;
-  return Array.isArray(n.arrivals) ? n.arrivals.find((t) => typeof t === 'number' && t > now) : undefined;
+  if (!Array.isArray(n.arrivals)) return undefined;
+  const armies = Array.isArray(n.armies) ? n.armies : [];
+  return n.arrivals.find((t, i) => typeof t === 'number' && t > now && !gone.has(armies[i]));
+}
+
+function withdrawnAll(n, gone) {
+  return n.withdrawn_drops && Array.isArray(n.armies) && n.armies.length > 0 && n.armies.every((a) => gone.has(a));
 }
 
 function left(at) {
@@ -400,9 +412,11 @@ function tickCountdowns() {
 setInterval(tickCountdowns, 1000);
 
 function renderNotices() {
-  const list = S.notices.filter((n) => n.seq > S.hiddenBefore && (S.filter === 'all' || n.level === S.filter)).reverse();
-  const coming = list.map((n) => [n, nextArrival(n)]).filter(([, at]) => at).sort((a, b) => a[1] - b[1]);
-  const rest = list.filter((n) => !nextArrival(n));
+  const gone = withdrawnArmies();
+  const list = S.notices.filter((n) => n.seq > S.hiddenBefore && (S.filter === 'all' || n.level === S.filter)
+    && !withdrawnAll(n, gone)).reverse();
+  const coming = list.map((n) => [n, nextArrival(n, gone)]).filter(([, at]) => at).sort((a, b) => a[1] - b[1]);
+  const rest = list.filter((n) => !nextArrival(n, gone));
   const card = (n, at) => {
     const who = roleOf(n);
     const when = at ? `<span class="when countdown" data-at="${at}" title="${clock(at)} 到"></span>`
