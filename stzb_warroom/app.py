@@ -630,7 +630,8 @@ class App:
         for number, account in enumerate(snapshot["tokens"], 1):
             role = (account.get("role") or {}).get("label") or "-"
             bark = account.get("bark") or {}
-            lines.append(f"账号 {number}：{account['state']} {role}；Bark {'已绑定' if bark.get('bound') else '未绑定'}"
+            waits = (account.get("pending") or {}).get("label")
+            lines.append(f"账号 {number}：{account['state']}{f'（{waits}）' if waits else ''} {role}；Bark {'已绑定' if bark.get('bound') else '未绑定'}"
                          + (f"（{bark['error']}）" if bark.get("error") else ""))
         lines.append("最近日志：")
         lines += [f"  {datetime.fromtimestamp(line['time']):%H:%M:%S} {line['text']}" for line in snapshot["logs"][-60:]]

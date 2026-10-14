@@ -47,6 +47,11 @@ const ACCOUNT_STATES = {
   problem: ['数据没有上传', 'err'],
   invalid: ['Token 无效', 'err'], offline: ['连不上服务器', ''], checking: ['检查中', ''],
 };
+// What the server says an invited account waits for comes first (a public domain's account is
+// approved by its first login, nobody approves it).
+const accountState = (a) => (a.state === 'pending' && a.pending
+  ? [a.pending.label || '等待核验', 'warn'] : ACCOUNT_STATES[a.state] || ['', '']);
+const LOGIN_STEPS = '请在本程序点「开始上报」，再进入游戏；如果已经在游戏里，退出后重新登录一次';
 
 const S = {
   data: null, page: 'overview', filter: 'all', notices: [], logs: [], n: 0, l: 0,
@@ -339,7 +344,7 @@ function renderOverview(d) {
   $('m-conn').textContent = s.connections;
 
   $('ov-accounts').innerHTML = d.tokens.length ? d.tokens.map((a) => {
-    const [label, cls] = ACCOUNT_STATES[a.state] || ['', ''];
+    const [label, cls] = accountState(a);
     const bark = a.bark ? (a.bark.bound ? '<span class="tag">Bark 已绑定</span>' : '<span class="tag warn">Bark 未绑定</span>') : '';
     return `<div class="mini"><span class="main-text">${esc(a.role ? roleName(a.role.label) : a.name || a.token)}</span>${bark}<span class="state ${cls}">${label}</span></div>`;
   }).join('') : '<div class="empty">还没有账号</div>';
@@ -443,7 +448,7 @@ function renderAccounts(d) {
   const typed = {};
   document.querySelectorAll('[data-bark-input]').forEach((input) => { typed[input.dataset.barkInput] = input.value; });
   $('account-list').innerHTML = d.tokens.map((a, index) => {
-    const [label, cls] = a.state === 'pending' && a.pending ? ['等待核验', 'warn'] : ACCOUNT_STATES[a.state] || ['', ''];
+    const [label, cls] = accountState(a);
     const role = a.role ? a.role.label : '';
     const title = a.state === 'invalid' ? '无效的 Token' : a.role ? roleName(role) : (a.name || '新账号');
     let problem = '';
@@ -451,7 +456,7 @@ function renderAccounts(d) {
     else if (a.state === 'invalid') problem = '<div class="account-problem">服务器不认这个 Token（可能复制错了，或已被管理员停用）。这个账号的数据不会上传。请找管理员要正确的 Token，删掉这个后重新添加。</div>';
     else if (a.state === 'pending' && a.pending) problem = `<div class="account-problem warn"><b>${esc(a.pending.title)}</b><br>${esc(a.pending.text)}</div>`;
     else if (a.state === 'pending') problem = '<div class="account-problem warn">这个 Token 需要管理员审批，审批后才能看到这个账号的通知和推送。可以先联系管理员。</div>';
-    else if (a.state === 'no_role') problem = '<div class="account-problem warn">还没有收到这个 Token 的游戏登录。保持程序运行，登录一次游戏就好。</div>';
+    else if (a.state === 'no_role') problem = '<div class="account-problem warn">还没收到这个账号的游戏登录。' + LOGIN_STEPS + '。</div>';
     else if (a.state === 'offline') problem = `<div class="account-problem warn">暂时连不上服务器（${esc(a.error || '')}），稍后会自动重试。</div>`;
     // The server gives the link of the account's website once the account is set up.
     const site = a.state !== 'invalid' && /^https:\/\//.test(a.site || '') ? `<div class="bark"><div class="label"><b>战局网站</b>网页</div>
@@ -628,7 +633,7 @@ function renderChecks(d) {
   const offline = accounts.length && accounts.every((a) => a.state === 'offline');
   const rows = [
     row(!offline && accounts.some((a) => a.state !== 'checking') ? true : offline ? false : null, '服务器', offline ? `连不上 ${d.server}` : d.server),
-    row(accounts.length ? accounts.every((a) => a.state === 'ok') : false, '账号', accounts.length ? accounts.map((a) => `${a.token} ${(ACCOUNT_STATES[a.state] || [''])[0]}`).join('；') : '没有 Token'),
+    row(accounts.length ? accounts.every((a) => a.state === 'ok') : false, '账号', accounts.length ? accounts.map((a) => `${a.token} ${accountState(a)[0]}`).join('；') : '没有 Token'),
     row(Boolean(d.settings.dumpcap), '网络组件', d.settings.dumpcap || '没有找到 dumpcap.exe（Wireshark）'),
     row(d.capture.state === 'running' ? true : d.capture.state === 'error' ? false : null, '上报', d.capture.state === 'running' ? '运行中' : d.capture.error || '未运行'),
     row(d.stats.connections > 0 ? true : null, '游戏连接', d.stats.connections > 0 ? `${d.stats.connections} 条` : '最近 5 分钟没有看到游戏连接（没在玩游戏时正常）'),
