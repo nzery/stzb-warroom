@@ -127,6 +127,15 @@ class AppTests(unittest.TestCase):
             app.add_token("stj_" + "x" * 22)
         self.assertEqual(app.tokens, [NEW])
 
+    def test_the_page_settings_outlive_a_restart(self):
+        # 2026-10-14 user: the page's own storage is emptied at each start (another port).
+        app = self.app()
+        app.set_ui("sound", False)
+        app.set_ui("dismissed", ["a"])
+        self.assertEqual(self.app().settings["ui"], {"sound": False, "dismissed": ["a"]})
+        with self.assertRaises(ValueError):
+            app.set_ui("", 1)
+
     def test_background_default_and_saved_choice(self):
         app = self.app()
         self.assertTrue(app.snapshot()["settings"]["keep_running"])
@@ -269,7 +278,10 @@ class AppTests(unittest.TestCase):
         self.assertIsNone(app.snapshot()["updated"])  # still the old version
         # the first start of that version says what it brought
         with unittest.mock.patch.object(appmod, "__version__", "9.0.0"):
-            self.assertEqual(self.app().snapshot()["updated"], {"version": "9.0.0", "notes": "本次更新……"})
+            first = self.app()
+            self.assertEqual(first.snapshot()["updated"], {"version": "9.0.0", "notes": "本次更新……"})
+            self.assertEqual(first.snapshot()["updated"], {"version": "9.0.0", "notes": "本次更新……"})  # that run
+            self.assertIsNone(self.app().snapshot()["updated"])  # once (2026-10-14 user): not at the next start
         with unittest.mock.patch.object(appmod, "__version__", "9.0.1"):
             self.assertIsNone(self.app().snapshot()["updated"])
         # updated by a version that kept nothing: the newest release's notes, once it is this version
@@ -355,6 +367,11 @@ class PageServerTests(unittest.TestCase):
         status, _, data = self.request("GET", "/api/state", self.cookie())
         self.assertEqual(status, 200)
         self.assertEqual(json.loads(data)["tokens"][0]["token"], "sta_…aaaa")
+        # the page's settings, kept by the program
+        self.assertEqual(self.request("GET", "/api/ui")[0], 403)
+        self.app.set_ui("sound", False)
+        status, _, data = self.request("GET", "/api/ui", self.cookie())
+        self.assertEqual((status, json.loads(data)), (200, {"sound": False}))
 
     def test_other_hosts_and_sites_are_refused(self):
         self.assertEqual(self.request("GET", "/", {"Host": "evil.test", **self.cookie()})[0], 403)

@@ -101,6 +101,8 @@ class Handler(BaseHTTPRequestHandler):
             return self.events(parse_qs(url.query).get("page", [""])[0] or secrets.token_hex(8))
         if url.path == "/api/ping":
             return self.send(200, {"ok": True})
+        if url.path == "/api/ui":  # the page's settings, read as it loads
+            return self.send(200, dict(self.server.app.settings.get("ui") or {}))
         self.send(404, {"error": "not found"})
 
     def static(self, name):
@@ -227,6 +229,7 @@ class Window(ThreadingHTTPServer):
             "bark_unbind": lambda: app.bark_unbind(int(index)),
             "bark_test": lambda: app.bark_test(int(index)),
             "set_setting": lambda: app.set_setting(body.get("name"), body.get("value")),
+            "set_ui": lambda: app.set_ui(body.get("key"), body.get("value")),
             "set_notice_pref": lambda: app.set_notice_pref(body.get("key"), body.get("value")),
             "personal": lambda: app.personal(int(index), body.get("page"), body.get("query")),
             "pick_dumpcap": app.pick_dumpcap,

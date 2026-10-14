@@ -25,9 +25,24 @@ const ICONS = {
 const icon = (name) => `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">${ICONS[name] || ''}</svg>`;
 const $ = (id) => document.getElementById(id);
 const esc = (value) => String(value ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+// The page's own settings (the sound, banners closed, the list cleared, …) are kept by the program:
+// the page's storage starts empty at each start, the program listening on another port.
+const saved = (() => {
+  try {
+    const request = new XMLHttpRequest();
+    request.open('GET', '/api/ui', false);  // before anything reads them
+    request.send();
+    return request.status === 200 ? JSON.parse(request.responseText) || {} : {};
+  } catch { return {}; }
+})();
 const store = {
-  get(key, fallback) { try { const v = localStorage.getItem(key); return v === null ? fallback : JSON.parse(v); } catch { return fallback; } },
-  set(key, value) { try { localStorage.setItem(key, JSON.stringify(value)); } catch { /* private mode */ } },
+  get(key, fallback) { return Object.prototype.hasOwnProperty.call(saved, key) ? saved[key] : fallback; },
+  set(key, value) {
+    if (JSON.stringify(saved[key]) === JSON.stringify(value)) return;
+    saved[key] = value;
+    fetch('/api/action', { method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ action: 'set_ui', key, value }) }).catch(() => {});
+  },
 };
 
 const PAGES = {
@@ -729,7 +744,6 @@ function show(page) {
   document.querySelectorAll('.page').forEach((p) => p.classList.toggle('active', p.id === 'page-' + page));
   $('page-title').textContent = PAGES[page][0];
   $('page-sub').textContent = PAGES[page][1];
-  store.set('page', page);
   history.replaceState(null, '', '#' + page);
   render();
   if (page === 'diagnostics') $('log').scrollTop = $('log').scrollHeight;

@@ -108,6 +108,7 @@ class App:
         self.quit = threading.Event()
         self.poke = threading.Event()  # look at the accounts now
         self.settings = self._read_settings()
+        self.updated = None  # what this version brought, in the run that shows it (_updated)
         # Only what the player added in the window; ST_CLIENT_TOKEN where there is no vault
         # (development off Windows). Nothing is saved until the player changes something.
         try:
@@ -185,11 +186,26 @@ class App:
         self.touch()
 
     def _updated(self):
-        """{"version", "notes"} when this is the version whose notes were kept before updating, else None."""
+        """{"version", "notes"} in the run of this version that first shows the notes kept before
+        updating (a page asks for them), else None; marked shown then, so later starts say nothing."""
         kept = self.settings.get("update_notes")
-        if isinstance(kept, dict) and kept.get("version") == __version__ and kept.get("notes"):
-            return {"version": kept["version"], "notes": str(kept["notes"])}
-        return None
+        # Said once (2026-10-14 user: it was said at every start).
+        if (self.updated is None and isinstance(kept, dict) and kept.get("version") == __version__
+                and kept.get("notes") and not kept.get("shown")):
+            self.updated = {"version": kept["version"], "notes": str(kept["notes"])}
+            kept["shown"] = True
+            self._write_settings()
+        return self.updated
+
+    def set_ui(self, key, value):
+        """A setting of the window's page (the sound, a closed banner, …). Kept here, not in the
+        page's own storage, which the program's new port at each start empties (2026-10-14 user:
+        what was new was said at every start)."""
+        if not isinstance(key, str) or not key or len(key) > 40 or len(json.dumps(value)) > 4000:
+            raise ValueError("bad setting")
+        with self.lock:
+            self.settings.setdefault("ui", {})[key] = value
+            self._write_settings()
 
     def _write_settings(self):
         self.settings_path.parent.mkdir(parents=True, exist_ok=True)
