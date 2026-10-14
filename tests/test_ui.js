@@ -79,11 +79,11 @@ async function main() {
   assert.ok(!place.includes('全文'));
   assert.ok(place.includes('<td title="&lt;x&gt;">') && place.includes('<colgroup>'), 'one line, the whole text on hover');
   const widths = vm.runInContext(`noticeTable({ columns: ['玩家', '阵容'], rows: [['甲', '庞统 红4、程昱 红1、刘备 红5']] })`, context)
-    .match(/width:([\d.]+)%/g).map((w) => parseFloat(w.slice(6)));
+    .match(/data-w="([\d.]+)"/g).map((w) => parseFloat(w.slice(8)));
   assert.ok(widths[1] > widths[0] && Math.abs(widths[0] + widths[1] - 100) < 0.5, String(widths));
   // the server's widths, the same for every notice so that their tables line up
   const fixed = vm.runInContext(`noticeTable({ columns: ['玩家', '阵容'], widths: [3, 1], rows: [['甲', '庞统/程昱/刘备']] })`, context)
-    .match(/width:([\d.]+)%/g).map((w) => parseFloat(w.slice(6)));
+    .match(/data-w="([\d.]+)"/g).map((w) => parseFloat(w.slice(8)));
   assert.deepEqual(fixed, [75, 25]);
   // when each army lands counts down in its row, not a line of its own
   const later = Math.floor(Date.now() / 1000) + 600;

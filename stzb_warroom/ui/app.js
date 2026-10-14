@@ -402,7 +402,8 @@ function noticeTable(t) {
   const given = Array.isArray(t.widths) && t.widths.length === t.columns.length && t.widths.every((w) => w > 0);
   const share = given ? t.widths : widths;
   const total = share.reduce((a, b) => a + b, 0);
-  const cols = share.map((w) => `<col style="width:${(w * 100 / total).toFixed(1)}%">`).join('');
+  // The page's CSP (style-src 'self') drops a style attribute: colWidths sets them from data-w.
+  const cols = share.map((w) => `<col data-w="${(w * 100 / total).toFixed(1)}">`).join('');
   const cd = t.countdown && Array.isArray(t.countdown.at) ? t.countdown : null;
   const cellOf = (c, i, r) => {
     const at = cd && i === cd.col ? cd.at[r] : null;
@@ -413,6 +414,10 @@ function noticeTable(t) {
   };
   return `<div class="vtable"><table class="fit"><colgroup>${cols}</colgroup><thead><tr>${t.columns.map((h) => `<th>${esc(h)}</th>`).join('')}</tr></thead>
     <tbody>${kept.map(([row, r]) => `<tr>${row.map((c, i) => cellOf(c, i, r)).join('')}</tr>`).join('')}</tbody></table></div>`;
+}
+// The columns' widths noticeTable gives as data-w, set through the DOM, which the CSP allows.
+function colWidths(root) {
+  for (const col of root.querySelectorAll('col[data-w]')) col.style.width = `${col.dataset.w}%`;
 }
 // A notice of tables whose rows have all landed has nothing left to tell.
 function landedAll(n) {
@@ -516,7 +521,9 @@ function renderNotices() {
       + ((pinned.length || coming.length) && rest.length ? '<div class="notice-group">其他通知</div>' : '')
       + rest.map((n) => card(n)).join('')
     : `<div class="card empty">${S.filter === 'all' ? '还没有通知' : '没有这一类的通知'}</div>`;
-  if ($('notice-list').dataset.html !== html) { $('notice-list').innerHTML = html; $('notice-list').dataset.html = html; }
+  if ($('notice-list').dataset.html !== html) {
+    $('notice-list').innerHTML = html; $('notice-list').dataset.html = html; colWidths($('notice-list'));
+  }
   tickCountdowns();
   if (S.notices.length) { S.seenNotices = S.notices[S.notices.length - 1].seq; store.set('seenNotices', S.seenNotices); }
 }
