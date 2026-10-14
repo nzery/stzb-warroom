@@ -40,6 +40,8 @@ MAX_PIPES = 8
 BLOCK_SECONDS = 600
 CONTROL_TIMEOUT = 90  # the relay pings every 25 s
 NAT64 = ipaddress.ip_network("64:ff9b::/96")
+SIX_TO_FOUR = ipaddress.ip_network("2002::/16")
+MAX_HANDLERS = 2 * MAX_PIPES  # orders being handled at once; more are dropped (a relay gone wrong)
 # This run of the program: a relay lets one computer at a time serve a token's phone, and knows
 # this one by it when it reconnects (another computer gets 409 until this one is gone).
 INSTANCE = uuid.uuid4().hex
@@ -59,10 +61,15 @@ def allowed_address(text, own=()):
     except ValueError:
         return False
     if address.version == 6:
+        # An IPv6 address carrying an IPv4 one is judged by the IPv4 one (NAT64, 6to4, Teredo).
         if address.ipv4_mapped:
             address = address.ipv4_mapped
         elif address in NAT64:
             address = ipaddress.IPv4Address(int(address) & 0xFFFFFFFF)
+        elif address in SIX_TO_FOUR:
+            address = address.sixtofour
+        elif address.teredo:
+            address = address.teredo[1]
     return address.is_global and not address.is_multicast and str(address) not in own
 
 
@@ -119,7 +126,10 @@ class WebSocket:
                     raise ConnectionError("no answer")
                 raw += data
             head, _sep, self.buffer = raw.partition(b"\r\n\r\n")
-            status = int(head.split(b" ", 2)[1])
+            try:
+                status = int(head.split(b" ", 2)[1])
+            except (IndexError, ValueError):
+                raise ConnectionError("not an HTTP answer") from None
             if status != 101:
                 raise Refused(status)
             expected = base64.b64encode(hashlib.sha1(key.encode("ascii") + GUID).digest()).decode("ascii")
@@ -263,6 +273,7 @@ class Exit:
         self.own = set()  # this computer's public address, as the relay saw it
         self.blocked = {}  # address -> monotonic time it may be tried again
         self.pipes = threading.BoundedSemaphore(MAX_PIPES)
+        self.handlers = threading.BoundedSemaphore(MAX_HANDLERS)
         self.open_pipes = 0
         self.stop = threading.Event()
         self.control = None
@@ -326,8 +337,19 @@ class Exit:
             self.own = {hello["ip"]}
         conn = message.get("open")
         if isinstance(conn, str) and len(conn) == 32 and all(c in "0123456789abcdef" for c in conn):
-            threading.Thread(target=self.open, args=(conn, message.get("host"), message.get("port")),
+            if not self.handlers.acquire(blocking=False):
+                self.log(event="open_refused", relay=self.origin, reason="too many orders")
+                return
+            threading.Thread(target=self._handled, args=(conn, message.get("host"), message.get("port")),
                              name="relay-pipe", daemon=True).start()
+
+    def _handled(self, conn, host, port):
+        try:
+            self.open(conn, host, port)
+        except Exception as exc:  # one order going wrong never takes the exit down
+            self.log(event="pipe_failed", relay=self.origin, error=f"{type(exc).__name__}: {exc}")
+        finally:
+            self.handlers.release()
 
     def refuse(self, conn, reason):
         self.log(event="open_refused", reason=reason)

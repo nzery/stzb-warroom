@@ -20,13 +20,15 @@ def client_frame(message_id, value, key=0x5A):
 
 class AddressTests(unittest.TestCase):
     def test_only_public_unicast(self):
-        for address in ("1.2.3.4", "2606:4700::1111", "::ffff:1.2.3.4", "64:ff9b::102:304"):
+        for address in ("1.2.3.4", "2606:4700::1111", "::ffff:1.2.3.4", "64:ff9b::102:304", "2002:102:304::1"):
             self.assertTrue(relay.allowed_address(address), address)
         for address in ("127.0.0.1", "10.0.0.8", "172.16.3.4", "192.168.1.1", "169.254.1.1",
                         "100.64.0.1",  # shared address space (carrier NAT, Tailscale)
                         "198.18.0.1", "0.0.0.0", "255.255.255.255", "224.0.0.1", "240.0.0.1",
                         "::1", "fe80::1", "fd00::1", "ff02::1", "::ffff:192.168.1.1",
                         "64:ff9b::a00:1",  # NAT64 of 10.0.0.1
+                        "2002:c0a8:101::1",  # 6to4 of 192.168.1.1
+                        "2001:0:4136:e378:8000:63bf:3f57:fefe",  # Teredo (its client 192.168.1.1)
                         "not an address", ""):
             self.assertFalse(relay.allowed_address(address), address)
 
@@ -97,6 +99,45 @@ class BusyTests(unittest.TestCase):
         self.assertEqual(logged[0]["event"], "relay_busy")
         self.assertEqual(calls[0]["X-Relay-Agent"], relay.INSTANCE)
         self.assertEqual(exit_.state, "stopped")
+
+
+class RobustnessTests(unittest.TestCase):
+    def test_a_garbled_answer_is_a_connection_error(self):
+        class Socket:
+            def __init__(self):
+                self.data = [b"HELLO\r\n\r\n"]
+
+            def sendall(self, data):
+                pass
+
+            def recv(self, size):
+                return self.data.pop(0) if self.data else b""
+
+            def close(self):
+                pass
+
+        with unittest.mock.patch("socket.create_connection", return_value=Socket()):
+            with self.assertRaises(ConnectionError):
+                relay.WebSocket("http://relay.example/relay/agent", {})
+
+    def test_orders_beyond_the_handlers_are_dropped(self):
+        exit_ = relay.Exit("https://relay.example", ["t"], log=lambda **fields: logged.append(fields))
+        logged, started = [], []
+        with unittest.mock.patch("threading.Thread") as thread:
+            thread.return_value.start = lambda: started.append(1)
+            for _ in range(relay.MAX_HANDLERS + 3):
+                exit_.handle(b'{"open": "' + b"a" * 32 + b'", "host": "h", "port": 8001}')
+        self.assertEqual(len(started), relay.MAX_HANDLERS)
+        self.assertEqual([f["reason"] for f in logged], ["too many orders"] * 3)
+
+    def test_an_order_going_wrong_does_not_stop_the_exit(self):
+        exit_ = relay.Exit("https://relay.example", ["t"], log=lambda **fields: logged.append(fields))
+        logged = []
+        exit_.handlers.acquire()
+        with unittest.mock.patch.object(exit_, "open", side_effect=ValueError("boom")):
+            exit_._handled("a" * 32, "h", 8001)
+        self.assertEqual(logged[-1]["event"], "pipe_failed")
+        self.assertTrue(exit_.handlers.acquire(blocking=False))  # released
 
 
 class GameCheckTests(unittest.TestCase):
