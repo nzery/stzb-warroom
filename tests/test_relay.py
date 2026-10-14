@@ -78,6 +78,27 @@ class OpenTests(unittest.TestCase):
         self.assertEqual(self.exit.own, {"1.2.3.4"})
 
 
+class BusyTests(unittest.TestCase):
+    def test_another_computer_serving_the_phone_means_waiting(self):
+        exit_ = relay.Exit("https://relay.example", ["t"], log=lambda **fields: logged.append(fields))
+        logged, calls = [], []
+
+        def refuse(url, headers, timeout=10):
+            calls.append(headers)
+            if len(calls) == 2:
+                exit_.stop.set()
+            raise relay.Refused(409)
+
+        waits = []
+        exit_.stop.wait = lambda seconds: waits.append(seconds)
+        with unittest.mock.patch.object(relay, "WebSocket", side_effect=refuse):
+            exit_.run()
+        self.assertEqual(waits[0], relay.BUSY_WAIT)
+        self.assertEqual(logged[0]["event"], "relay_busy")
+        self.assertEqual(calls[0]["X-Relay-Agent"], relay.INSTANCE)
+        self.assertEqual(exit_.state, "stopped")
+
+
 class GameCheckTests(unittest.TestCase):
     def test_the_game_from_the_first_byte_even_in_pieces(self):
         first = client_frame(99991, {"passport": "x@163.com", "ver": "9.2.2"})

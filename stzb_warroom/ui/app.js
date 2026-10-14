@@ -711,6 +711,7 @@ function personalClick(event) {
 // image, so nothing the server sends runs here.
 
 const EXIT_STATES = { online: ['已连接', 'ok'], connecting: ['连接中', ''], refused: ['不接受这台电脑的账号', 'err'],
+  busy: ['另一台电脑正在用', 'warn'],
   unreachable: ['连不上', 'warn'], stopped: ['已停止', ''] };
 
 async function loadPhone(reset = false) {
