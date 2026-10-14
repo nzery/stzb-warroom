@@ -93,6 +93,110 @@ def resolve(host, port, own=()):
     return sorted(dict.fromkeys(found), key=lambda item: item[0] != socket.AF_INET)
 
 
+# How the first bytes of the TLS handshake (the ClientHello, which names the relay in clear) are cut:
+# into TLS records of these sizes, each in its own TCP packet, the rest in one. A filter that reads
+# the name from a single packet (Aliyun's 443 for a domain without ICP filing: it resets the
+# connection) does not find it (2026-10-15).
+HELLO_PIECES = (16, 24, 32, 48, 64, 64, 64)
+PIECE_GAP = 0.002  # seconds between two pieces, so that they leave as separate packets
+
+
+def split_hello(data, host=""):
+    """The first TLS flight with its handshake record cut into smaller records (RFC 8446 lets a
+    handshake message span records): at HELLO_PIECES, and always inside `host` where it appears,
+    so no piece holds the whole name. Anything not a single handshake record is left as it is."""
+    if len(data) < 5 or data[0] != 0x16 or int.from_bytes(data[3:5], "big") != len(data) - 5:
+        return [data]
+    head, body = data[:3], data[5:]
+    cuts, at = set(), 0
+    for size in HELLO_PIECES:
+        at += size
+        cuts.add(at)
+    name = host.encode("ascii", "ignore")
+    found = body.find(name) if name else -1
+    if found >= 0:
+        cuts.add(found + max(1, len(name) // 2))
+    cuts = sorted(cut for cut in cuts if 0 < cut < len(body))
+    pieces = [body[a:b] for a, b in zip([0] + cuts, cuts + [len(body)])]
+    return [head + len(piece).to_bytes(2, "big") + piece for piece in pieces]
+
+
+class TLS:
+    """TLS over a connected socket, its handshake sent in pieces (split_hello). Looks enough like a
+    socket for WebSocket and select(): recv, sendall, pending, fileno, settimeout, shutdown, close.
+    One lock around the TLS state: one thread reads while another sends."""
+
+    def __init__(self, sock, context, host):
+        self.sock = sock
+        self.incoming, self.outgoing = ssl.MemoryBIO(), ssl.MemoryBIO()
+        self.tls = context.wrap_bio(self.incoming, self.outgoing, server_hostname=host)
+        self.lock = threading.Lock()
+        sock.setsockopt(socket.IPPROTO_TCP, socket.TCP_NODELAY, 1)
+        first = True
+        while True:
+            try:
+                self.tls.do_handshake()
+                self._flush()
+                return
+            except ssl.SSLWantReadError:
+                pass
+            data = self.outgoing.read()
+            if first and data:
+                first = False
+                for piece in split_hello(data, host):
+                    sock.sendall(piece)
+                    time.sleep(PIECE_GAP)
+            elif data:
+                sock.sendall(data)
+            received = sock.recv(65536)
+            if not received:
+                raise ConnectionError("closed during the TLS handshake")
+            self.incoming.write(received)
+
+    def _flush(self):
+        data = self.outgoing.read()
+        if data:
+            self.sock.sendall(data)
+
+    def recv(self, size):
+        while True:
+            with self.lock:
+                try:
+                    return self.tls.read(size)
+                except ssl.SSLWantReadError:
+                    pass
+                except ssl.SSLZeroReturnError:
+                    return b""
+                finally:
+                    self._flush()  # what reading made TLS answer (key updates, …)
+            data = self.sock.recv(65536)
+            if not data:
+                return b""
+            with self.lock:
+                self.incoming.write(data)
+
+    def sendall(self, data):
+        with self.lock:
+            self.tls.write(data)
+            self._flush()
+
+    def pending(self):
+        with self.lock:
+            return self.tls.pending()
+
+    def fileno(self):
+        return self.sock.fileno()
+
+    def settimeout(self, value):
+        self.sock.settimeout(value)
+
+    def shutdown(self, how):
+        self.sock.shutdown(how)
+
+    def close(self):
+        self.sock.close()
+
+
 def _mask(data, key):
     if not data:
         return b""
@@ -113,7 +217,7 @@ class WebSocket:
             if secure:
                 context = ssl.create_default_context()
                 context.set_alpn_protocols(["http/1.1"])  # no WebSocket over HTTP/2 at the relay
-                sock = context.wrap_socket(sock, server_hostname=host)
+                sock = TLS(sock, context, host)
             key = base64.b64encode(os.urandom(16)).decode("ascii")
             lines = [f"GET {parts.path} HTTP/1.1", f"Host: {parts.netloc}", "Upgrade: websocket",
                      "Connection: Upgrade", f"Sec-WebSocket-Key: {key}", "Sec-WebSocket-Version: 13"]
@@ -137,6 +241,9 @@ class WebSocket:
             if {name.strip().lower(): value.strip() for name, value in fields.items()}.get(
                     "sec-websocket-accept") != expected:
                 raise ConnectionError("bad WebSocket answer")
+        except ssl.SSLError as exc:
+            sock.close()
+            raise ConnectionError(f"TLS: {exc}") from None
         except BaseException:
             sock.close()
             raise
@@ -146,7 +253,7 @@ class WebSocket:
 
     def pending(self):
         """Bytes already read from the socket but not yet handed out (select() cannot see them)."""
-        return bool(self.buffer) or (isinstance(self.sock, ssl.SSLSocket) and self.sock.pending() > 0)
+        return bool(self.buffer) or (isinstance(self.sock, TLS) and self.sock.pending() > 0)
 
     def _read(self, size):
         while len(self.buffer) < size:

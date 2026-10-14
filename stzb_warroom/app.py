@@ -547,7 +547,7 @@ class App:
             "relay_connected": ("info", f"手机中转：已连上 {host}"),
             "relay_refused": ("warn", f"手机中转：{host} 不接受这台电脑的账号（要已审批的账号）"),
             "relay_busy": ("warn", "手机中转：这个账号的手机正经另一台电脑转发；那台关掉出口或下线后，这台自动接上"),
-            "relay_unreachable": ("warn", f"手机中转：连不上 {host}，稍后重试"),
+            "relay_unreachable": ("warn", f"手机中转：连不上 {host}，稍后重试（{fields.get('error') or '原因不明'}）"),
             "pipe_open": ("info", "手机的一条游戏连接经本机转出"),
             "open_refused": ("warn", f"手机中转要本机连的目标不对，已拒绝（{fields.get('reason')}）"),
             "pipe_failed": ("warn", "手机中转：数据通道没建立起来"),
