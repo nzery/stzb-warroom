@@ -1,0 +1,127 @@
+"""The phone exit: what this computer agrees to connect to and keep, whatever the relays ask."""
+
+import json
+import os
+import socket
+import struct
+import unittest
+import unittest.mock
+
+from stzb_warroom import relay
+
+SESSION = b"0123456789abcdef0123456789abcdef"
+
+
+def client_frame(message_id, value, key=0x5A):
+    data = bytes(b ^ key for b in json.dumps(value).encode())
+    head = struct.pack(">II", 1, 2) + SESSION + struct.pack(">II", message_id, 1) + b"\0\0\0" + bytes([key, 5])
+    return struct.pack(">I", len(head) + len(data)) + head + data
+
+
+class AddressTests(unittest.TestCase):
+    def test_only_public_unicast(self):
+        for address in ("1.2.3.4", "2606:4700::1111", "::ffff:1.2.3.4", "64:ff9b::102:304"):
+            self.assertTrue(relay.allowed_address(address), address)
+        for address in ("127.0.0.1", "10.0.0.8", "172.16.3.4", "192.168.1.1", "169.254.1.1",
+                        "100.64.0.1",  # shared address space (carrier NAT, Tailscale)
+                        "198.18.0.1", "0.0.0.0", "255.255.255.255", "224.0.0.1", "240.0.0.1",
+                        "::1", "fe80::1", "fd00::1", "ff02::1", "::ffff:192.168.1.1",
+                        "64:ff9b::a00:1",  # NAT64 of 10.0.0.1
+                        "not an address", ""):
+            self.assertFalse(relay.allowed_address(address), address)
+
+    def test_not_this_computers_own_public_address(self):
+        self.assertFalse(relay.allowed_address("1.2.3.4", own={"1.2.3.4"}))
+        self.assertTrue(relay.allowed_address("1.2.3.5", own={"1.2.3.4"}))
+
+    def test_hosts(self):
+        self.assertTrue(relay.valid_host("game.example.com"))
+        self.assertTrue(relay.valid_host("1.2.3.4"))
+        for host in ("", "a" * 254, "a b", "a/b", "a\r\nb", None, 5):
+            self.assertFalse(relay.valid_host(host), host)
+
+    def test_resolves_once_and_drops_private_answers(self):
+        answers = [(socket.AF_INET, socket.SOCK_STREAM, 6, "", ("10.0.0.1", 8001)),
+                   (socket.AF_INET6, socket.SOCK_STREAM, 6, "", ("2606:4700::1111", 8001, 0, 0)),
+                   (socket.AF_INET, socket.SOCK_STREAM, 6, "", ("1.2.3.4", 8001))]
+        with unittest.mock.patch("socket.getaddrinfo", return_value=answers) as lookup:
+            self.assertEqual(relay.resolve("game.example", 8001),
+                             [(socket.AF_INET, "1.2.3.4"), (socket.AF_INET6, "2606:4700::1111")])
+        lookup.assert_called_once()
+
+
+class OpenTests(unittest.TestCase):
+    def setUp(self):
+        self.exit = relay.Exit("https://relay.example", ["t"], log=lambda **fields: None)
+        self.refused = []
+        self.exit.refuse = lambda conn, reason: self.refused.append(reason)
+
+    def test_refuses_without_connecting(self):
+        with unittest.mock.patch("socket.socket") as make, unittest.mock.patch("socket.getaddrinfo") as lookup:
+            self.exit.open("0" * 32, "game.example", 22)
+            self.exit.open("0" * 32, "bad host!", 8001)
+            lookup.return_value = [(socket.AF_INET, socket.SOCK_STREAM, 6, "", ("192.168.1.1", 8001))]
+            self.exit.open("0" * 32, "router.example", 8001)
+        self.assertEqual(self.refused, ["target", "target", "address"])
+        make.assert_not_called()
+
+    def test_only_well_formed_orders(self):
+        with unittest.mock.patch("threading.Thread") as thread:
+            for message in (b"not json", b"[]", b'{"open": "../x"}', b'{"open": 5}', b'{"open": "' + b"g" * 32 + b'"}'):
+                self.exit.handle(message)
+            thread.assert_not_called()
+            self.exit.handle(b'{"open": "' + b"a" * 32 + b'", "host": "h", "port": 8001}')
+            thread.assert_called_once()
+
+    def test_hello_gives_the_own_address(self):
+        self.exit.handle(b'{"hello": {"ip": "1.2.3.4"}}')
+        self.assertEqual(self.exit.own, {"1.2.3.4"})
+
+
+class GameCheckTests(unittest.TestCase):
+    def test_the_game_from_the_first_byte_even_in_pieces(self):
+        first = client_frame(99991, {"passport": "x@163.com", "ver": "9.2.2"})
+        stream = first + client_frame(5025, {"a": 1})
+        for cut in (1, 10, 57, len(first) - 1, len(first), len(stream) - 1):
+            check = relay.GameCheck()
+            verdict = check.feed(stream[:cut])
+            self.assertEqual(verdict, True if cut >= len(first) else None, cut)
+            self.assertTrue(check.feed(stream[cut:]), cut)
+
+    def test_anything_else_is_refused(self):
+        for junk in (b"GET / HTTP/1.1\r\nHost: x\r\n\r\n" * 20000,  # a web request through the game's port
+                     os.urandom(300 * 1024),  # noise
+                     b"".join(client_frame(1, None) for _ in range(5)) + bytes(300 * 1024)):  # frames that are not JSON
+            check = relay.GameCheck()
+            verdict = None
+            for start in range(0, len(junk), 16384):
+                verdict = check.feed(junk[start:start + 16384])
+                if verdict is not None:
+                    break
+            self.assertIs(verdict, False)
+
+    def test_a_verdict_stays(self):
+        check = relay.GameCheck()
+        self.assertTrue(check.feed(client_frame(99991, {"x": 1})))
+        self.assertTrue(check.feed(os.urandom(1000)))
+
+
+class RelaysTests(unittest.TestCase):
+    def test_relays_from_the_first_token_that_has_them(self):
+        pages = {"a": OSError("down"), "b": {"problem": "未审批", "relays": []},
+                 "c": {"relays": ["https://relay.example", "http://plain.example", 5, "https://backup.example"]}}
+
+        class Server:
+            def json(self, path, token, timeout):
+                self.path = path
+                value = pages[token]
+                if isinstance(value, Exception):
+                    raise value
+                return value
+
+        self.assertEqual(relay.relays_of(Server(), ["a", "b", "c"]), ["https://relay.example", "https://backup.example"])
+        self.assertEqual(relay.relays_of(Server(), ["a", "b"]), [])
+
+
+if __name__ == "__main__":
+    unittest.main()

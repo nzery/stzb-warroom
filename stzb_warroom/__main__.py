@@ -4,6 +4,7 @@
     python -m stzb_warroom notify      print the server's notifications in this terminal
     python -m stzb_warroom gui         both in a window (what the Windows package runs)
     python -m stzb_warroom join CODE   join an alliance with its invitation code (adds a token)
+    python -m stzb_warroom relay       let the phone play through this computer (its game connections)
 
 The commands read the tokens from ST_CLIENT_TOKEN (several separated by commas, one per game
 account played on this computer); the window also asks for them and can keep them encrypted.
@@ -41,6 +42,16 @@ def capture(args):
     except RuntimeError as exc:
         print(f"capture stopped: {exc}", file=sys.stderr, flush=True)
         raise SystemExit(1)
+
+
+def relay(args):
+    from . import relay as exit_relay
+    stop = threading.Event()
+    signal.signal(signal.SIGTERM, lambda *_: stop.set())
+    try:
+        exit_relay.run(Server(args.server), client_tokens(), stop, origins=args.relay or None)
+    except KeyboardInterrupt:
+        pass
 
 
 ENVIRONMENT_D = Path.home() / ".config" / "environment.d"
@@ -112,6 +123,9 @@ def main(argv=None):
     joining.add_argument("code", help="the invitation code (stj_...)")
     joining.add_argument("--env-file", help="the environment.d file to add the token to "
                          "(default: the one that sets ST_CLIENT_TOKEN, else ~/.config/environment.d/90-stzb.conf)")
+    relaying = commands.add_parser("relay", help="let the phone play through this computer")
+    relaying.add_argument("--relay", action="append",
+                          help="a relay's HTTPS origin, may repeat (default: the ones the server's phone page names)")
     args = parser.parse_args(argv)
     if not args.server:
         parser.error("no server: pass --server or set ST_SERVER")
@@ -119,6 +133,8 @@ def main(argv=None):
         return capture(args)
     if args.command == "join":
         return join(args)
+    if args.command == "relay":
+        return relay(args)
     if args.command == "gui":
         from . import webui
         return webui.main(Server(args.server), args.state_dir, background=args.background, after=args.after)

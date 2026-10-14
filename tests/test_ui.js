@@ -17,7 +17,7 @@ const context = vm.createContext({
   window: { addEventListener() {} },
   localStorage: { getItem: () => null, setItem() {} },
   history: { replaceState() {} }, location: { hash: '' },
-  setTimeout() {}, setInterval() {},
+  setTimeout() {}, setInterval() {}, btoa,
   EventSource: class { addEventListener() {} },
   fetch: () => { requests++; return new Promise((resolve) => { resolveFetch = resolve; }); },
 });
@@ -69,6 +69,22 @@ async function main() {
   for (const part of ['data-prole="8"', 'data-pfilter="kind" data-value="npc"', 'data-ppage="3"', 'lv good', '打不过：孙权', '第 2 / 3 页']) {
     assert.ok(drawn.includes(part), part);
   }
+  // the phone page: the server's QR code only as an image (nothing it sends runs), its texts escaped
+  vm.runInContext(`S.page = 'phone'; S.data.settings = { phone_exit: true };
+    S.data.phone = { enabled: true, running: true, waiting: false, exits: [{ relay: 'relay.example', state: 'online', since: 1, pipes: 1 }] };
+    S.phone = { role: 7, data: { problem: null, note: '<说明>', steps: ['扫码'], rule: 'DST-PORT,8001,率土战局-主节点',
+      nodes: [{ name: '率土战局-主节点', host: 'relay.example', link: 'vless://k@relay.example:443?type=ws#x',
+        qr: '<svg xmlns="http://www.w3.org/2000/svg"><script>alert(1)</script></svg>' }] } };
+    renderPhone(S.data);`, context);
+  const phone = nodes.get('phone-box').innerHTML;
+  assert.ok(phone.includes('<img class="qr"') && phone.includes('src="data:image/svg+xml;base64,'), phone);
+  assert.ok(!phone.includes('<svg xmlns') && !phone.includes('<script>'), 'the server\'s SVG is never inlined');
+  assert.ok(phone.includes('&lt;说明&gt;') && phone.includes('data-copy-text="vless://k@relay.example:443?type=ws#x"'));
+  assert.ok(phone.includes('data-phone-reset') && phone.includes('DST-PORT,8001,率土战局-主节点'));
+  const exits = nodes.get('phone-status').innerHTML;
+  assert.ok(exits.includes('率土战局-主节点') && exits.includes('已连接') && exits.includes('1 条'), exits);
+  vm.runInContext(`S.phone = { role: 7, data: { problem: '还没审核通过', nodes: [], relays: [] } }; renderPhone(S.data);`, context);
+  assert.ok(nodes.get('phone-box').innerHTML.includes('还没审核通过'));
   // enemy armies are a table, a row an army, each row on one line; texts escaped; another notice is its body
   assert.ok(vm.runInContext(`noticeBody({ body: '<b>' })`, context).includes('&lt;b&gt;'));
   assert.ok(vm.runInContext(`noticeBody({ body: '旧格式', view: { head: 'x' } })`, context).includes('旧格式'));

@@ -23,6 +23,7 @@
       <button class="nav-item" data-page="battles"><i data-icon="swords"></i><span>对局记录</span></button>
       <button class="nav-item" data-page="rivals"><i data-icon="target"></i><span>对手分析</span></button>
       <button class="nav-item" data-page="prefs"><i data-icon="sliders"></i><span>通知设置</span></button>
+      <button class="nav-item" data-page="phone"><i data-icon="phone"></i><span>用手机玩</span></button>
       <button class="nav-item" data-page="accounts"><i data-icon="user"></i><span>账号与推送</span><b class="badge alert" id="badge-accounts"></b></button>
       <button class="nav-item" data-page="settings"><i data-icon="gear"></i><span>设置</span></button>
       <button class="nav-item" data-page="diagnostics"><i data-icon="pulse"></i><span>诊断</span></button>
@@ -91,6 +92,16 @@
     <section class="page" id="page-teams"><div id="personal-teams"></div></section>
     <section class="page" id="page-battles"><div id="personal-battles"></div></section>
     <section class="page" id="page-rivals"><div id="personal-rivals"></div></section>
+    <section class="page" id="page-phone">
+      <div class="card settings">
+        <div class="setting">
+          <div><b>允许手机经本机连接游戏</b><p>开着时，手机上小火箭转来的游戏连接由这台电脑连出去，游戏看到的是这台电脑的网络，照常上报。只连游戏服务器，别的一概不连；本机不开任何端口。上报停止时也不转发。</p></div>
+          <label class="switch"><input type="checkbox" id="set-phone"><span></span></label>
+        </div>
+        <div id="phone-status"></div>
+      </div>
+      <div id="phone-box"></div>
+    </section>
 
     <section class="page" id="page-prefs">
       <div id="prefs"></div>
