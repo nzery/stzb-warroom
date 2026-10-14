@@ -21,6 +21,8 @@ const ICONS = {
   swords: '<path d="M14.5 17.5 3 6V3h3l11.5 11.5"/><path d="M13 19l6-6M16 16l4 4M19 21l2-2"/><path d="M9.5 6.5 6 3"/>',
   target: '<circle cx="12" cy="12" r="9"/><circle cx="12" cy="12" r="5"/><circle cx="12" cy="12" r="1"/>',
   refresh: '<path d="M20 11a8 8 0 1 0-2.3 5.7"/><path d="M20 4v7h-7"/>',
+  phone: '<rect x="7" y="2.5" width="10" height="19" rx="2"/><path d="M11 18.5h2"/>',
+  copy: '<rect x="9" y="9" width="11" height="11" rx="2"/><path d="M5 15V5a1 1 0 0 1 1-1h10"/>',
 };
 const icon = (name) => `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">${ICONS[name] || ''}</svg>`;
 const $ = (id) => document.getElementById(id);
@@ -52,6 +54,7 @@ const PAGES = {
   battles: ['对局记录', '你的部队上场的每一场战报'],
   rivals: ['对手分析', '和你交过手的敌方阵容，你每支队伍打它们的结果'],
   prefs: ['通知设置', '要哪些通知、过滤哪些敌军、推送哪些到手机'],
+  phone: ['用手机玩', '手机上的游戏连接经这台电脑出去，照常上报'],
   accounts: ['账号与推送', 'Token、角色与 iPhone 推送（Bark）'],
   settings: ['设置', '启动方式、网络组件与数据'],
   diagnostics: ['诊断', '检查运行环境，查看运行日志'],
@@ -75,6 +78,8 @@ const S = {
   // The pages about the account's own armies, as the server gave them: {query, data, error, loading, key} each.
   personal: { teams: { query: {} }, battles: { query: {} }, rivals: { query: {} } },
   personalRole: store.get('personalRole', null),
+  // The server's phone page for the chosen account: {data, error, loading, role, key}.
+  phone: {},
 };
 const PERSONAL = new Set(['teams', 'battles', 'rivals']);
 
@@ -246,6 +251,7 @@ function render() {
     if (account && !view.loading && !view.error && view.role !== account.a.role.id) loadPersonal(S.page);
     else renderPersonal(S.page);
   }
+  if (S.page === 'phone') renderPhone(d);
   renderSettings(d);
   renderChecks(d);
   $('about-version').textContent = d.app_version;
@@ -700,6 +706,107 @@ function personalClick(event) {
   return true;
 }
 
+// ---------------------------------------------------------------- the phone through this computer
+// The server's page (texts, nodes and their QR codes) as it made it; the QR code is shown as an
+// image, so nothing the server sends runs here.
+
+const EXIT_STATES = { online: ['已连接', 'ok'], connecting: ['连接中', ''], refused: ['不接受这台电脑的账号', 'err'],
+  unreachable: ['连不上', 'warn'], stopped: ['已停止', ''] };
+
+async function loadPhone(reset = false) {
+  const account = personalAccount();
+  const view = S.phone;
+  if (!account) { S.phone = {}; renderPhone(S.data); return; }
+  view.loading = true;
+  renderPhone(S.data);
+  const role = account.a.role.id;
+  try {
+    const data = await act('phone', { index: account.index, reset }, { quiet: true });
+    if (personalAccount()?.a.role.id !== role) return;
+    Object.assign(view, { data, error: null, role });
+    if (reset) toast('已换新节点：手机要重新扫码，旧的 30 秒内失效');
+  } catch (error) {
+    view.error = error.message || String(error);
+  } finally {
+    view.loading = false;
+    renderPhone(S.data);
+  }
+}
+
+const svgImage = (svg) => `data:image/svg+xml;base64,${btoa(unescape(encodeURIComponent(svg)))}`;
+const copyButton = (text, label) => `<button class="btn ghost small" data-copy-text="${esc(text)}">${icon('copy').replace('<svg', '<svg width="14" height="14"')}${esc(label)}</button>`;
+
+function renderPhone(d) {
+  if (!d) return;
+  const p = d.phone || { enabled: false, exits: [] };
+  $('set-phone').checked = d.settings.phone_exit;
+  const nodes = S.phone.data?.nodes || [];
+  const name = (host) => nodes.find((n) => n.host === host)?.name || host;
+  $('phone-status').innerHTML = !p.enabled ? ''
+    : !p.running ? `<p class="muted">上报没有运行，现在不转发。点右上角“开始上报”后自动开始。</p>`
+    : p.waiting ? `<p class="muted">正在向服务器要中转……账号审批通过后才有。</p>`
+    : `<div class="phone-exits">${p.exits.map((e) => {
+        const [label, cls] = EXIT_STATES[e.state] || [e.state, ''];
+        return `<div class="phone-exit"><b>${esc(name(e.relay))}</b><span class="pill ${cls}">${esc(label)}</span>`
+          + (e.pipes ? `<span class="muted">正在转发 ${e.pipes} 条游戏连接</span>` : '') + '</div>';
+      }).join('')}</div>`;
+  const view = S.phone;
+  const accounts = personalAccounts();
+  const account = personalAccount();
+  const key = JSON.stringify([view.data, view.error, view.loading, accounts.map(({ a }) => a.role.id), account?.a.role.id]);
+  if (key === view.key) return;
+  view.key = key;
+  const box = $('phone-box');
+  if (!account) {
+    box.innerHTML = `<div class="card empty">${(d.tokens || []).length ? '还没有能用手机玩的账号：Token 审批通过（先在这台电脑上登录一次游戏）后就有。' : '先到“账号与推送”添加账号。'}</div>`;
+    return;
+  }
+  if (!view.data && !view.error && !view.loading) { loadPhone(); return; }
+  const who = accounts.length > 1 ? `<div class="vfilter"><span>账号</span><div class="chips">${accounts.map(({ a }) =>
+    `<button class="chip${a.role.id === account.a.role.id ? ' active' : ''}" data-phone-role="${esc(a.role.id)}">${esc(roleName(a.role.label))}</button>`).join('')}</div></div>` : '';
+  const data = view.data;
+  let body;
+  if (view.error) body = banner('warn', 'info', esc(view.error));
+  else if (!data) body = '<div class="card empty">正在读取…</div>';
+  else if (data.problem) body = banner('warn', 'info', esc(data.problem));
+  else body = `<p class="muted prefs-note">${esc(data.note || '')}</p>
+    <div class="phone-nodes">${data.nodes.map((n) => `<div class="card phone-node">
+      <h3>${esc(n.name)}</h3>
+      ${n.qr ? `<img class="qr" alt="${esc(n.name)} 的二维码" src="${svgImage(n.qr)}">` : '<div class="empty">服务器没给二维码，复制链接到手机上导入</div>'}
+      <div class="row-actions">${copyButton(n.link, '复制链接')}</div></div>`).join('')}</div>
+    <div class="card"><h3>怎么用</h3><ol class="phone-steps">${(data.steps || []).map((s) => `<li>${esc(s)}</li>`).join('')}</ol>
+      <div class="setting"><div><b>要加的规则</b><p><code>${esc(data.rule)}</code></p></div>${copyButton(data.rule, '复制规则')}</div>
+      <div class="setting"><div><b>二维码外泄了？</b><p>换一个新节点，旧的 30 秒内失效，手机要重新扫码。</p></div>
+        <button class="btn ghost small" data-phone-reset="1">重置</button></div></div>`;
+  const refresh = `<button class="btn ghost small" data-phone-refresh="1"${view.loading ? ' disabled' : ''}>${view.loading ? '<span class="spin"></span>读取中' : `${icon('refresh').replace('<svg', '<svg width="14" height="14"')}刷新`}</button>`;
+  box.innerHTML = `<div class="vtoolbar"><div class="vfilters">${who}</div>${refresh}</div>` + body;
+}
+
+async function phoneClick(event) {
+  if (S.page !== 'phone') return false;
+  const copy = event.target.closest('[data-copy-text]');
+  if (copy) {
+    try { await navigator.clipboard.writeText(copy.dataset.copyText); toast('已复制'); }
+    catch { toast('复制失败', true); }
+    return true;
+  }
+  const role = event.target.closest('[data-phone-role]');
+  if (role) {
+    S.personalRole = Number(role.dataset.phoneRole);
+    store.set('personalRole', S.personalRole);
+    for (const name of PERSONAL) S.personal[name] = { query: {} };
+    S.phone = {};
+    loadPhone();
+    return true;
+  }
+  if (event.target.closest('[data-phone-reset]')) {
+    if (confirm('换一个新节点？旧二维码 30 秒内失效，手机上要删掉旧节点、重新扫码。')) loadPhone(true);
+    return true;
+  }
+  if (event.target.closest('[data-phone-refresh]')) { loadPhone(); return true; }
+  return false;
+}
+
 function renderSettings(d) {
   const s = d.settings;
   const autostart = $('set-autostart');
@@ -747,6 +854,7 @@ function appendLogs(lines) {
 
 function show(page) {
   S.page = page;
+  if (page === 'phone') S.phone = {};  // read again each time it is opened (renderPhone asks)
   document.querySelectorAll('.nav-item').forEach((b) => b.classList.toggle('active', b.dataset.page === page));
   document.querySelectorAll('.page').forEach((p) => p.classList.toggle('active', p.id === 'page-' + page));
   $('page-title').textContent = PAGES[page][0];
@@ -768,6 +876,7 @@ document.addEventListener('click', async (event) => {
   const goto = event.target.closest('[data-goto]');
   if (goto) return show(goto.dataset.goto);
   if (personalClick(event)) return;
+  if (await phoneClick(event)) return;
   if (event.target.closest('[data-guide]')) {
     const guide = document.querySelector('.guide');
     guide.open = true;
@@ -868,6 +977,7 @@ document.addEventListener('change', async (event) => {
 
 $('set-autostart').addEventListener('change', (e) => act('set_setting', { name: 'autostart', value: e.target.checked }).catch(() => {}));
 $('set-keep').addEventListener('change', (e) => act('set_setting', { name: 'keep_running', value: e.target.checked }).catch(() => {}));
+$('set-phone').addEventListener('change', (e) => act('set_setting', { name: 'phone_exit', value: e.target.checked }).catch(() => {}));
 $('pick-dumpcap').addEventListener('click', (e) => withBusy(e.currentTarget, '等待选择', async () => {
   const path = await act('pick_dumpcap');
   if (path) { toast('已选择 ' + path); if (S.data && S.data.capture.state !== 'running') act('start', {}, { quiet: true }).catch(() => {}); }

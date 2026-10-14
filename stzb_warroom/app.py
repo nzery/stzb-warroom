@@ -29,7 +29,7 @@ from pathlib import Path
 from urllib.error import HTTPError
 from urllib.parse import urlencode
 
-from . import __version__, notify, update as updates, vault, winsys
+from . import __version__, notify, relay, update as updates, vault, winsys
 from .api import client_tokens, invite_code, site
 from .capture import find_dumpcap
 from .runner import run_capture
@@ -38,6 +38,8 @@ ACCOUNT_EVERY = 60  # seconds between two looks at the accounts' status
 PREFS = "/v1/client/notice-prefs"
 PERSONAL = "/v1/client/personal/"
 PERSONAL_PAGES = ("teams", "battles", "rivals")
+PHONE = "/v1/client/phone"
+RELAYS_EVERY = 60  # seconds between two asks for the relays while none is known
 UPDATE_EVERY = 6 * 3600
 HINTS = (  # what a player can do about a capture failure, from its text
     ("another capture process", "已经有一个程序在上报（可能是另一个窗口），先关掉它。"),
@@ -107,6 +109,7 @@ class App:
         self.relaunch = False  # start again once quit (to run the code an update downloaded)
         self.quit = threading.Event()
         self.poke = threading.Event()  # look at the accounts now
+        self.exit_said = {}  # (event, relay) -> when the phone exit last said it in the log
         self.settings = self._read_settings()
         self.updated = None  # what this version brought, in the run that shows it (_updated)
         # Only what the player added in the window; ST_CLIENT_TOKEN where there is no vault
@@ -151,7 +154,8 @@ class App:
                 "hints": [dict(hint, token=mask(token)) for token, hint in self.hints.items()],
                 "notices": [n for n in self.notices if n["seq"] > notices_after],
                 "logs": [line for line in self.logs if line["seq"] > logs_after],
-                "settings": {"keep_running": self.settings["keep_running"],
+                "phone": self._phone_status(),
+                "settings": {"keep_running": self.settings["keep_running"], "phone_exit": self.settings["phone_exit"],
                              "autostart": winsys.autostart(), "autostart_available": winsys.autostart_command() is not None,
                              "dumpcap": self.find_dumpcap()[0], "dumpcap_picked": self._picked(),
                              "state_dir": str(self.state_dir), "windows": winsys.WINDOWS},
@@ -172,15 +176,23 @@ class App:
             value = json.loads(self.settings_path.read_text(encoding="utf-8"))
         except (OSError, ValueError):
             value = {}
-        return {"keep_running": True, **(value if isinstance(value, dict) else {})}
+        # phone_exit: the phone may play through this computer (relay.py); off until the player says.
+        return {"keep_running": True, "phone_exit": False, **(value if isinstance(value, dict) else {})}
 
     def set_setting(self, name, value):
         if name == "autostart":
             winsys.set_autostart(bool(value))
-        elif name == "keep_running":
+        elif name in ("keep_running", "phone_exit"):
             with self.lock:
-                self.settings["keep_running"] = bool(value)
+                self.settings[name] = bool(value)
                 self._write_settings()
+                session = self.session
+            if name == "phone_exit" and session is not None:
+                if value:
+                    self._start_exits(session)
+                else:
+                    self._stop_exits(session)
+                    self.log("已关闭手机经本机连接游戏")
         else:
             raise ValueError(f"unknown setting {name}")
         self.touch()
@@ -466,6 +478,92 @@ class App:
             raise ValueError("服务器的回复不对")
         return value
 
+    # the phone through this computer (relay.py) -----------------------------------
+
+    def phone(self, index, reset=False):
+        """The server's phone page for the account (nodes with QR codes, the rule, the steps), as
+        it made it; `reset` asks for a new key first. Nothing of it is logged."""
+        token = self._token(index)
+        try:
+            with self.server.open(PHONE + ("/reset" if reset else ""), token, {} if reset else None,
+                                  timeout=30, method="POST" if reset else "GET") as response:
+                value = json.load(response)
+        except HTTPError as exc:
+            if exc.code == 404:
+                raise ValueError("服务器还不支持用手机玩")
+            try:
+                message = json.loads(exc.read() or b"{}").get("error")
+            except (OSError, ValueError):
+                message = None
+            raise ValueError(message or f"服务器返回 HTTP {exc.code}")
+        except OSError as exc:
+            raise ValueError(f"连不上服务器：{exc}")
+        if not isinstance(value, dict):
+            raise ValueError("服务器的回复不对")
+        if reset:
+            self.log("已重置手机节点：旧的二维码 30 秒内失效，手机要重新扫码")
+        return value
+
+    def _phone_status(self):
+        session = self.session
+        exits = (session or {}).get("exits") or []
+        return {"enabled": self.settings["phone_exit"], "running": session is not None,
+                "waiting": bool(session and self.settings["phone_exit"] and not exits),
+                "exits": [{"relay": e.origin.removeprefix("https://"), "state": e.state, "since": e.since,
+                           "pipes": e.open_pipes} for e in exits]}
+
+    def _start_exits(self, session):
+        """The exits of this capture session: the relays come from the server's phone page (an
+        approved token's), asked again every RELAYS_EVERY until there are some."""
+        def run():
+            while not session["stop"].is_set() and self.settings["phone_exit"] and not session.get("exits"):
+                origins = relay.relays_of(self.server, session["tokens"])
+                with self.lock:
+                    if origins and not session["stop"].is_set() and self.settings["phone_exit"] \
+                            and not session.get("exits"):
+                        session["exits"] = relay.start(origins, session["tokens"], log=self._exit_log)
+                        self.log("手机经本机连接游戏：已开启")
+                        break
+                if not origins:
+                    self.log("手机经本机连接游戏：服务器还没给中转（账号要先审批通过），稍后再试", "warn")
+                self.touch()
+                session["stop"].wait(RELAYS_EVERY)
+            self.touch()
+
+        threading.Thread(target=run, name="relays", daemon=True).start()
+        self.touch()
+
+    def _stop_exits(self, session):
+        with self.lock:
+            exits, session["exits"] = session.get("exits") or [], []
+        for exit_ in exits:
+            exit_.close()
+        self.touch()
+
+    def _exit_log(self, **fields):
+        """The exits' events in the window's log: what the player can act on, once per change."""
+        event, host = fields.get("event"), (fields.get("relay") or "").removeprefix("https://")
+        text = {
+            "relay_connected": ("info", f"手机中转：已连上 {host}"),
+            "relay_refused": ("warn", f"手机中转：{host} 不接受这台电脑的账号（要已审批的账号）"),
+            "relay_unreachable": ("warn", f"手机中转：连不上 {host}，稍后重试"),
+            "pipe_open": ("info", "手机的一条游戏连接经本机转出"),
+            "open_refused": ("warn", f"手机中转要本机连的目标不对，已拒绝（{fields.get('reason')}）"),
+            "pipe_failed": ("warn", "手机中转：数据通道没建立起来"),
+        }.get(event)
+        if event == "game_check" and not fields.get("ok"):
+            text = ("warn", "拦下一条不是游戏的手机连接，这个目标 10 分钟内不再连")
+        if text is None:
+            return
+        key = (event, host)
+        now = time.monotonic()
+        with self.lock:
+            if event in ("relay_unreachable", "relay_refused") and now - self.exit_said.get(key, -3600) < 600:
+                return  # retried every few minutes: said once in ten
+            self.exit_said[key] = now
+        self.log(text[1], text[0])
+        self.touch()
+
     # notifications and prompts ------------------------------------------------------
 
     def _drop_expired(self):
@@ -513,7 +611,7 @@ class App:
                 self.touch()
                 return
             stop = threading.Event()
-            session = self.session = {"stop": stop, "uploader": None, "tokens": list(self.tokens)}
+            session = self.session = {"stop": stop, "uploader": None, "tokens": list(self.tokens), "exits": []}
             self.capture.update(state="starting", error=None, hint=None, since=time.time(), dumpcap=dumpcap)
             self.hints.clear()
             session["thread"] = threading.Thread(target=self._capture, args=(session, dumpcap), name="capture",
@@ -521,6 +619,8 @@ class App:
             session["thread"].start()
         notify.start(self.server, session["tokens"], self.state_dir, stop, prompt_for=self.prompt_for,
                      show=self.on_notice, warn=lambda text: self.log(text, "warn"))
+        if self.settings["phone_exit"]:
+            self._start_exits(session)  # the phone's connections are reported by this capture
         self.touch()
 
     def _capture(self, session, dumpcap):
@@ -539,6 +639,7 @@ class App:
             error = str(exc) or type(exc).__name__
         finally:
             session["stop"].set()  # also stop notifications when setup failed before capture began
+            self._stop_exits(session)
         with self.lock:
             if session is self.session:
                 self.session = None
@@ -642,7 +743,9 @@ class App:
                  f"dumpcap：{snapshot['settings']['dumpcap'] or '没有找到'}；Npcap：{ {True: '已安装', False: '未安装', None: '-'}[winsys.npcap_installed()]}",
                  f"上报：{snapshot['capture']['state']} {snapshot['capture']['error'] or ''}".rstrip(),
                  f"统计：已上传 {snapshot['stats']['uploaded']} 条，待上传 {snapshot['stats']['pending']}，"
-                 f"连接 {snapshot['stats']['connections']}"]
+                 f"连接 {snapshot['stats']['connections']}",
+                 "手机经本机：" + ("开" if snapshot["phone"]["enabled"] else "关") + "".join(
+                     f"；{e['relay']} {e['state']}（{e['pipes']} 条）" for e in snapshot["phone"]["exits"])]
         for number, account in enumerate(snapshot["tokens"], 1):
             role = (account.get("role") or {}).get("label") or "-"
             bark = account.get("bark") or {}

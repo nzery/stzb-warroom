@@ -70,6 +70,12 @@ class FakeServer:
 
     def open(self, path, token, body=None, timeout=45, method=None):
         self.calls.append((method, path, body))
+        if path.startswith("/v1/client/phone"):
+            if token == NEW:
+                return Response(json.dumps({"problem": "还没审核通过", "nodes": [], "relays": []}).encode())
+            key = "k2" if path.endswith("/reset") else "k1"
+            return Response(json.dumps({"problem": None, "nodes": [{"name": "率土战局-主节点", "link": f"vless://{key}@r"}],
+                                        "relays": ["https://r.example"]}).encode())
         if body == {"address": "bad"}:
             raise HTTPError(path, 400, "bad", {}, io.BytesIO('{"error": "推送没有送达"}'.encode()))
         return Response(json.dumps({"bound": method != "DELETE", "address": "https://api.day.app/ABCD…"}).encode())
@@ -248,6 +254,64 @@ class AppTests(unittest.TestCase):
             app.personal(1, "teams")
         with self.assertRaisesRegex(ValueError, "没有这个账号"):
             app.personal(5, "teams")
+
+    def test_the_phone_page_is_the_servers_and_never_logged(self):
+        app = self.app(saved=f"{GOOD},{NEW}")
+        page = app.phone(0)
+        self.assertEqual(self.server.calls[-1], ("GET", "/v1/client/phone", None))
+        self.assertEqual(page["nodes"][0]["link"], "vless://k1@r")
+        page = app.phone(0, reset=True)
+        self.assertEqual(self.server.calls[-1], ("POST", "/v1/client/phone/reset", {}))
+        self.assertEqual(page["nodes"][0]["link"], "vless://k2@r")
+        self.assertEqual(app.phone(1)["problem"], "还没审核通过")
+        self.assertNotIn("k1", json.dumps(list(app.logs)) + app.diagnostics())
+        with self.assertRaisesRegex(ValueError, "没有这个账号"):
+            app.phone(5)
+
+    def test_the_phone_exit_is_off_until_asked_and_follows_the_capture(self):
+        app = self.app(saved=GOOD)
+        self.assertFalse(app.snapshot()["settings"]["phone_exit"])
+        self.assertFalse(app.snapshot()["phone"]["enabled"])
+
+        class FakeExit:
+            def __init__(self, origin):
+                self.origin, self.state, self.since, self.open_pipes, self.closed = origin, "online", 1.0, 2, False
+
+            def close(self):
+                self.closed = True
+
+        made = []
+
+        def start(origins, tokens, log=None):
+            made.extend(FakeExit(origin) for origin in origins)
+            return list(made)
+
+        session = {"stop": threading.Event(), "tokens": [GOOD], "exits": []}
+        with unittest.mock.patch.object(appmod.relay, "relays_of", return_value=["https://r.example"]), \
+                unittest.mock.patch.object(appmod.relay, "start", side_effect=start):
+            app.session = session
+            app.set_setting("phone_exit", True)
+            for _ in range(100):
+                if session["exits"]:
+                    break
+                time.sleep(0.01)
+            status = app.snapshot()["phone"]
+            self.assertEqual(status["exits"], [{"relay": "r.example", "state": "online", "since": 1.0, "pipes": 2}])
+            self.assertIn("r.example", app.diagnostics())
+            app.set_setting("phone_exit", False)
+            self.assertTrue(made[0].closed)
+            self.assertEqual(session["exits"], [])
+        self.assertFalse(App(self.server, self.folder).settings["phone_exit"])  # saved off again
+        session["stop"].set()
+
+    def test_the_exits_say_a_failing_relay_once_in_a_while(self):
+        app = self.app()
+        for _ in range(3):
+            app._exit_log(event="relay_unreachable", relay="https://r.example", error="x")
+        app._exit_log(event="game_check", ok=False)
+        texts = [line["text"] for line in app.logs]
+        self.assertEqual(sum("连不上 r.example" in t for t in texts), 1)
+        self.assertTrue(any("拦下" in t for t in texts))
 
     def test_bark_is_bound_through_the_server(self):
         app = self.app(saved=GOOD)
