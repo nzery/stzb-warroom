@@ -54,7 +54,7 @@ const accountState = (a) => (a.state === 'pending' && a.pending
 const LOGIN_STEPS = '请在本程序点「开始上报」，再进入游戏；如果已经在游戏里，退出后重新登录一次';
 
 const S = {
-  data: null, page: 'overview', filter: 'all', notices: [], logs: [], n: 0, l: 0,
+  data: null, tapped: {}, nextFlip: Infinity, page: 'overview', filter: 'all', notices: [], logs: [], n: 0, l: 0,
   hiddenBefore: store.get('hiddenBefore', 0), dismissed: new Set(store.get('dismissed', [])),
   seenNotices: store.get('seenNotices', 0), loaded: false, accountsKey: '', prefsKey: '', busy: new Set(),
   // The pages about the account's own armies, as the server gave them: {query, data, error, loading, key} each.
@@ -97,6 +97,7 @@ async function refresh() {
     for (const notice of data.notices) {
       if (!live(notice)) continue;
       S.notices.push(notice);
+      if (notice.tapped) S.tapped[notice.role] = notice.tapped;
       if (S.loaded) announce(notice);
     }
     S.notices = S.notices.filter(live);
@@ -350,7 +351,7 @@ function renderOverview(d) {
   }).join('') : '<div class="empty">还没有账号</div>';
 
   const gone = withdrawnArmies();
-  const recent = S.notices.filter((n) => n.seq > S.hiddenBefore && !withdrawnAll(n, gone)).slice(-6).reverse();
+  const recent = latestOfPlaces(S.notices.filter((n) => n.seq > S.hiddenBefore && !withdrawnAll(n, gone))).slice(-6).reverse();
   $('ov-notices').innerHTML = recent.length ? recent.map((n) => `<div class="mini"><span class="tag ${esc(n.level)}">${esc(n.tag || '通知')}</span><span class="main-text">${esc(n.title)}</span><span class="time">${clock(n.time)}</span></div>`).join('')
     : '<div class="empty">还没有通知。登录游戏并上报后，敌袭等通知会显示在这里。</div>';
 }
@@ -359,7 +360,9 @@ function renderOverview(d) {
 // army. Each row stays on one line within the notice: columns share the width as the server says
 // (`widths`, so the tables of all notices line up) or else by their longest text, and a cell too
 // long for its column ends in … with the whole text on hover. The table's `key` column (the
-// enemy lineup) stands out. Any other notice is its text.
+// enemy lineup) stands out. Its `countdown` column (when each army lands, the server's epoch
+// seconds in `at`, `draw` for one that attacks again then) counts down in the row. Any other
+// notice is its text.
 const textWidth = (value) => [...String(value)].reduce((n, ch) => n + (ch.charCodeAt(0) > 0xff ? 2 : 1), 0);
 function noticeTable(t) {
   const rows = (t && t.rows) || [];
@@ -370,10 +373,18 @@ function noticeTable(t) {
   const share = given ? t.widths : widths;
   const total = share.reduce((a, b) => a + b, 0);
   const cols = share.map((w) => `<col style="width:${(w * 100 / total).toFixed(1)}%">`).join('');
-  const cellOf = (c, i) => `<td title="${esc(c)}"${i === t.key ? ' class="key"' : ''}>${esc(c)}</td>`;
+  const cd = t.countdown && Array.isArray(t.countdown.at) ? t.countdown : null;
+  const cellOf = (c, i, r) => {
+    const at = cd && i === cd.col ? cd.at[r] : null;
+    if (typeof at === 'number') {
+      return `<td class="cd" data-at="${at}"${cd.draw && cd.draw[r] ? ' data-draw="1"' : ''} title="${esc(c)}">${esc(c)}</td>`;
+    }
+    return `<td title="${esc(c)}"${i === t.key ? ' class="key"' : ''}>${esc(c)}</td>`;
+  };
   return `<div class="vtable"><table class="fit"><colgroup>${cols}</colgroup><thead><tr>${t.columns.map((h) => `<th>${esc(h)}</th>`).join('')}</tr></thead>
-    <tbody>${rows.map((row) => `<tr>${row.map(cellOf).join('')}</tr>`).join('')}</tbody></table></div>`;
+    <tbody>${rows.map((row, r) => `<tr>${row.map((c, i) => cellOf(c, i, r)).join('')}</tr>`).join('')}</tbody></table></div>`;
 }
+const countsDown = (n) => (n.view?.blocks || []).some((b) => b.table?.countdown);
 function noticeBody(n) {
   const v = n.view;
   if (!v || !Array.isArray(v.blocks)) return n.body ? `<div class="body">${esc(n.body)}</div>` : '';
@@ -405,39 +416,60 @@ function left(at) {
   return s >= 60 ? `还有 ${Math.floor(s / 60)}分${String(s % 60).padStart(2, '0')}秒` : `还有 ${s}秒`;
 }
 
+// '1分05秒' to an army's landing in its row, '打平 1分05秒' to one attacking again; '已到' after.
+function short(at, draw) {
+  const s = Math.ceil(at - Date.now() / 1000);
+  if (s <= 0) return '已到';
+  return (draw ? '打平 ' : '') + (s >= 60 ? `${Math.floor(s / 60)}分${String(s % 60).padStart(2, '0')}秒` : `${s}秒`);
+}
+
 function tickCountdowns() {
-  let landed = false;
-  for (const el of document.querySelectorAll('#notice-list .countdown')) {
-    const at = Number(el.dataset.at);
-    if (at * 1000 <= Date.now()) landed = true;
-    el.textContent = left(at);
+  for (const el of document.querySelectorAll('#notice-list .countdown')) el.textContent = left(Number(el.dataset.at));
+  for (const el of document.querySelectorAll('#notice-list td.cd')) {
+    el.textContent = short(Number(el.dataset.at), el.dataset.draw);
+    el.classList.toggle('soon', Number(el.dataset.at) * 1000 - Date.now() < 60000);
   }
-  if (landed) renderNotices();
+  if (Date.now() / 1000 >= S.nextFlip) renderNotices();  // a raid landed: the order changes
 }
 setInterval(tickCountdowns, 1000);
 
+// A place the player tapped (`tapped`, the server's) is told anew at each tap that finds a change:
+// only its latest notice is shown, and the latest tapped place's stays above all, until the
+// player taps another (2026-10-14 user).
+function latestOfPlaces(notices) {
+  const latest = new Map();
+  for (const n of notices) if (n.tapped) latest.set(`${n.role}:${n.tapped}`, n.seq);
+  return notices.filter((n) => !n.tapped || latest.get(`${n.role}:${n.tapped}`) === n.seq);
+}
+
 function renderNotices() {
   const gone = withdrawnArmies();
-  const list = S.notices.filter((n) => n.seq > S.hiddenBefore && (S.filter === 'all' || n.level === S.filter)
-    && !withdrawnAll(n, gone)).reverse();
-  const coming = list.map((n) => [n, nextArrival(n, gone)]).filter(([, at]) => at).sort((a, b) => a[1] - b[1]);
-  const rest = list.filter((n) => !nextArrival(n, gone));
+  const list = latestOfPlaces(S.notices.filter((n) => n.seq > S.hiddenBefore && (S.filter === 'all' || n.level === S.filter)
+    && !withdrawnAll(n, gone))).reverse();
+  const pinned = list.filter((n) => n.tapped && S.tapped[n.role] === n.tapped);
+  const others = list.filter((n) => !pinned.includes(n));
+  const coming = others.map((n) => [n, nextArrival(n, gone)]).filter(([, at]) => at).sort((a, b) => a[1] - b[1]);
+  const rest = others.filter((n) => !nextArrival(n, gone));
+  S.nextFlip = Math.min(Infinity, ...list.map((n) => nextArrival(n, gone) || Infinity));
   const card = (n, at) => {
     const who = roleOf(n);
-    const when = at ? `<span class="when countdown" data-at="${at}" title="${clock(at)} 到"></span>`
+    // A notice whose table counts down in its rows says when it came; else when its raid lands.
+    const when = at && !countsDown(n) ? `<span class="when countdown" data-at="${at}" title="${clock(at)} 到"></span>`
       : `<span class="when" title="${clock(n.time, true)}">${clock(n.time)}</span>`;
     return `<article class="notice ${esc(n.level)}${at ? ' coming' : ''}"><span class="tag ${esc(n.level)}">${esc(n.tag || '通知')}</span>
       <div class="title">${who && S.data.tokens.length > 1 ? `<span class="who">${esc(who)}</span>` : ''}${esc(n.title)}</div>
       ${when}
       ${noticeBody(n)}</article>`;
   };
+  const group = (label, cards) => (cards.length ? `<div class="notice-group">${label}</div>${cards.join('')}` : '');
   const html = list.length
-    ? (coming.length ? `<div class="notice-group">还没打到 · 先到的在上</div>${coming.map(([n, at]) => card(n, at)).join('')}` : '')
-      + (coming.length && rest.length ? '<div class="notice-group">其他通知</div>' : '')
+    ? group('刚点开的地点 · 点别处才换', pinned.map((n) => card(n, nextArrival(n, gone))))
+      + group('还没打到 · 先到的在上', coming.map(([n, at]) => card(n, at)))
+      + ((pinned.length || coming.length) && rest.length ? '<div class="notice-group">其他通知</div>' : '')
       + rest.map((n) => card(n)).join('')
     : `<div class="card empty">${S.filter === 'all' ? '还没有通知' : '没有这一类的通知'}</div>`;
   if ($('notice-list').dataset.html !== html) { $('notice-list').innerHTML = html; $('notice-list').dataset.html = html; }
-  for (const el of document.querySelectorAll('#notice-list .countdown')) el.textContent = left(Number(el.dataset.at));
+  tickCountdowns();
   if (S.notices.length) { S.seenNotices = S.notices[S.notices.length - 1].seq; store.set('seenNotices', S.seenNotices); }
 }
 

@@ -85,6 +85,17 @@ async function main() {
   const fixed = vm.runInContext(`noticeTable({ columns: ['玩家', '阵容'], widths: [3, 1], rows: [['甲', '庞统/程昱/刘备']] })`, context)
     .match(/width:([\d.]+)%/g).map((w) => parseFloat(w.slice(6)));
   assert.deepEqual(fixed, [75, 25]);
+  // when each army lands counts down in its row, not a line of its own
+  const rows = vm.runInContext(`noticeTable({ columns: ['到达', '阵容'], key: 1,
+    countdown: { col: 0, at: [100, null], draw: [true, false] }, rows: [['21:33:02', '甲'], ['已驻守', '乙']] })`, context);
+  assert.ok(rows.includes('<td class="cd" data-at="100" data-draw="1" title="21:33:02">'), rows);
+  assert.ok(rows.includes('<td title="已驻守">已驻守</td>'), 'an army staying does not count down');
+  assert.equal(vm.runInContext(`short(Date.now() / 1000 + 65, '1')`, context), '打平 1分05秒');
+  assert.equal(vm.runInContext(`short(Date.now() / 1000 - 1)`, context), '已到');
+  // a tapped place's latest notice only
+  const kept = vm.runInContext(`latestOfPlaces([{ seq: 1, role: 1, tapped: '9' }, { seq: 2, role: 1 },
+    { seq: 3, role: 1, tapped: '9' }, { seq: 4, role: 2, tapped: '9' }]).map((n) => n.seq)`, context);
+  assert.deepEqual([...kept], [2, 3, 4]);
   console.log('UI startup and refresh regression checks passed');
 }
 main().catch((error) => { console.error(error); process.exitCode = 1; });

@@ -34,16 +34,16 @@ code { font-family: Consolas, "Cascadia Mono", monospace; color: var(--gold); }
 
 /* layout */
 .app { display: flex; height: 100vh; }
-.sidebar { width: 216px; flex: none; background: var(--side); border-right: 1px solid var(--line);
-  display: flex; flex-direction: column; padding: 20px 12px 16px; }
-.brand { display: flex; align-items: center; gap: 12px; padding: 0 8px 26px; }
+.sidebar { width: 160px; flex: none; background: var(--side); border-right: 1px solid var(--line);
+  display: flex; flex-direction: column; padding: 20px 8px 16px; }
+.brand { display: flex; align-items: center; gap: 10px; padding: 0 4px 26px; }
 .brand strong { display: block; font-size: 17px; letter-spacing: 3px; }
 .brand small { display: block; color: var(--faint); font-size: 12px; margin-top: 2px; letter-spacing: 1px; }
 .mark { display: grid; place-items: center; width: 38px; height: 38px; flex: none; border: 1px solid var(--gold2);
   color: #ecc488; font: 25px "SimSun", "Songti SC", serif; background: linear-gradient(160deg, #2a3a31, #1a2723); }
 .mark.big { width: 64px; height: 64px; font-size: 42px; margin: 0 auto; }
 nav { display: grid; gap: 4px; }
-.nav-item { position: relative; display: flex; align-items: center; gap: 12px; width: 100%; padding: 10px 12px;
+.nav-item { position: relative; display: flex; align-items: center; gap: 10px; width: 100%; padding: 10px 8px;
   border: 0; border-radius: 8px; background: transparent; color: #b3c0b6; cursor: pointer; text-align: left;
   transition: background .15s, color .15s; }
 .nav-item:hover { background: var(--hover); color: #f2e6c9; }
@@ -54,7 +54,7 @@ nav { display: grid; gap: 4px; }
   font: 600 11px/18px "Segoe UI", sans-serif; text-align: center; }
 .badge:empty { display: none; }
 .badge.alert { background: #6b3029; color: #ffd9d2; }
-.side-status { margin-top: auto; padding: 14px 12px 4px; border-top: 1px solid var(--line); line-height: 1.6; }
+.side-status { margin-top: auto; padding: 14px 8px 4px; border-top: 1px solid var(--line); line-height: 1.6; }
 .side-status small { display: block; color: var(--faint); font-size: 12px; }
 .dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; background: var(--faint); margin-right: 8px;
   vertical-align: 1px; }
@@ -69,6 +69,7 @@ nav { display: grid; gap: 4px; }
 .topbar h1 { margin: 0; font-size: 20px; font-weight: 600; letter-spacing: 1px; }
 .sub { margin: 3px 0 0; color: var(--faint); font-size: 12px; }
 .page { display: none; padding: 20px 28px 32px; max-width: 1180px; }
+#page-notices { max-width: none; }
 .page.active { display: block; animation: fade .18s ease-out; }
 @keyframes fade { from { opacity: 0; transform: translateY(4px); } to { opacity: 1; transform: none; } }
 
@@ -170,12 +171,14 @@ nav { display: grid; gap: 4px; }
 .notice .when.countdown { color: var(--amber); font-weight: 600; }
 .notice-group { color: var(--faint); font-size: 12px; padding: 4px 2px 0; }
 .notice .body { grid-column: 2 / 4; color: #c4cdc3; white-space: pre-wrap; line-height: 1.65; font-size: 13px; }
-.notice .body.view { white-space: normal; }
+.notice .body.view { white-space: normal; grid-column: 1 / 4; }
 .notice .body.view .line { white-space: pre-wrap; }
 .notice .body.view .vtable { margin: 6px 0; overflow: hidden; }
 .notice .body.view .vtable table.fit { table-layout: fixed; width: 100%; }
 .notice .body.view .vtable td, .notice .body.view .vtable th { padding: 4px 10px; white-space: nowrap;
   overflow: hidden; text-overflow: ellipsis; }
+.notice .body.view .vtable td.cd { color: var(--amber); font-weight: 600; }
+.notice .body.view .vtable td.cd.soon { color: var(--red); }
 .notice .body.view .vtable td.key { color: var(--gold); font-weight: 700; font-size: 14px; }
 .notice .who { color: var(--gold); font-weight: 400; margin-right: 6px; }
 
