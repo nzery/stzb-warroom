@@ -43,6 +43,7 @@ code { font-family: Consolas, "Cascadia Mono", monospace; color: var(--gold); }
   color: #ecc488; font: 25px "SimSun", "Songti SC", serif; background: linear-gradient(160deg, #2a3a31, #1a2723); }
 .mark.big { width: 64px; height: 64px; font-size: 42px; margin: 0 auto; }
 nav { display: grid; gap: 4px; }
+.nav-sep { height: 1px; margin: 6px 8px; background: var(--line); }
 .nav-item { position: relative; display: flex; align-items: center; gap: 10px; width: 100%; padding: 10px 8px;
   border: 0; border-radius: 8px; background: transparent; color: #b3c0b6; cursor: pointer; text-align: left;
   transition: background .15s, color .15s; }

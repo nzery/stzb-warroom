@@ -86,12 +86,25 @@ async function main() {
     .match(/width:([\d.]+)%/g).map((w) => parseFloat(w.slice(6)));
   assert.deepEqual(fixed, [75, 25]);
   // when each army lands counts down in its row, not a line of its own
+  const later = Math.floor(Date.now() / 1000) + 600;
   const rows = vm.runInContext(`noticeTable({ columns: ['到达', '阵容'], key: 1,
-    countdown: { col: 0, at: [100, null], draw: [true, false] }, rows: [['21:33:02', '甲'], ['已驻守', '乙']] })`, context);
-  assert.ok(rows.includes('<td class="cd" data-at="100" data-draw="1" title="21:33:02">'), rows);
+    countdown: { col: 0, at: [${later}, null], draw: [true, false] }, rows: [['21:33:02', '甲'], ['已驻守', '乙']] })`, context);
+  assert.ok(rows.includes(`<td class="cd" data-at="${later}" data-draw="1" title="21:33:02">`), rows);
   assert.ok(rows.includes('<td title="已驻守">已驻守</td>'), 'an army staying does not count down');
   assert.equal(vm.runInContext(`short(Date.now() / 1000 + 65, '1')`, context), '打平 1分05秒');
   assert.equal(vm.runInContext(`short(Date.now() / 1000 - 1)`, context), '已到');
+  // a row whose army landed goes; a table left with none goes with its group's lines; then the notice
+  const soon = Math.floor(Date.now() / 1000) + 600;
+  const landed = vm.runInContext(`({ view: { blocks: [{ text: '来袭 2 支' },
+    { table: { columns: ['到达', '阵容'], countdown: { col: 0, at: [1, 2] }, rows: [['a', '甲'], ['b', '乙']] } },
+    { text: '驻守 1 支' }, { table: { columns: ['到达', '阵容'], countdown: { col: 0, at: [null] }, rows: [['已驻守', '丙']] } }] } })`, context);
+  context.landed = landed;
+  const drawn2 = vm.runInContext('noticeBody(landed)', context);
+  assert.ok(!drawn2.includes('来袭 2 支') && !drawn2.includes('甲') && drawn2.includes('驻守 1 支') && drawn2.includes('丙'), drawn2);
+  assert.equal(vm.runInContext('landedAll(landed)', context), false);  // one stays
+  const partly = vm.runInContext(`noticeTable({ columns: ['到达', '阵容'], countdown: { col: 0, at: [1, ${soon}] }, rows: [['a', '甲'], ['b', '乙']] })`, context);
+  assert.ok(!partly.includes('甲') && partly.includes(`data-at="${soon}"`), partly);
+  assert.equal(vm.runInContext(`landedAll({ view: { blocks: [{ table: { columns: ['到达'], countdown: { col: 0, at: [1] }, rows: [['a']] } }] } })`, context), true);
   // a tapped place's latest notice only
   const kept = vm.runInContext(`latestOfPlaces([{ seq: 1, role: 1, tapped: '9' }, { seq: 2, role: 1 },
     { seq: 3, role: 1, tapped: '9' }, { seq: 4, role: 2, tapped: '9' }]).map((n) => n.seq)`, context);

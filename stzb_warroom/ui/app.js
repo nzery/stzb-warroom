@@ -54,7 +54,7 @@ const accountState = (a) => (a.state === 'pending' && a.pending
 const LOGIN_STEPS = '请在本程序点「开始上报」，再进入游戏；如果已经在游戏里，退出后重新登录一次';
 
 const S = {
-  data: null, tapped: {}, nextFlip: Infinity, page: 'overview', filter: 'all', notices: [], logs: [], n: 0, l: 0,
+  data: null, tapped: {}, nextFlip: Infinity, page: 'notices', filter: 'all', notices: [], logs: [], n: 0, l: 0,
   hiddenBefore: store.get('hiddenBefore', 0), dismissed: new Set(store.get('dismissed', [])),
   seenNotices: store.get('seenNotices', 0), loaded: false, accountsKey: '', prefsKey: '', busy: new Set(),
   // The pages about the account's own armies, as the server gave them: {query, data, error, loading, key} each.
@@ -283,6 +283,12 @@ function renderBanners(d) {
     parts.push(banner('error', 'alert', `<b>${invalid.length === d.tokens.length ? 'Token 无效' : `有 ${invalid.length} 个 Token 无效`}</b>：${esc(invalid.map((a) => a.token).join('、'))} 被服务器拒绝，这些账号的数据不会上传。请找管理员确认 Token，删掉后重新添加。`,
       '<button class="btn danger" data-goto="accounts">去处理</button>'));
   }
+  const waiting = d.tokens.filter((a) => ['pending', 'no_role', 'problem'].includes(a.state));
+  if (waiting.length) {
+    parts.push(banner(waiting.some((a) => a.state === 'problem') ? 'error' : 'warn', 'user',
+      `<b>账号还不能收通知</b>：${waiting.map((a) => `${esc(a.role ? roleName(a.role.label) : a.name || a.token)} ${esc(accountState(a)[0])}`).join('；')}`,
+      '<button class="btn primary" data-goto="accounts">去看看</button>'));
+  }
   if (!d.tokens.length) parts.push(banner('warn', 'user', '还没有添加 Token，数据不会上传。', '<button class="btn primary" data-goto="accounts">添加账号</button>'));
   // On the overview the status card says it already.
   if (d.capture.state === 'error' && S.page !== 'overview' && !(invalid.length && invalid.length === d.tokens.length)) {
@@ -351,7 +357,8 @@ function renderOverview(d) {
   }).join('') : '<div class="empty">还没有账号</div>';
 
   const gone = withdrawnArmies();
-  const recent = latestOfPlaces(S.notices.filter((n) => n.seq > S.hiddenBefore && !withdrawnAll(n, gone))).slice(-6).reverse();
+  const recent = latestOfPlaces(S.notices.filter((n) => n.seq > S.hiddenBefore && !withdrawnAll(n, gone)))
+    .filter((n) => !landedAll(n)).slice(-6).reverse();
   $('ov-notices').innerHTML = recent.length ? recent.map((n) => `<div class="mini"><span class="tag ${esc(n.level)}">${esc(n.tag || '通知')}</span><span class="main-text">${esc(n.title)}</span><span class="time">${clock(n.time)}</span></div>`).join('')
     : '<div class="empty">还没有通知。登录游戏并上报后，敌袭等通知会显示在这里。</div>';
 }
@@ -361,11 +368,19 @@ function renderOverview(d) {
 // (`widths`, so the tables of all notices line up) or else by their longest text, and a cell too
 // long for its column ends in … with the whole text on hover. The table's `key` column (the
 // enemy lineup) stands out. Its `countdown` column (when each army lands, the server's epoch
-// seconds in `at`, `draw` for one that attacks again then) counts down in the row. Any other
-// notice is its text.
+// seconds in `at`, `draw` for one that attacks again then) counts down in the row, and a row
+// whose army landed goes (2026-10-14 user: what is left is what is still to come, even when the
+// player taps no other place); a table whose rows all went goes with the lines before it (its
+// group's name, where its armies went). Any other notice is its text.
+const nowSec = () => Date.now() / 1000;
+function rowsLeft(t) {
+  const at = t.countdown && Array.isArray(t.countdown.at) ? t.countdown.at : [];
+  return ((t && t.rows) || []).map((row, r) => [row, r]).filter(([, r]) => !(typeof at[r] === 'number' && at[r] <= nowSec()));
+}
 const textWidth = (value) => [...String(value)].reduce((n, ch) => n + (ch.charCodeAt(0) > 0xff ? 2 : 1), 0);
 function noticeTable(t) {
-  const rows = (t && t.rows) || [];
+  const kept = rowsLeft(t);
+  const rows = kept.map(([row]) => row);
   if (!rows.length) return '';
   // +3: a cell's padding, about three half-width characters
   const widths = t.columns.map((h, i) => 3 + Math.min(40, Math.max(4, textWidth(h), ...rows.map((row) => textWidth(row[i] ?? '')))));
@@ -382,14 +397,32 @@ function noticeTable(t) {
     return `<td title="${esc(c)}"${i === t.key ? ' class="key"' : ''}>${esc(c)}</td>`;
   };
   return `<div class="vtable"><table class="fit"><colgroup>${cols}</colgroup><thead><tr>${t.columns.map((h) => `<th>${esc(h)}</th>`).join('')}</tr></thead>
-    <tbody>${rows.map((row, r) => `<tr>${row.map((c, i) => cellOf(c, i, r)).join('')}</tr>`).join('')}</tbody></table></div>`;
+    <tbody>${kept.map(([row, r]) => `<tr>${row.map((c, i) => cellOf(c, i, r)).join('')}</tr>`).join('')}</tbody></table></div>`;
+}
+// A notice of tables whose rows have all landed has nothing left to tell.
+function landedAll(n) {
+  const tables = (n.view?.blocks || []).filter((b) => b.table?.countdown);
+  return tables.length > 0 && (n.view.blocks || []).every((b) => !b.table || !rowsLeft(b.table).length);
+}
+// When the next row lands, for the list to drop it then.
+function nextRowLanding(n) {
+  return Math.min(Infinity, ...(n.view?.blocks || []).flatMap((b) => (b.table?.countdown?.at || [])
+    .filter((at) => typeof at === 'number' && at > nowSec())));
 }
 const countsDown = (n) => (n.view?.blocks || []).some((b) => b.table?.countdown);
 function noticeBody(n) {
   const v = n.view;
   if (!v || !Array.isArray(v.blocks)) return n.body ? `<div class="body">${esc(n.body)}</div>` : '';
   const text = (t) => (t ? `<div class="line">${esc(t)}</div>` : '');
-  return `<div class="body view">${v.blocks.map((b) => (b.table ? noticeTable(b.table) : text(b.text))).join('')}</div>`;
+  const parts = [];
+  let lines = [];
+  for (const b of v.blocks) {
+    if (!b.table) { lines.push(text(b.text)); continue; }
+    const table = noticeTable(b.table);
+    if (table || !(b.table.rows || []).length) parts.push(...lines, table);
+    lines = [];
+  }
+  return `<div class="body view">${[...parts, ...lines].join('')}</div>`;
 }
 
 // A notice of raids still to come (`arrivals`, the server's, epoch seconds ascending) stays above
@@ -445,12 +478,12 @@ function latestOfPlaces(notices) {
 function renderNotices() {
   const gone = withdrawnArmies();
   const list = latestOfPlaces(S.notices.filter((n) => n.seq > S.hiddenBefore && (S.filter === 'all' || n.level === S.filter)
-    && !withdrawnAll(n, gone))).reverse();
+    && !withdrawnAll(n, gone))).filter((n) => !landedAll(n)).reverse();
   const pinned = list.filter((n) => n.tapped && S.tapped[n.role] === n.tapped);
   const others = list.filter((n) => !pinned.includes(n));
   const coming = others.map((n) => [n, nextArrival(n, gone)]).filter(([, at]) => at).sort((a, b) => a[1] - b[1]);
   const rest = others.filter((n) => !nextArrival(n, gone));
-  S.nextFlip = Math.min(Infinity, ...list.map((n) => nextArrival(n, gone) || Infinity));
+  S.nextFlip = Math.min(Infinity, ...list.map((n) => Math.min(nextArrival(n, gone) || Infinity, nextRowLanding(n))));
   const card = (n, at) => {
     const who = roleOf(n);
     // A notice whose table counts down in its rows says when it came; else when its raid lands.
@@ -832,7 +865,9 @@ $('copy-diag').addEventListener('click', (e) => withBusy(e.currentTarget, '收�
 }).catch(() => {}));
 
 document.querySelectorAll('[data-icon]').forEach((node) => { node.innerHTML = icon(node.dataset.icon); });
-const first = location.hash.slice(1) || store.get('page', 'overview');
-show(PAGES[first] ? first : 'overview');
+// Notices are what the window is for (2026-10-14 user): it opens on them; what needs doing
+// elsewhere (an account to fix, the capture stopped) is a banner above them with a way there.
+const first = location.hash.slice(1) || 'notices';
+show(PAGES[first] ? first : 'notices');
 refresh();
 connect();
