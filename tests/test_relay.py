@@ -140,6 +140,37 @@ class RobustnessTests(unittest.TestCase):
         self.assertTrue(exit_.handlers.acquire(blocking=False))  # released
 
 
+class HelloTests(unittest.TestCase):
+    def hello(self, size=517, name=b"relay.host.test"):
+        body = bytes([1]) + (size - 9).to_bytes(3, "big") + b"\x03\x03" + os.urandom(40) + b"\x00\x00" + name
+        body += os.urandom(size - 5 - len(body))
+        return b"\x16\x03\x01" + len(body).to_bytes(2, "big") + body
+
+    def test_the_hello_is_cut_into_records_that_rebuild_it(self):
+        data = self.hello()
+        pieces = relay.split_hello(data, "relay.host.test")
+        self.assertGreater(len(pieces), 3)
+        rebuilt = b""
+        for piece in pieces:
+            self.assertEqual(piece[:3], b"\x16\x03\x01")
+            self.assertEqual(int.from_bytes(piece[3:5], "big"), len(piece) - 5)
+            rebuilt += piece[5:]
+        self.assertEqual(rebuilt, data[5:])
+        self.assertFalse(any(b"relay.host.test" in piece for piece in pieces))  # no packet names the relay whole
+        for size in (300, 517, 1557):  # wherever the name is
+            for offset in range(0, size - 40, 7):
+                body = bytearray(os.urandom(size - 5))
+                body[offset:offset + 15] = b"relay.host.test"
+                hello = b"\x16\x03\x01" + len(body).to_bytes(2, "big") + bytes(body)
+                self.assertFalse(any(b"relay.host.test" in p for p in relay.split_hello(hello, "relay.host.test")))
+
+    def test_anything_else_is_sent_as_it_is(self):
+        for data in (b"", b"\x17\x03\x03\x00\x02ab", self.hello()[:-1], self.hello() + self.hello()):
+            self.assertEqual(relay.split_hello(data), [data])
+        small = b"\x16\x03\x01\x00\x04abcd"
+        self.assertEqual(relay.split_hello(small), [small])
+
+
 class GameCheckTests(unittest.TestCase):
     def test_the_game_from_the_first_byte_even_in_pieces(self):
         first = client_frame(99991, {"passport": "x@163.com", "ver": "9.2.2"})
