@@ -375,16 +375,50 @@ function noticeBody(n) {
   return `<div class="body view">${v.blocks.map((b) => (b.table ? noticeTable(b.table) : text(b.text))).join('')}</div>`;
 }
 
+// A notice of raids still to come (`arrivals`, the server's, epoch seconds ascending) stays above
+// the others, the soonest first, counting down to its next one; once they have all landed it goes
+// back among the others by when it came.
+function nextArrival(n) {
+  const now = Date.now() / 1000;
+  return Array.isArray(n.arrivals) ? n.arrivals.find((t) => typeof t === 'number' && t > now) : undefined;
+}
+
+function left(at) {
+  const s = Math.max(0, Math.ceil(at - Date.now() / 1000));
+  return s >= 60 ? `还有 ${Math.floor(s / 60)}分${String(s % 60).padStart(2, '0')}秒` : `还有 ${s}秒`;
+}
+
+function tickCountdowns() {
+  let landed = false;
+  for (const el of document.querySelectorAll('#notice-list .countdown')) {
+    const at = Number(el.dataset.at);
+    if (at * 1000 <= Date.now()) landed = true;
+    el.textContent = left(at);
+  }
+  if (landed) renderNotices();
+}
+setInterval(tickCountdowns, 1000);
+
 function renderNotices() {
   const list = S.notices.filter((n) => n.seq > S.hiddenBefore && (S.filter === 'all' || n.level === S.filter)).reverse();
-  const html = list.length ? list.map((n) => {
+  const coming = list.map((n) => [n, nextArrival(n)]).filter(([, at]) => at).sort((a, b) => a[1] - b[1]);
+  const rest = list.filter((n) => !nextArrival(n));
+  const card = (n, at) => {
     const who = roleOf(n);
-    return `<article class="notice ${esc(n.level)}"><span class="tag ${esc(n.level)}">${esc(n.tag || '通知')}</span>
+    const when = at ? `<span class="when countdown" data-at="${at}" title="${clock(at)} 到"></span>`
+      : `<span class="when" title="${clock(n.time, true)}">${clock(n.time)}</span>`;
+    return `<article class="notice ${esc(n.level)}${at ? ' coming' : ''}"><span class="tag ${esc(n.level)}">${esc(n.tag || '通知')}</span>
       <div class="title">${who && S.data.tokens.length > 1 ? `<span class="who">${esc(who)}</span>` : ''}${esc(n.title)}</div>
-      <span class="when" title="${clock(n.time, true)}">${clock(n.time)}</span>
+      ${when}
       ${noticeBody(n)}</article>`;
-  }).join('') : `<div class="card empty">${S.filter === 'all' ? '还没有通知' : '没有这一类的通知'}</div>`;
+  };
+  const html = list.length
+    ? (coming.length ? `<div class="notice-group">还没打到 · 先到的在上</div>${coming.map(([n, at]) => card(n, at)).join('')}` : '')
+      + (coming.length && rest.length ? '<div class="notice-group">其他通知</div>' : '')
+      + rest.map((n) => card(n)).join('')
+    : `<div class="card empty">${S.filter === 'all' ? '还没有通知' : '没有这一类的通知'}</div>`;
   if ($('notice-list').dataset.html !== html) { $('notice-list').innerHTML = html; $('notice-list').dataset.html = html; }
+  for (const el of document.querySelectorAll('#notice-list .countdown')) el.textContent = left(Number(el.dataset.at));
   if (S.notices.length) { S.seenNotices = S.notices[S.notices.length - 1].seq; store.set('seenNotices', S.seenNotices); }
 }
 

@@ -167,6 +167,8 @@ nav { display: grid; gap: 4px; }
 .notice > .tag { justify-self: stretch; text-align: center; padding: 1px 4px; }
 .notice .title { font-weight: 600; line-height: 22px; min-width: 0; }
 .notice .when { color: var(--faint); font-size: 12px; line-height: 22px; font-variant-numeric: tabular-nums; }
+.notice .when.countdown { color: var(--amber); font-weight: 600; }
+.notice-group { color: var(--faint); font-size: 12px; padding: 4px 2px 0; }
 .notice .body { grid-column: 2 / 4; color: #c4cdc3; white-space: pre-wrap; line-height: 1.65; font-size: 13px; }
 .notice .body.view { white-space: normal; }
 .notice .body.view .line { white-space: pre-wrap; }
