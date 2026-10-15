@@ -252,6 +252,21 @@ class GameCheckTests(unittest.TestCase):
                     break
             self.assertIs(verdict, False)
 
+    def test_what_was_not_taken_is_logged_without_the_session_token(self):
+        frame = client_frame(1, None)  # a request frame whose body is not JSON
+        token = frame[12:44]
+        check = relay.GameCheck()
+        check.feed(frame)
+        self.assertEqual(len(check.head), 1)
+        size, shown = check.head[0].split(":")
+        self.assertEqual(int(size), len(frame))
+        self.assertNotIn(token.hex(), shown)
+        self.assertEqual(shown[:24], frame[:12].hex())  # the length and what follows stay
+        self.assertEqual(len(bytes.fromhex(shown)), min(len(frame), relay.HEAD_BYTES))
+        for _ in range(10):
+            check.feed(b"x")
+        self.assertEqual(len(check.head), relay.HEAD_MESSAGES)
+
     def test_a_verdict_stays(self):
         check = relay.GameCheck()
         self.assertTrue(check.feed(client_frame(99991, {"x": 1})))
