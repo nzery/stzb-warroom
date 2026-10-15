@@ -84,6 +84,13 @@ class OpenTests(unittest.TestCase):
 
 class CloseTests(unittest.TestCase):
     def test_closing_the_exit_ends_the_game_connections_going_through_it(self):
+        self.closes_the_game_connection(wakes=True)
+
+    def test_closing_ends_them_where_a_shutdown_does_not_wake_select(self):
+        # Windows: shutting the game socket down leaves the copying thread asleep in select().
+        self.closes_the_game_connection(wakes=False)
+
+    def closes_the_game_connection(self, wakes):
         exit_ = relay.Exit("https://relay.example", ["t"], log=lambda **fields: None)
         mine, _game_server = socket.socketpair()
         pipe_end, _relay_end = socket.socketpair()
@@ -93,6 +100,10 @@ class CloseTests(unittest.TestCase):
         class Game(socket.socket):
             def connect(self, address):
                 pass
+
+            def shutdown(self, how):
+                if wakes:
+                    super().shutdown(how)
 
         class Pipe:
             sock, closed = pipe_end, False
