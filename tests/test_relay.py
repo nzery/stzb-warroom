@@ -4,6 +4,8 @@ import json
 import os
 import socket
 import struct
+import threading
+import time
 import unittest
 import unittest.mock
 
@@ -78,6 +80,52 @@ class OpenTests(unittest.TestCase):
     def test_hello_gives_the_own_address(self):
         self.exit.handle(b'{"hello": {"ip": "1.2.3.4"}}')
         self.assertEqual(self.exit.own, {"1.2.3.4"})
+
+
+class CloseTests(unittest.TestCase):
+    def test_closing_the_exit_ends_the_game_connections_going_through_it(self):
+        exit_ = relay.Exit("https://relay.example", ["t"], log=lambda **fields: None)
+        mine, _game_server = socket.socketpair()
+        pipe_end, _relay_end = socket.socketpair()
+        self.addCleanup(_game_server.close)
+        self.addCleanup(_relay_end.close)
+
+        class Game(socket.socket):
+            def connect(self, address):
+                pass
+
+        class Pipe:
+            sock, closed = pipe_end, False
+
+            def __init__(self, url, headers):
+                pass
+
+            def pending(self):
+                return False
+
+            def send(self, data):
+                pass
+
+            def close(self):
+                Pipe.closed = True
+
+        game = Game(fileno=mine.detach())
+        with unittest.mock.patch.object(relay, "resolve", return_value=[(socket.AF_INET, "1.2.3.4")]), \
+                unittest.mock.patch.object(relay.socket, "socket", return_value=game), \
+                unittest.mock.patch.object(relay, "WebSocket", Pipe):
+            worker = threading.Thread(target=exit_.open, args=("a" * 32, "game.example", 8001), daemon=True)
+            worker.start()
+            for _ in range(200):
+                if exit_.open_pipes:
+                    break
+                time.sleep(0.01)
+            self.assertEqual(exit_.open_pipes, 1)
+            exit_.close()
+            worker.join(2)
+        self.assertFalse(worker.is_alive())
+        self.assertTrue(Pipe.closed)
+        self.assertEqual(exit_.open_pipes, 0)
+        pipe_end.close()
 
 
 class BusyTests(unittest.TestCase):
@@ -200,20 +248,39 @@ class GameCheckTests(unittest.TestCase):
 
 
 class RelaysTests(unittest.TestCase):
-    def test_relays_from_the_first_token_that_has_them(self):
+    def test_relays_of_all_the_tokens(self):
+        # The public domain's token names DMIT's alone; a private one's names Aliyun's first: whichever
+        # comes first, the computer connects to both (it serves both tokens' phones).
         pages = {"a": OSError("down"), "b": {"problem": "未审批", "relays": []},
-                 "c": {"relays": ["https://relay.example", "http://plain.example", 5, "https://backup.example"]}}
+                 "public": {"relays": ["https://backup.example"]},
+                 "private": {"relays": ["https://relay.example", "http://plain.example", 5, "https://backup.example"]}}
 
         class Server:
+            def __init__(self):
+                self.paths = []
+
             def json(self, path, token, timeout):
-                self.path = path
+                self.paths.append(path)
                 value = pages[token]
                 if isinstance(value, Exception):
                     raise value
                 return value
 
-        self.assertEqual(relay.relays_of(Server(), ["a", "b", "c"]), ["https://relay.example", "https://backup.example"])
+        for tokens in (["a", "public", "private"], ["private", "b", "public"]):
+            self.assertEqual(sorted(relay.relays_of(Server(), tokens)), ["https://backup.example", "https://relay.example"])
         self.assertEqual(relay.relays_of(Server(), ["a", "b"]), [])
+        server = Server()
+        relay.relays_of(server, ["public"])
+        self.assertEqual(server.paths, ["/v1/client/phone?only=relays"])  # no QR codes made for this
+
+    def test_an_older_server_gets_the_whole_page_asked(self):
+        class Server:
+            def json(self, path, token, timeout):
+                if "?" in path:
+                    raise relay.HTTPError(path, 404, "Not Found", {}, None)
+                return {"relays": ["https://backup.example"]}
+
+        self.assertEqual(relay.relays_of(Server(), ["t"]), ["https://backup.example"])
 
 
 if __name__ == "__main__":
