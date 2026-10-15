@@ -17,6 +17,7 @@ import hashlib
 import ipaddress
 import json
 import os
+import re
 import selectors
 import socket
 import ssl
@@ -39,7 +40,6 @@ TEXT, BINARY, CLOSE, PING, PONG = 1, 2, 8, 9, 10
 CHECK_BYTES = 256 * 1024
 CHECK_STRIKES = 5
 MAX_PIPES = 8
-BLOCK_SECONDS = 600
 STOP_CHECK = 1  # seconds between a game connection's looks at whether the exit was closed
 CONTROL_TIMEOUT = 90  # the relay pings every 25 s
 NAT64 = ipaddress.ip_network("64:ff9b::/96")
@@ -337,6 +337,18 @@ class WebSocket:
             pass
 
 
+HEAD_MESSAGES = 6  # messages whose beginning the log shows when the check fails
+HEAD_BYTES = 64
+SECRET = re.compile(rb"[0-9A-Za-z]{16,}")
+
+
+def head(data):
+    """A message's size and first bytes in hex, a run of 16+ letters and digits (the session token
+    of a request frame) left out, for finding out what the check did not take."""
+    shown = SECRET.sub(lambda m: b"\0" * len(m.group()), bytes(data[:HEAD_BYTES])).hex()
+    return f"{len(data)}:{shown}"
+
+
 class GameCheck:
     """Whether the bytes the phone sends are the game's requests (S10 of docs/phone-relay.md)."""
 
@@ -345,11 +357,14 @@ class GameCheck:
         self.checked = self.strikes = 0
         self.start = bytearray()  # the first bytes, until a whole request header is there
         self.verdict = None  # None: not yet; True: the game; False: something else
+        self.head = []  # the first messages' beginnings, for the log when it is not the game
 
     def feed(self, data):
         if self.verdict is not None:
             return self.verdict
         self.checked += len(data)
+        if len(self.head) < HEAD_MESSAGES:
+            self.head.append(head(data))
         if self.start is not None:
             # The splitter starts on a piece that begins with a whole frame header (a TCP segment);
             # the phone's WebSocket messages can cut anywhere, so the first ones are joined first.
@@ -381,7 +396,6 @@ class Exit:
         self.log = log or (lambda **fields: print(json.dumps(fields, ensure_ascii=False), flush=True))
         self.enforce_game = enforce_game
         self.own = set()  # this computer's public address, as the relay saw it
-        self.blocked = {}  # address -> monotonic time it may be tried again
         self.pipes = threading.BoundedSemaphore(MAX_PIPES)
         self.handlers = threading.BoundedSemaphore(MAX_HANDLERS)
         self.games = set()  # the game sockets of the connections being copied now (close() ends them)
@@ -490,8 +504,7 @@ class Exit:
             return self.refuse(conn, "busy")
         try:
             try:
-                addresses = [a for a in resolve(host, port, self.own)
-                             if self.blocked.get(a[1], 0) < time.monotonic()]
+                addresses = resolve(host, port, self.own)
             except OSError:
                 addresses = []
             if not addresses:
@@ -555,9 +568,11 @@ class Exit:
                         return
                     data = message[1]
                     if check.verdict is None and check.feed(data) is not None:
-                        self.log(event="game_check", ok=check.verdict, checked=check.checked, down=down)
+                        self.log(event="game_check", ok=check.verdict, checked=check.checked, down=down,
+                                 **({} if check.verdict else {"head": check.head}))
+                        # Only this connection ends: the target is not blocked, so a reconnect the
+                        # check does not take (2026-10-15) does not shut out the login that follows.
                         if not check.verdict and self.enforce_game:
-                            self.blocked[address] = time.monotonic() + BLOCK_SECONDS
                             return
                     up += len(data)
                     game.sendall(data)
