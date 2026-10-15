@@ -14,6 +14,8 @@ jobs:
     runs-on: windows-latest
     steps:
       - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0  # the tags: a build by hand is numbered after the latest one (build.ps1)
       - uses: actions/setup-python@v6
         with:
           python-version: "3.12"
