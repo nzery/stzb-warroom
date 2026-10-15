@@ -240,6 +240,14 @@ class GameCheckTests(unittest.TestCase):
             self.assertEqual(verdict, True if cut >= len(first) else None, cut)
             self.assertTrue(check.feed(stream[cut:]), cut)
 
+    def test_a_resumed_session_is_the_game(self):
+        # 2026-10-15, iPhone reconnecting: a 90008 without a body, then 90009s whose body is a number.
+        bare = client_frame(90008, None)
+        bare = struct.pack(">I", 53) + bare[4:57]  # the header alone
+        stream = bare + b"".join(client_frame(90009, 9787814 + n) for n in range(6))
+        check = relay.GameCheck()
+        self.assertTrue(check.feed(stream[:57]) is None and check.feed(stream[57:]))
+
     def test_anything_else_is_refused(self):
         for junk in (b"GET / HTTP/1.1\r\nHost: x\r\n\r\n" * 20000,  # a web request through the game's port
                      os.urandom(300 * 1024),  # noise
