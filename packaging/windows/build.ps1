@@ -5,7 +5,10 @@
 #   powershell -ExecutionPolicy Bypass -File packaging\windows\build.ps1 -Server ... -Include D:\Wireshark-4.6.9-x64.exe
 #
 # -Version (default: the tag being built, GITHUB_REF_NAME, without its "v") is the version the
-# program reports and compares with the newest release; any other build is 0.0.0.
+# program reports and compares with the newest release. Any other build (a test build, run by hand)
+# is the latest tag plus the run number, e.g. 1.7.2.38: newer than that release, so it does not
+# update itself back to it, and older than the next one, which replaces it as usual (0.0.0 did
+# the former: a test build ran the release's code from its second start).
 # -Server (default: ST_SERVER) is the server the package reports to and -Site (default: ST_SITE) the
 # website its window links to; both go into config.json beside the exe, not into the source.
 #
@@ -21,7 +24,11 @@ if (-not $Server) { throw "no server: pass -Server or set ST_SERVER" }
 $root = Resolve-Path "$PSScriptRoot\..\.."
 Set-Location $root
 $Version = $Version -replace '^v', ''
-if ($Version -notmatch '^\d+(\.\d+)*$') { $Version = "0.0.0" }
+if ($Version -notmatch '^\d+(\.\d+)*$') {
+    try { $tag = (git describe --tags --abbrev=0 --match "v*" 2>$null) -replace '^v', '' } catch { $tag = "" }
+    $run = if ($env:GITHUB_RUN_NUMBER) { $env:GITHUB_RUN_NUMBER } else { "0" }
+    $Version = if ($tag -match '^\d+(\.\d+)*$') { "$tag.$run" } else { "0.0.0" }
+}
 [IO.File]::WriteAllText("$root\stzb_warroom\_version.py", "__version__ = `"$Version`"`n")
 Write-Host "version $Version"
 
