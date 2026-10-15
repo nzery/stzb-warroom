@@ -335,8 +335,9 @@ input[type=text]:focus, input[type=password]:focus { border-color: var(--gold2);
 .pill.ok { background: #24412f; color: #9fdcae; }
 .pill.warn { background: #4a3d22; color: #f0cf8a; }
 .pill.err { background: #4a2626; color: #f2a3a3; }
-.phone-nodes { display: grid; grid-template-columns: repeat(auto-fill, minmax(230px, 1fr)); gap: 14px; margin-bottom: 14px; }
+.phone-nodes { display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 14px; margin-bottom: 14px; }
 .phone-node { display: flex; flex-direction: column; align-items: center; gap: 10px; }
+.phone-node .phone-steps, .phone-node .setting { align-self: stretch; }
 .phone-node .qr { width: 200px; height: 200px; background: #fff; padding: 8px; border-radius: 6px; image-rendering: pixelated; }
 .phone-steps { margin: 6px 0 12px; padding-left: 20px; line-height: 1.8; font-size: 13px; }
 

@@ -80,7 +80,6 @@ const S = {
   personalRole: store.get('personalRole', null),
   // The server's phone page for the chosen account: {data, error, loading, role, key}.
   phone: {},
-  phoneOS: store.get('phoneOS', 'ios'),  // which phone's steps it shows: 'ios' or 'android'
 };
 const PERSONAL = new Set(['teams', 'battles', 'rivals']);
 
@@ -755,10 +754,12 @@ function renderPhone(d) {
   const view = S.phone;
   const accounts = personalAccounts();
   const account = personalAccount();
-  const key = JSON.stringify([view.data, view.error, view.loading, accounts.map(({ a }) => a.role.id), account?.a.role.id]);
+  const on = Boolean(d.settings.phone_exit);
+  const key = JSON.stringify([on, view.data, view.error, view.loading, accounts.map(({ a }) => a.role.id), account?.a.role.id]);
   if (key === view.key) return;
   view.key = key;
   const box = $('phone-box');
+  if (!on) { box.innerHTML = ''; return; }  // off: nothing below the switch
   if (!account) {
     box.innerHTML = `<div class="card empty">${(d.tokens || []).length ? '还没有能用手机玩的账号：Token 审批通过（先在这台电脑上登录一次游戏）后就有。' : '先到“账号与推送”添加账号。'}</div>`;
     return;
@@ -772,26 +773,26 @@ function renderPhone(d) {
   else if (!data) body = '<div class="card empty">正在读取…</div>';
   else if (data.problem) body = banner('warn', 'info', esc(data.problem));
   else {
-    // iPhone (Shadowrocket nodes and a rule) or Android (a v2rayNG subscription), as the server gives them.
-    const android = data.android && S.phoneOS === 'android';
-    const reset = `<div class="setting"><div><b>${android ? '订阅地址' : '二维码'}外泄了？</b><p>换一个新的，旧的 30 秒内失效，手机要重新扫码。</p></div>
-        <button class="btn ghost small" data-phone-reset="1">重置</button></div>`;
-    const os = data.android ? `<div class="vfilter"><span>手机</span><div class="chips">${[['ios', 'iPhone'], ['android', '安卓']].map(([value, label]) =>
-      `<button class="chip${(android ? 'android' : 'ios') === value ? ' active' : ''}" data-phone-os="${value}">${label}</button>`).join('')}</div></div>` : '';
-    body = `<p class="muted prefs-note">${esc(data.note || '')}</p>${os}` + (android ? `
-    <div class="phone-nodes"><div class="card phone-node">
-      <h3>v2rayNG 订阅</h3>
-      ${data.android.qr ? `<img class="qr" alt="订阅二维码" src="${svgImage(data.android.qr)}">` : '<div class="empty">服务器没给二维码，复制订阅地址到手机上添加</div>'}
-      <div class="row-actions">${copyButton(data.android.sub, '复制订阅地址')}</div></div></div>
-    <div class="card"><h3>怎么用</h3><ol class="phone-steps">${(data.android.steps || []).map((s) => `<li>${esc(s)}</li>`).join('')}</ol>
-      ${reset}</div>` : `
-    <div class="phone-nodes">${data.nodes.map((n) => `<div class="card phone-node">
-      <h3>${esc(n.name)}</h3>
-      ${n.qr ? `<img class="qr" alt="${esc(n.name)} 的二维码" src="${svgImage(n.qr)}">` : '<div class="empty">服务器没给二维码，复制链接到手机上导入</div>'}
-      <div class="row-actions">${copyButton(n.link, '复制链接')}</div></div>`).join('')}</div>
-    <div class="card"><h3>怎么用</h3><ol class="phone-steps">${(data.steps || []).map((s) => `<li>${esc(s)}</li>`).join('')}</ol>
-      <div class="setting"><div><b>要加的规则</b><p><code>${esc(data.rule)}</code></p></div>${copyButton(data.rule, '复制规则')}</div>
-      ${reset}</div>`);
+    // iPhone (a Shadowrocket node and its rule) and Android (a v2rayNG subscription) side by side,
+    // as the server gives them; a server without the Android part shows the iPhone alone.
+    const node = data.nodes[0];
+    const steps = (list) => `<ol class="phone-steps">${(list || []).map((s) => `<li>${esc(s)}</li>`).join('')}</ol>`;
+    const qr = (svg, alt) => svg ? `<img class="qr" alt="${alt}" src="${svgImage(svg)}">` : '<div class="empty">服务器没给二维码，复制到手机上导入</div>';
+    const iphone = node ? `<div class="card phone-node">
+      <h3>iPhone</h3>
+      ${qr(node.qr, 'iPhone 的二维码')}
+      <div class="row-actions">${copyButton(node.link, '复制链接')}</div>
+      ${steps(data.steps)}
+      <div class="setting"><div><b>要加的规则</b><p><code>${esc(data.rule)}</code></p></div>${copyButton(data.rule, '复制规则')}</div></div>` : '';
+    const android = data.android ? `<div class="card phone-node">
+      <h3>安卓</h3>
+      ${qr(data.android.qr, '安卓的二维码')}
+      <div class="row-actions">${copyButton(data.android.sub, '复制订阅地址')}</div>
+      ${steps(data.android.steps)}</div>` : '';
+    body = `<p class="muted prefs-note">${esc(data.note || '')}</p>
+    <div class="phone-nodes">${iphone}${android}</div>
+    <div class="card"><div class="setting"><div><b>二维码外泄了？</b><p>拿到二维码或订阅地址的人能借你的电脑连游戏。重置后换新的，旧的 30 秒内失效，手机要重新扫码。</p></div>
+      <button class="btn ghost small" data-phone-reset="1">重置</button></div></div>`;
   }
   const refresh = `<button class="btn ghost small" data-phone-refresh="1"${view.loading ? ' disabled' : ''}>${view.loading ? '<span class="spin"></span>读取中' : `${icon('refresh').replace('<svg', '<svg width="14" height="14"')}刷新`}</button>`;
   box.innerHTML = `<div class="vtoolbar"><div class="vfilters">${who}</div>${refresh}</div>` + body;
@@ -803,14 +804,6 @@ async function phoneClick(event) {
   if (copy) {
     try { await navigator.clipboard.writeText(copy.dataset.copyText); toast('已复制'); }
     catch { toast('复制失败', true); }
-    return true;
-  }
-  const os = event.target.closest('[data-phone-os]');
-  if (os) {
-    S.phoneOS = os.dataset.phoneOs;
-    store.set('phoneOS', S.phoneOS);
-    S.phone.key = null;
-    renderPhone(S.data);
     return true;
   }
   const role = event.target.closest('[data-phone-role]');
