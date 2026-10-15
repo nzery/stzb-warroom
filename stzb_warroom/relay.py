@@ -26,6 +26,7 @@ import time
 import uuid
 from urllib.parse import urlsplit
 
+from .api import tls_context
 from .capture import GAME_PORT
 from .frames import CLIENT_HEADER, Direction, is_game
 
@@ -215,7 +216,7 @@ class WebSocket:
         sock = socket.create_connection((host, port), timeout=timeout)
         try:
             if secure:
-                context = ssl.create_default_context()
+                context = tls_context()
                 context.set_alpn_protocols(["http/1.1"])  # no WebSocket over HTTP/2 at the relay
                 sock = TLS(sock, context, host)
             key = base64.b64encode(os.urandom(16)).decode("ascii")
