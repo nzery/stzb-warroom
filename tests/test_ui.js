@@ -84,12 +84,12 @@ async function main() {
   const exits = nodes.get('phone-status').innerHTML;
   assert.ok(exits.includes('率土战局-主节点') && exits.includes('已连接') && exits.includes('1 条'), exits);
   assert.ok(!phone.includes('安卓'), 'a server without the Android part shows the iPhone alone');
-  assert.ok(phone.includes('<h3>iPhone</h3>'), phone);
+  assert.ok(phone.includes('<h3>iPhone · 小火箭</h3>'), phone);
   // both phones side by side: each QR code under its name, no choice to make
   vm.runInContext(`S.phone.data.android = { sub: 'https://api.example/v1/phone/sub?k=<x>', steps: ['装 v2rayNG'],
       qr: '<svg xmlns="http://www.w3.org/2000/svg"></svg>' }; S.phone.key = null; renderPhone(S.data);`, context);
   const both = nodes.get('phone-box').innerHTML;
-  assert.ok(both.indexOf('<h3>iPhone</h3>') < both.indexOf('<h3>安卓</h3>') && !both.includes('data-phone-os'), both);
+  assert.ok(both.indexOf('<h3>iPhone · 小火箭</h3>') < both.indexOf('<h3>安卓 · v2rayNG</h3>') && !both.includes('data-phone-os'), both);
   assert.ok(both.includes('data-copy-text="https://api.example/v1/phone/sub?k=&lt;x&gt;"') && both.includes('装 v2rayNG'), both);
   assert.ok(both.includes('DST-PORT,8001') && both.includes('data-phone-reset'), both);
   assert.strictEqual((both.match(/<img class="qr"/g) || []).length, 2);
