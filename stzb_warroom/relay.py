@@ -40,6 +40,7 @@ CHECK_BYTES = 256 * 1024
 CHECK_STRIKES = 5
 MAX_PIPES = 8
 BLOCK_SECONDS = 600
+STOP_CHECK = 1  # seconds between a game connection's looks at whether the exit was closed
 CONTROL_TIMEOUT = 90  # the relay pings every 25 s
 NAT64 = ipaddress.ip_network("64:ff9b::/96")
 SIX_TO_FOUR = ipaddress.ip_network("2002::/16")
@@ -444,7 +445,7 @@ class Exit:
             games = list(self.games)
         for game in games:
             try:
-                game.shutdown(socket.SHUT_RDWR)  # its copy() sees the end and closes the pipe itself
+                game.shutdown(socket.SHUT_RDWR)  # its copy() sees the end (or the stop) and closes the pipe
             except OSError:
                 pass
 
@@ -536,7 +537,11 @@ class Exit:
         check, up, down = GameCheck(), 0, 0
         try:
             while True:
-                ready = ["pipe"] if pipe.pending() else [key.data for key, _ in selector.select()]
+                # Shutting the game socket down (close()) wakes select() on Linux but not on Windows,
+                # so it also wakes each second to see whether the exit was closed.
+                if self.stop.is_set():
+                    return
+                ready = ["pipe"] if pipe.pending() else [key.data for key, _ in selector.select(STOP_CHECK)]
                 for side in ready:
                     if side == "game":
                         data = game.recv(65536)
