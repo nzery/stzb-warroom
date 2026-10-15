@@ -99,7 +99,10 @@ class App:
         self.version = 0  # bumped on every change the page should fetch
         self.notices = collections.deque(maxlen=500)
         self.logs = collections.deque(maxlen=1000)
-        self.seq = 0
+        # Numbers the notices and log lines; the page keeps "cleared up to" across launches, so a
+        # new launch numbers on from where any earlier one stopped: counting from 0 again hid every
+        # notice after a restart (2026-10-16 user) until it passed the old number.
+        self.seq = int(time.time() * 1000)
         self.hints = {}  # token -> {"id", "text", "time"}
         self.accounts = {}  # token -> what /v1/client/status said, or why it could not
         self.capture = {"state": "stopped", "error": None, "hint": None, "since": None, "dumpcap": None}

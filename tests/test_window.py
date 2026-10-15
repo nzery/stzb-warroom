@@ -187,6 +187,18 @@ class AppTests(unittest.TestCase):
         for token in (GOOD, BAD, NEW, TAKEN):
             self.assertNotIn(token, text)
 
+    def test_a_new_launch_numbers_notices_past_the_last_one(self):
+        # 2026-10-16 user: after the program restarted no notice showed. The page keeps "cleared up
+        # to" (and its last number while it stays open) across launches; counting from 0 again put
+        # every new notice below it.
+        app = self.app()
+        app.on_notice({"title": "旧", "level": "info"})
+        cleared = app.snapshot()["notices"][-1]["seq"]
+        time.sleep(0.05)  # a launch takes far longer than a millisecond for each line the last one numbered
+        again = self.app()
+        again.on_notice({"title": "新", "level": "info"})
+        self.assertEqual([n["title"] for n in again.snapshot(notices_after=cleared)["notices"]], ["新"])
+
     def test_a_hint_goes_when_the_server_drops_it(self):
         app = self.app(saved=GOOD)
         show = app.prompt_for(GOOD)
