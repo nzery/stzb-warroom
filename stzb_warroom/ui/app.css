@@ -204,6 +204,11 @@ nav { display: grid; gap: 4px; }
 .bark .value { flex: 1; min-width: 0; }
 .bark .value small { display: block; color: var(--faint); font-size: 12px; margin-top: 2px; }
 .bark .value small.err { color: var(--red); }
+.ntfy-sub { display: flex; gap: 18px; align-items: flex-start; padding: 4px 20px 16px; background: #142120; }
+.ntfy-sub > div { flex: 1; min-width: 0; }
+.ntfy-sub .qr { flex: none; width: 180px; height: 180px; background: #fff; padding: 8px; border-radius: 6px; image-rendering: pixelated; }
+.ntfy-sub code { word-break: break-all; }
+@media (max-width: 640px) { .ntfy-sub { flex-direction: column; align-items: center; } }
 .inline-form { display: flex; gap: 8px; flex: 1; min-width: 0; }
 input[type=text], input[type=password] { flex: 1; min-width: 0; padding: 9px 12px; border-radius: 8px;
   border: 1px solid var(--line2); background: #0d1716; outline: none; transition: border-color .15s, box-shadow .15s; }

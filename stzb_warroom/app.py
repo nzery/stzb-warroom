@@ -2,8 +2,8 @@
 
 It runs the same capture and upload as ``capture`` (runner.run_capture) and follows the
 same notifications and prompts as ``notify``, for the tokens the player typed in (kept
-encrypted, vault.py). Everything shown about an account (its name, role, approval, Bark
-binding) comes from the server (``/v1/client/status``); Bark is bound there too. So does the
+encrypted, vault.py). Everything shown about an account (its name, role, approval, phone
+binding: Bark or ntfy) comes from the server (``/v1/client/status``); phones are bound there too. So does the
 notice settings page (``/v1/client/notice-prefs``): the player's choice is given to every token,
 so all the accounts of this computer follow the same settings. The server keeps them: the
 minute's look only reads them, and a choice is sent only when the player makes it, to a token
@@ -444,6 +444,10 @@ class App:
     def bark_bind(self, index, address):
         return self._bark("POST", "/v1/client/bark", index, {"address": str(address or "")})
 
+    def ntfy_bind(self, index):
+        """An Android phone: the server gives the token a topic on its ntfy server, and how to subscribe."""
+        return self._bark("POST", "/v1/client/bark", index, {"kind": "ntfy"})
+
     def bark_unbind(self, index):
         return self._bark("DELETE", "/v1/client/bark", index)
 
@@ -758,7 +762,7 @@ class App:
             role = (account.get("role") or {}).get("label") or "-"
             bark = account.get("bark") or {}
             waits = (account.get("pending") or {}).get("label")
-            lines.append(f"账号 {number}：{account['state']}{f'（{waits}）' if waits else ''} {role}；Bark {'已绑定' if bark.get('bound') else '未绑定'}"
+            lines.append(f"账号 {number}：{account['state']}{f'（{waits}）' if waits else ''} {role}；手机推送 {({'ntfy': '已绑定安卓', 'bark': '已绑定 iPhone'}.get(bark.get('kind'), '已绑定')) if bark.get('bound') else '未绑定'}"
                          + (f"（{bark['error']}）" if bark.get("error") else ""))
         lines.append("最近日志：")
         lines += [f"  {datetime.fromtimestamp(line['time']):%H:%M:%S} {line['text']}" for line in snapshot["logs"][-60:]]

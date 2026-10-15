@@ -352,6 +352,8 @@ class AppTests(unittest.TestCase):
         self.assertEqual(self.server.calls[-1][:2], ("DELETE", "/v1/client/bark"))
         with self.assertRaises(ValueError):
             app.bark_test(5)
+        app.ntfy_bind(0)  # an Android phone: the server makes up its topic
+        self.assertEqual(self.server.calls[-1], ("POST", "/v1/client/bark", {"kind": "ntfy"}))
 
     def test_a_missing_dumpcap_stops_with_a_hint(self):
         app = self.app(saved=GOOD)
