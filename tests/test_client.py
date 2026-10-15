@@ -398,6 +398,20 @@ if __name__ == "__main__":
     unittest.main()
 
 
+class TlsTests(unittest.TestCase):
+    def test_lets_encrypt_roots_are_added_to_the_system_ones(self):
+        # a Windows store without ISRG Root X1 but with its old DST cross-sign failed with "certificate has expired"
+        names = {dict(item[0] for item in cert["subject"]).get("commonName")
+                 for cert in api.tls_context().get_ca_certs()}
+        self.assertLessEqual({"ISRG Root X1", "ISRG Root X2"}, names)
+
+    def test_a_given_ca_file_is_the_only_one(self):
+        with tempfile.TemporaryDirectory() as folder:
+            path = Path(folder) / "ca.pem"
+            path.write_text(api.ISRG_ROOTS.split("-----END CERTIFICATE-----")[0] + "-----END CERTIFICATE-----\n")
+            self.assertEqual(len(api.tls_context(str(path)).get_ca_certs()), 1)
+
+
 class JoinTests(unittest.TestCase):
     CODE = "stj_" + "a" * 22
     TOKEN = "sta_" + "t" * 43
