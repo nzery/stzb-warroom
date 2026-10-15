@@ -55,7 +55,7 @@ const PAGES = {
   rivals: ['对手分析', '和你交过手的敌方阵容，你每支队伍打它们的结果'],
   prefs: ['通知设置', '要哪些通知、过滤哪些敌军、推送哪些到手机'],
   phone: ['用手机玩', '手机上的游戏连接经这台电脑出去，照常上报'],
-  accounts: ['账号与推送', 'Token、角色与 iPhone 推送（Bark）'],
+  accounts: ['账号与推送', 'Token、角色与手机推送（iPhone 用 Bark，安卓用 ntfy）'],
   settings: ['设置', '启动方式、网络组件与数据'],
   diagnostics: ['诊断', '检查运行环境，查看运行日志'],
   about: ['关于', ''],
@@ -558,16 +558,23 @@ function renderAccounts(d) {
       <button class="btn ghost small" data-copy-site="${index}" type="button">复制链接</button></div></div>` : '';
     let bark = '';
     if (a.state !== 'invalid') {
+      // An Android phone (ntfy, kind "ntfy") comes with how to subscribe to it, as the server gives it.
+      const ntfy = a.bark && a.bark.bound && a.bark.kind === 'ntfy' ? a.bark.android : null;
       if (a.bark && a.bark.bound) {
-        bark = `<div class="bark"><div class="label"><b>iPhone 推送</b>Bark</div>
+        const phone = ntfy ? '安卓手机' : 'iPhone';
+        bark = `<div class="bark"><div class="label"><b>${ntfy ? '安卓推送' : 'iPhone 推送'}</b>${ntfy ? 'ntfy' : 'Bark'}</div>
           <div class="value"><span class="state ok">已绑定</span> <span class="token-text">${esc(a.bark.address)}</span>
-          ${a.bark.error ? `<small class="err">上一条推送失败：${esc(a.bark.error)}</small>` : '<small>敌袭等需要你下令的通知会推送到这台 iPhone。</small>'}</div>
+          ${a.bark.error ? `<small class="err">上一条推送失败：${esc(a.bark.error)}</small>` : `<small>敌袭等需要你下令的通知会推送到这台${phone}。</small>`}</div>
           <div class="row-actions"><button class="btn ghost small" data-action="bark_test" data-index="${index}">发测试推送</button>
-          <button class="btn ghost small" data-action="bark_unbind" data-index="${index}" data-confirm="解绑后这台 iPhone 不再收到推送，确定吗？">解绑</button></div></div>`;
+          <button class="btn ghost small" data-action="bark_unbind" data-index="${index}" data-confirm="解绑后这台${phone}不再收到推送，确定吗？">解绑</button></div></div>`;
+        if (ntfy) bark += ntfyCard(ntfy);
       } else if (a.bark) {
         bark = `<div class="bark"><div class="label"><b>iPhone 推送</b><button class="link" data-guide="1" type="button">怎么获取？</button></div>
           <form class="inline-form" data-bark-form="${index}"><input type="text" data-bark-input="${index}" spellcheck="false" autocomplete="off" placeholder="粘贴 Bark 里的地址：https://api.day.app/…">
-          <button class="btn primary small" type="submit">绑定</button></form></div>`;
+          <button class="btn primary small" type="submit">绑定</button></form></div>
+          <div class="bark"><div class="label"><b>安卓推送</b>ntfy</div>
+          <div class="value"><small>安卓手机用 ntfy App 收推送，点“绑定安卓”后扫二维码订阅。</small></div>
+          <div class="row-actions"><button class="btn primary small" data-action="ntfy_bind" data-index="${index}">绑定安卓</button></div></div>`;
       }
     }
     return `<div class="card account ${a.state === 'invalid' ? 'invalid' : ''}">
@@ -578,6 +585,16 @@ function renderAccounts(d) {
       ${problem}${site}${bark}</div>`;
   }).join('') || '<div class="card empty">还没有账号。在下面添加管理员发给你的 Token。</div>';
   document.querySelectorAll('[data-bark-input]').forEach((input) => { input.value = typed[input.dataset.barkInput] || ''; });
+}
+
+// How an Android phone subscribes to its ntfy topic: the QR code, the server and topic to type in, the steps.
+function ntfyCard(n) {
+  const qr = n.qr ? `<img class="qr" alt="ntfy 订阅二维码" src="${svgImage(n.qr)}">` : '';
+  return `<div class="ntfy-sub">${qr}<div>
+    <div class="setting"><div><b>服务器</b><p><code>${esc(n.server)}</code></p></div>${copyButton(n.server, '复制')}</div>
+    <div class="setting"><div><b>主题</b><p><code>${esc(n.topic)}</code></p></div>${copyButton(n.topic, '复制')}</div>
+    <ol class="phone-steps">${(n.steps || []).map((s) => `<li>${esc(s)}</li>`).join('')}</ol>
+    ${n.note ? `<small class="muted">${esc(n.note)}</small>` : ''}</div></div>`;
 }
 
 // The notice settings: the page as the server gives it (texts and all), the same for every account.
@@ -882,7 +899,7 @@ function show(page) {
 }
 
 const MESSAGES = {
-  bark_test: '已发送测试推送，看看手机有没有收到', bark_unbind: '已解绑 Bark', remove_token: '已删除 Token',
+  bark_test: '已发送测试推送，看看手机有没有收到', ntfy_bind: '已生成安卓订阅，用手机扫二维码', bark_unbind: '已解绑手机推送', remove_token: '已删除 Token',
   open_installer: '正在打开 Wireshark 安装程序或下载页',
 };
 
