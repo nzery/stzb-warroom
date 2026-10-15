@@ -40,6 +40,7 @@ PERSONAL = "/v1/client/personal/"
 PERSONAL_PAGES = ("teams", "battles", "rivals")
 PHONE = "/v1/client/phone"
 RELAYS_EVERY = 60  # seconds between two asks for the relays while none is known
+RELAYS_REFRESH = 600  # and once there are some (a token approved or moved since: more relays)
 UPDATE_EVERY = 6 * 3600
 HINTS = (  # what a player can do about a capture failure, from its text
     ("another capture process", "已经有一个程序在上报（可能是另一个窗口），先关掉它。"),
@@ -513,21 +514,27 @@ class App:
                            "pipes": e.open_pipes} for e in exits]}
 
     def _start_exits(self, session):
-        """The exits of this capture session: the relays come from the server's phone page (an
-        approved token's), asked again every RELAYS_EVERY until there are some."""
+        """The exits of this capture session: the relays come from the server (any of the tokens'),
+        asked again every RELAYS_EVERY until there are some, then every RELAYS_REFRESH for a relay
+        a token may use since (approved, moved to another domain): an exit is added for it."""
+        mine = session["exits_run"] = object()  # an older run (the exit turned off and on) ends
+
         def run():
-            while not session["stop"].is_set() and self.settings["phone_exit"] and not session.get("exits"):
+            while not session["stop"].is_set() and self.settings["phone_exit"] and session["exits_run"] is mine:
                 origins = relay.relays_of(self.server, session["tokens"])
                 with self.lock:
-                    if origins and not session["stop"].is_set() and self.settings["phone_exit"] \
-                            and not session.get("exits"):
-                        session["exits"] = relay.start(origins, session["tokens"], log=self._exit_log)
-                        self.log("手机经本机连接游戏：已开启")
-                        break
-                if not origins:
+                    exits = session.get("exits") or []
+                    known = {e.origin for e in exits}
+                    new = [o for o in origins if o.rstrip("/") not in known]
+                    if new and not session["stop"].is_set() and self.settings["phone_exit"] \
+                            and session["exits_run"] is mine:
+                        session["exits"] = exits + relay.start(new, session["tokens"], log=self._exit_log)
+                        if not exits:
+                            self.log("手机经本机连接游戏：已开启")
+                if not origins and not exits:
                     self.log("手机经本机连接游戏：服务器还没给中转（账号要先审批通过），稍后再试", "warn")
                 self.touch()
-                session["stop"].wait(RELAYS_EVERY)
+                session["stop"].wait(RELAYS_REFRESH if session.get("exits") else RELAYS_EVERY)
             self.touch()
 
         threading.Thread(target=run, name="relays", daemon=True).start()

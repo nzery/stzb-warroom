@@ -24,6 +24,7 @@ import struct
 import threading
 import time
 import uuid
+from urllib.error import HTTPError
 from urllib.parse import urlsplit
 
 from .api import tls_context
@@ -382,7 +383,8 @@ class Exit:
         self.blocked = {}  # address -> monotonic time it may be tried again
         self.pipes = threading.BoundedSemaphore(MAX_PIPES)
         self.handlers = threading.BoundedSemaphore(MAX_HANDLERS)
-        self.open_pipes = 0
+        self.games = set()  # the game sockets of the connections being copied now (close() ends them)
+        self.games_lock = threading.Lock()
         self.stop = threading.Event()
         self.control = None
         self.state, self.since = "connecting", time.time()
@@ -428,10 +430,23 @@ class Exit:
             wait = min(wait * 2, 300)
         self._state("stopped")
 
+    @property
+    def open_pipes(self):
+        return len(self.games)
+
     def close(self):
+        """Stop: the connection to the relay and every game connection made through it (the
+        phone must not go on through this computer once the exit is off)."""
         self.stop.set()
         if self.control:
             self.control.close()
+        with self.games_lock:
+            games = list(self.games)
+        for game in games:
+            try:
+                game.shutdown(socket.SHUT_RDWR)  # its copy() sees the end and closes the pipe itself
+            except OSError:
+                pass
 
     def handle(self, data):
         try:
@@ -494,12 +509,17 @@ class Exit:
                 game.close()
                 self.log(event="pipe_failed", error=str(exc))
                 return
-            self.log(event="pipe_open", relay=self.origin, host=address)
-            self.open_pipes += 1
+            with self.games_lock:
+                stopped = self.stop.is_set()  # close() came while this was connecting
+                if not stopped:
+                    self.games.add(game)
             try:
-                self.copy(game, pipe, address)
+                if not stopped:
+                    self.log(event="pipe_open", relay=self.origin, host=address)
+                    self.copy(game, pipe, address)
             finally:
-                self.open_pipes -= 1
+                with self.games_lock:
+                    self.games.discard(game)
                 game.close()
                 pipe.close()
         finally:
@@ -552,17 +572,24 @@ def start(origins, tokens, log=None):
 
 
 def relays_of(server, tokens):
-    """The relays the server's phone page names (GET /v1/client/phone), from the first token
-    that has them (an approved one); [] when none has."""
+    """The relays any of the tokens may use, as the server names them (GET /v1/client/phone?only=relays,
+    asked for each token: the public domain's and a private one's differ), in the order given;
+    [] when none has (not approved yet). A server without ?only=relays gets the whole page asked."""
+    found = []
     for token in tokens:
         try:
-            page = server.json("/v1/client/phone", token, timeout=20)
+            try:
+                page = server.json("/v1/client/phone?only=relays", token, timeout=20)
+            except HTTPError as exc:
+                if exc.code != 404:
+                    raise
+                page = server.json("/v1/client/phone", token, timeout=20)
         except (OSError, ValueError):
             continue
         relays = page.get("relays") if isinstance(page, dict) else None
-        if isinstance(relays, list) and relays:
-            return [str(r) for r in relays if isinstance(r, str) and r.startswith("https://")][:4]
-    return []
+        if isinstance(relays, list):
+            found += [r for r in relays if isinstance(r, str) and r.startswith("https://")]
+    return list(dict.fromkeys(found))[:4]
 
 
 def run(server, tokens, stop, log=None, origins=None):
