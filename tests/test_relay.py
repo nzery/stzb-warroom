@@ -199,6 +199,36 @@ class RobustnessTests(unittest.TestCase):
         self.assertTrue(exit_.handlers.acquire(blocking=False))  # released
 
 
+class TLSTests(unittest.TestCase):
+    def test_records_already_received_are_pending(self):
+        # 2026-10-16: the relay's 101 answer and the phone's first message (90008, 57 bytes) came in
+        # one read; a TLS read hands out one record, the other stayed encrypted where select() and
+        # SSLObject.pending() do not look, until the phone gave up.
+        class Records:  # SSLObject: one record a read, pending() only within that record
+            def __init__(self, *records):
+                self.records = list(records)
+
+            def read(self, size):
+                if not self.records:
+                    raise relay.ssl.SSLWantReadError()
+                return self.records.pop(0)
+
+            def pending(self):
+                return 0
+
+        mine, theirs = socket.socketpair()
+        self.addCleanup(mine.close)
+        self.addCleanup(theirs.close)
+        tls = relay.TLS.__new__(relay.TLS)
+        tls.sock, tls.lock, tls.plain, tls.eof = mine, threading.Lock(), b"", False
+        tls.outgoing = relay.ssl.MemoryBIO()
+        tls.tls = Records(b"HTTP/1.1 101", b"\x82\x39" + b"x" * 57)
+        self.assertEqual(tls.recv(12), b"HTTP/1.1 101")
+        self.assertTrue(tls.pending())
+        self.assertEqual(tls.recv(65536), b"\x82\x39" + b"x" * 57)
+        self.assertFalse(tls.pending())
+
+
 class HelloTests(unittest.TestCase):
     def hello(self, size=517, name=b"relay.nzery.dev"):
         body = bytes([1]) + (size - 9).to_bytes(3, "big") + b"\x03\x03" + os.urandom(40) + b"\x00\x00" + name
