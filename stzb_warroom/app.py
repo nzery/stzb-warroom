@@ -10,9 +10,9 @@ minute's look only reads them, and a choice is sent only when the player makes i
 added here since, or again to a token it did not reach; a change made elsewhere (another
 computer with the same token) is followed, not undone.
 
-The pages about an account's own armies (我的队伍, 对局记录, 对手分析) are the server's too
-(``/v1/client/personal/<page>``): asked for when the player opens one, passed to the window
-as they come, the page's filters and page number passed along unread.
+The 玩家队伍 page (any player's armies, looked up by name) is the server's too
+(``/v1/client/personal/players``): asked for when the player opens it, passed to the window
+as it comes, the name typed, the page's filters and page number passed along unread.
 """
 
 import collections
@@ -37,7 +37,7 @@ from .runner import run_capture
 ACCOUNT_EVERY = 60  # seconds between two looks at the accounts' status
 PREFS = "/v1/client/notice-prefs"
 PERSONAL = "/v1/client/personal/"
-PERSONAL_PAGES = ("teams", "battles", "rivals")
+PERSONAL_PAGES = ("players",)
 PHONE = "/v1/client/phone"
 RELAYS_EVERY = 60  # seconds between two asks for the relays while none is known
 RELAYS_REFRESH = 600  # and once there are some (a token approved or moved since: more relays)
@@ -459,11 +459,11 @@ class App:
     def bark_test(self, index):
         return self._bark("POST", "/v1/client/bark/test", index, {})
 
-    # the account's own armies -------------------------------------------------------
+    # the server's pages (玩家队伍) ----------------------------------------------------
 
     def personal(self, index, page, query=None):
-        """One of the server's pages about the account's own armies, as it made it. `query`: the
-        page's filters and page number ({name: text or number}), sent along as they are."""
+        """One of the server's pages (玩家队伍), as it made it. `query`: the name typed, the page's
+        filters and page number ({name: text or number}), sent along as they are."""
         token = self._token(index)
         if page not in PERSONAL_PAGES:
             raise ValueError("没有这个页面")

@@ -22,6 +22,7 @@ const ICONS = {
   target: '<circle cx="12" cy="12" r="9"/><circle cx="12" cy="12" r="5"/><circle cx="12" cy="12" r="1"/>',
   refresh: '<path d="M20 11a8 8 0 1 0-2.3 5.7"/><path d="M20 4v7h-7"/>',
   phone: '<rect x="7" y="2.5" width="10" height="19" rx="2"/><path d="M11 18.5h2"/>',
+  search: '<circle cx="11" cy="11" r="7"/><path d="m20 20-4-4"/>',
   copy: '<rect x="9" y="9" width="11" height="11" rx="2"/><path d="M5 15V5a1 1 0 0 1 1-1h10"/>',
 };
 const icon = (name) => `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">${ICONS[name] || ''}</svg>`;
@@ -50,9 +51,7 @@ const store = {
 const PAGES = {
   overview: ['概览', '上报游戏数据，接收战局通知'],
   notices: ['通知', '服务器根据你的战局生成的通知'],
-  teams: ['我的队伍', '你每套配置的战绩，打得过谁、打不过谁'],
-  battles: ['对局记录', '你的部队上场的每一场战报'],
-  rivals: ['对手分析', '和你交过手的敌方阵容，你每支队伍打它们的结果'],
+  players: ['玩家队伍', '按名字查一名玩家最近的队伍：武将、战法、红度'],
   prefs: ['通知设置', '要哪些通知、过滤哪些敌军、推送哪些到手机'],
   phone: ['用手机玩', '手机上的游戏连接经这台电脑出去，照常上报'],
   accounts: ['账号与推送', 'Token、角色与手机推送（iPhone 用 Bark，安卓用 ntfy）'],
@@ -75,13 +74,13 @@ const S = {
   data: null, tapped: {}, nextFlip: Infinity, page: 'notices', filter: 'all', notices: [], logs: [], n: 0, l: 0,
   hiddenBefore: store.get('hiddenBefore', 0), dismissed: new Set(store.get('dismissed', [])),
   seenNotices: store.get('seenNotices', 0), loaded: false, accountsKey: '', prefsKey: '', busy: new Set(),
-  // The pages about the account's own armies, as the server gave them: {query, data, error, loading, key} each.
-  personal: { teams: { query: {} }, battles: { query: {} }, rivals: { query: {} } },
+  // The server's pages (玩家队伍), as it gave them: {query, data, error, loading, key} each.
+  personal: { players: { query: {} } },
   personalRole: store.get('personalRole', null),
   // The server's phone page for the chosen account: {data, error, loading, role, key}.
   phone: {},
 };
-const PERSONAL = new Set(['teams', 'battles', 'rivals']);
+const PERSONAL = new Set(['players']);
 
 // ---------------------------------------------------------------- server
 
@@ -624,7 +623,7 @@ function renderPrefs(d) {
     + p.groups.map((g) => `<div class="card settings"><h3>${esc(g.title)}</h3>${g.items.map(item).join('')}</div>`).join('');
 }
 
-// ---------------------------------------------------------------- the account's own armies
+// ---------------------------------------------------------------- the server's pages (玩家队伍)
 // Pages the server makes (texts, filters and all): cards of tags, figures, lines and a table.
 
 // The accounts these pages can be about: approved, with a role the server has seen.
@@ -690,7 +689,13 @@ function renderPersonal(page) {
   const filters = (d?.filters || []).map((f) => `<div class="vfilter"><span>${esc(f.label)}</span><div class="chips">${f.options.map((o) =>
     `<button class="chip${o.value === f.value ? ' active' : ''}" data-pfilter="${esc(f.key)}" data-value="${esc(o.value)}">${esc(o.label)}</button>`).join('')}</div></div>`).join('');
   const refresh = `<button class="btn ghost small" data-prefresh="1"${view.loading ? ' disabled' : ''}>${view.loading ? '<span class="spin"></span>读取中' : `${icon('refresh').replace('<svg', '<svg width="14" height="14"')}刷新`}</button>`;
-  const toolbar = `<div class="vtoolbar"><div class="vfilters">${who}${filters}</div>${refresh}</div>`;
+  // A page with a box to type in (玩家队伍: the name); what is typed goes as the server's `search.key`.
+  const search = d?.search || view.search;
+  if (search) view.search = search;
+  const box2 = search ? `<form class="inline-form vsearch" data-psearch="${esc(search.key)}"><input type="text" autocomplete="off" spellcheck="false"
+    maxlength="40" value="${esc(view.query[search.key] ?? search.value ?? '')}" placeholder="${esc(search.placeholder || '')}">
+    <button class="btn primary" type="submit"${view.loading ? ' disabled' : ''}>查询</button></form>` : '';
+  const toolbar = `${box2}<div class="vtoolbar"><div class="vfilters">${who}${filters}</div>${refresh}</div>`;
   let body;
   if (view.error) body = banner('warn', 'info', esc(view.error));
   else if (!d) body = '<div class="card empty">正在读取…</div>';
@@ -951,6 +956,13 @@ document.addEventListener('submit', async (event) => {
       toast(result && result.joined ? result.joined : '已添加，正在检查这个 Token');
       S.accountsKey = '';
     } catch { /* shown */ }
+  } else if (form.dataset.psearch !== undefined) {
+    // A new name: the page from its start, the player chosen before no longer meant.
+    const view = S.personal[S.page];
+    if (!view) return;
+    const { show } = view.query;
+    view.query = { [form.dataset.psearch]: form.querySelector('input').value.trim(), page: 1, ...(show ? { show } : {}) };
+    loadPersonal(S.page);
   } else if (form.dataset.barkForm !== undefined) {
     const index = Number(form.dataset.barkForm);
     const input = form.querySelector('input');
