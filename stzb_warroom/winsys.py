@@ -217,7 +217,8 @@ def pick_file(title, pattern):
     start = os.environ.get("ProgramFiles", "C:\\")
     dialog = OpenFileName(lStructSize=ctypes.sizeof(OpenFileName),
                           hwndOwner=ctypes.windll.user32.GetForegroundWindow(),
-                          lpstrFilter=f"{description}\0{files}\0所有文件\0*.*\0\0", lpstrFile=buffer,
+                          lpstrFilter=f"{description}\0{files}\0所有文件\0*.*\0\0",
+                          lpstrFile=ctypes.cast(buffer, wintypes.LPWSTR),  # a buffer is no c_wchar_p
                           nMaxFile=len(buffer), lpstrInitialDir=start, lpstrTitle=title,
                           Flags=0x00001000 | 0x00000800 | 0x00080000 | 0x00000008)  # file/path must exist, explorer, no chdir
     comdlg32 = ctypes.WinDLL("comdlg32")
