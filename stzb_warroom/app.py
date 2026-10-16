@@ -272,7 +272,9 @@ class App:
         code = invite_code(text)
         joined = None
         if code:
-            joined = self.server.join(code)
+            with self.lock:
+                held = list(self.tokens)
+            joined = self.server.join(code, held)
             text = joined["token"]
         try:
             new = client_tokens(text)

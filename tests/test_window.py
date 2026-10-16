@@ -63,7 +63,8 @@ class FakeServer:
                     "problem": {"title": "角色 7 已被另一个 Token 绑定", "text": "角色 7 已被同域的另一个 Token 绑定"}}
         return {"name": "n", "approved": True, "role": ROLE, "bark": {"bound": False}}
 
-    def join(self, code):
+    def join(self, code, tokens=()):
+        self.calls.append(("JOIN", code, list(tokens)))
         if code != INVITE:
             raise ValueError("邀请码无效")
         return {"token": NEW, "text": "已加入「某盟」"}
@@ -132,6 +133,7 @@ class AppTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "邀请码无效"):
             app.add_token("stj_" + "x" * 22)
         self.assertEqual(app.tokens, [NEW])
+        self.assertIn(("JOIN", "stj_" + "x" * 22, [NEW]), app.server.calls)  # what it holds goes along
 
     def test_the_page_settings_outlive_a_restart(self):
         # 2026-10-14 user: the page's own storage is emptied at each start (another port).
