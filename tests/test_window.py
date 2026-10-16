@@ -255,19 +255,19 @@ class AppTests(unittest.TestCase):
         self.assertEqual(self.server.prefs[NEW]["mode"], "active")
         self.assertNotIn(NEW, json.dumps(later.settings))
 
-    def test_the_pages_about_own_armies_are_the_servers(self):
+    def test_the_players_page_is_the_servers(self):
         app = self.app(saved=f"{GOOD},{NEW}")
-        page = app.personal(0, "battles", {"team": "ab12", "page": 2, "x": True, "y": None})
+        page = app.personal(0, "players", {"name": "张三", "page": 2, "x": True, "y": None})
         self.assertEqual(page["cards"], [{"title": "曹操队"}])
-        self.assertEqual(self.server.calls[-1][:3], ("GET", "/v1/client/personal/battles?page=2&team=ab12", GOOD))
-        app.personal(0, "teams")
-        self.assertEqual(self.server.calls[-1][1], "/v1/client/personal/teams")
-        with self.assertRaisesRegex(ValueError, "没有这个页面"):
-            app.personal(0, "../admin/tokens")
+        self.assertEqual(self.server.calls[-1][:3],
+                         ("GET", "/v1/client/personal/players?name=%E5%BC%A0%E4%B8%89&page=2", GOOD))
+        for gone in ("teams", "../admin/tokens"):  # 我的队伍 and the others are no longer pages here
+            with self.assertRaisesRegex(ValueError, "没有这个页面"):
+                app.personal(0, gone)
         with self.assertRaisesRegex(ValueError, "还没审批"):
-            app.personal(1, "teams")
+            app.personal(1, "players")
         with self.assertRaisesRegex(ValueError, "没有这个账号"):
-            app.personal(5, "teams")
+            app.personal(5, "players")
 
     def test_the_phone_page_is_the_servers_and_never_logged(self):
         app = self.app(saved=f"{GOOD},{NEW}")

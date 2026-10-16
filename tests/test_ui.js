@@ -58,15 +58,17 @@ async function main() {
   }
   // a page about the account's own armies is drawn as the server gave it, its texts escaped
   vm.runInContext(`S.data = { tokens: [{ state: 'ok', role: { id: 7, label: '甲 · 某盟' } }, { state: 'ok', role: { id: 8, label: '乙' } }] };
-    S.personal.battles = { query: {}, role: 7, data: { note: '说明', filters: [{ key: 'kind', label: '对手', value: 'pvp',
-      options: [{ value: 'pvp', label: '打玩家' }, { value: 'npc', label: '打 NPC' }] }],
+    S.personal.players = { query: { name: '<张' }, role: 7, data: { note: '说明', search: { key: 'name', value: '<张', placeholder: '输入玩家名字' },
+      filters: [{ key: 'player', label: '玩家', value: '张三',
+      options: [{ value: '张三', label: '张三（敌盟）' }, { value: 'npc', label: '张三丰（我方）' }] }],
       cards: [{ title: '<曹操队>', subtitle: null, tags: [{ text: '可以出征', level: 'good' }], stats: [{ label: '交换比', value: '1.50', level: 'good' }],
         lines: [{ text: '打不过：孙权', level: 'bad' }], table: { columns: ['时间', '结果'], rows: [['10-13 09:00', { text: '胜', level: 'good' }]] } }],
       empty: null, page: { page: 2, pages: 3, total: 50 } } };
-    renderPersonal('battles');`, context);
-  const drawn = nodes.get('personal-battles').innerHTML;
+    renderPersonal('players');`, context);
+  const drawn = nodes.get('personal-players').innerHTML;
   assert.ok(drawn.includes('&lt;曹操队&gt;') && !drawn.includes('<曹操队>'), 'texts are escaped');
-  for (const part of ['data-prole="8"', 'data-pfilter="kind" data-value="npc"', 'data-ppage="3"', 'lv good', '打不过：孙权', '第 2 / 3 页']) {
+  for (const part of ['data-prole="8"', 'data-pfilter="player" data-value="npc"', 'data-ppage="3"', 'lv good', '打不过：孙权', '第 2 / 3 页',
+    'data-psearch="name"', 'value="&lt;张"', 'placeholder="输入玩家名字"']) {
     assert.ok(drawn.includes(part), part);
   }
   // the phone page: the server's QR code only as an image (nothing it sends runs), its texts escaped
