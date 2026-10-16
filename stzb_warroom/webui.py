@@ -158,6 +158,9 @@ class Handler(BaseHTTPRequestHandler):
             result = self.server.act(body.get("action"), body)
         except (ValueError, RuntimeError) as exc:
             return self.send(400, {"error": str(exc)})
+        except Exception as exc:  # an answer, not a dropped connection the page shows as "Failed to fetch"
+            self.server.app.log(f"{body.get('action')} 出错：{type(exc).__name__}: {exc}", "error")
+            return self.send(500, {"error": f"出错了：{type(exc).__name__}: {exc}"})
         self.send(200, {"ok": True, "result": result})
 
 

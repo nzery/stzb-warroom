@@ -69,6 +69,17 @@ def registered_wireshark():
     return [folder for folder in folders if folder]
 
 
+def fixed_drives():
+    """The local hard drives' roots ("C:\\", "D:\\", ...): no network, removable or CD drive, which may be slow."""
+    import ctypes
+
+    kernel32 = ctypes.windll.kernel32
+    kernel32.GetDriveTypeW.argtypes = [ctypes.c_wchar_p]
+    mask = kernel32.GetLogicalDrives()
+    roots = [f"{chr(65 + bit)}:\\" for bit in range(26) if mask >> bit & 1]
+    return [root for root in roots if kernel32.GetDriveTypeW(root) == 3]  # DRIVE_FIXED
+
+
 def dumpcap_candidates(preferred=()):
     """Where dumpcap may be, in order: ST_DUMPCAP, `preferred`, then where Wireshark installs."""
     places = [os.environ.get("ST_DUMPCAP", ""), *preferred]
@@ -78,6 +89,9 @@ def dumpcap_candidates(preferred=()):
         places += [os.path.join(os.environ[name], "Wireshark", "dumpcap.exe")
                    for name in ("ProgramW6432", "ProgramFiles", "ProgramFiles(x86)") if os.environ.get(name)]
         places.append(r"C:\Program Files\Wireshark\dumpcap.exe")
+        # Installed where the registry does not say (unpacked, an old installer): the usual folders on each drive.
+        places += [os.path.join(root, *folder, "dumpcap.exe") for root in fixed_drives()
+                   for folder in (("Program Files", "Wireshark"), ("Program Files (x86)", "Wireshark"), ("Wireshark",))]
     else:
         places += [shutil.which("dumpcap") or "", "/usr/bin/dumpcap"]
     return list(dict.fromkeys(os.path.normpath(place) for place in places if place))
