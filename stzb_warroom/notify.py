@@ -96,6 +96,8 @@ class Follower:
         self.epoch, self.after = value.get("epoch"), value.get("after")
 
     def print(self, notice):
+        if notice.get("hidden"):  # a recall: only the window uses what it names
+            return
         with LOCK:
             print(render(notice, self.color, self.label), flush=True)
 

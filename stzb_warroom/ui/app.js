@@ -224,7 +224,7 @@ setInterval(() => {
   if (S.notices.length !== before) render();
 }, 15000);
 function announce(notice) {
-  if (notice.level !== 'alarm') return;
+  if (notice.level !== 'alarm' || notice.hidden) return;
   if (store.get('sound', true)) beep();
   if (store.get('desktop', false) && 'Notification' in window && Notification.permission === 'granted' && document.hidden) {
     const who = roleOf(notice);
@@ -285,7 +285,7 @@ function renderChrome(d) {
     toggle.innerHTML = state === 'starting' || state === 'stopping' ? `<span class="spin"></span>${state === 'starting' ? '启动中' : '停止中'}`
       : running ? `${icon('pause').replace('<svg', '<svg width="14" height="14"')}暂停上报` : `${icon('play').replace('<svg', '<svg width="14" height="14"')}开始上报`;
   }
-  const unseen = S.notices.filter((n) => n.seq > S.seenNotices).length;
+  const unseen = S.notices.filter((n) => n.seq > S.seenNotices && !n.hidden).length;
   $('badge-notices').textContent = S.page === 'notices' || !unseen ? '' : unseen > 99 ? '99+' : unseen;
   const problems = d.tokens.filter((a) => a.state === 'invalid' || a.state === 'problem').length;
   $('badge-accounts').textContent = problems || '';
@@ -377,8 +377,8 @@ function renderOverview(d) {
   }).join('') : '<div class="empty">还没有账号</div>';
 
   const gone = withdrawnArmies();
-  const recent = latestOfPlaces(S.notices.filter((n) => n.seq > S.hiddenBefore && !withdrawnAll(n, gone)))
-    .filter((n) => !landedAll(n)).slice(-6).reverse();
+  const recent = latestOfPlaces(S.notices.filter((n) => n.seq > S.hiddenBefore && !n.hidden && !withdrawnAll(n, gone)))
+    .filter((n) => !landedAll(n, gone)).slice(-6).reverse();
   $('ov-notices').innerHTML = recent.length ? recent.map((n) => `<div class="mini"><span class="tag ${esc(n.level)}">${esc(n.tag || '通知')}</span><span class="main-text">${esc(n.title)}</span><span class="time">${clock(n.time)}</span></div>`).join('')
     : '<div class="empty">还没有通知。登录游戏并上报后，敌袭等通知会显示在这里。</div>';
 }
@@ -391,15 +391,18 @@ function renderOverview(d) {
 // seconds in `at`, `draw` for one that attacks again then) counts down in the row, and a row
 // whose army landed goes (2026-10-14 user: what is left is what is still to come, even when the
 // player taps no other place); a table whose rows all went goes with the lines before it (its
-// group's name, where its armies went). Any other notice is its text.
+// group's name, where its armies went). A row whose army a recall named (`armies`, the server's, a
+// row's army id; `gone`, withdrawnArmies) goes too (2026-10-16 user). Any other notice is its text.
 const nowSec = () => Date.now() / 1000;
-function rowsLeft(t) {
+function rowsLeft(t, gone = new Set()) {
   const at = t.countdown && Array.isArray(t.countdown.at) ? t.countdown.at : [];
-  return ((t && t.rows) || []).map((row, r) => [row, r]).filter(([, r]) => !(typeof at[r] === 'number' && at[r] <= nowSec()));
+  const armies = Array.isArray(t.armies) ? t.armies : [];
+  return ((t && t.rows) || []).map((row, r) => [row, r])
+    .filter(([, r]) => !(typeof at[r] === 'number' && at[r] <= nowSec()) && !gone.has(armies[r]));
 }
 const textWidth = (value) => [...String(value)].reduce((n, ch) => n + (ch.charCodeAt(0) > 0xff ? 2 : 1), 0);
-function noticeTable(t) {
-  const kept = rowsLeft(t);
+function noticeTable(t, gone) {
+  const kept = rowsLeft(t, gone);
   const rows = kept.map(([row]) => row);
   if (!rows.length) return '';
   // +3: a cell's padding, about three half-width characters
@@ -424,10 +427,10 @@ function noticeTable(t) {
 function colWidths(root) {
   for (const col of root.querySelectorAll('col[data-w]')) col.style.width = `${col.dataset.w}%`;
 }
-// A notice of tables whose rows have all landed has nothing left to tell.
-function landedAll(n) {
-  const tables = (n.view?.blocks || []).filter((b) => b.table?.countdown);
-  return tables.length > 0 && (n.view.blocks || []).every((b) => !b.table || !rowsLeft(b.table).length);
+// A notice of tables whose rows have all landed (or went back) has nothing left to tell.
+function landedAll(n, gone) {
+  const tables = (n.view?.blocks || []).filter((b) => b.table?.countdown || b.table?.armies);
+  return tables.length > 0 && (n.view.blocks || []).every((b) => !b.table || !rowsLeft(b.table, gone).length);
 }
 // When the next row lands, for the list to drop it then.
 function nextRowLanding(n) {
@@ -435,7 +438,7 @@ function nextRowLanding(n) {
     .filter((at) => typeof at === 'number' && at > nowSec())));
 }
 const countsDown = (n) => (n.view?.blocks || []).some((b) => b.table?.countdown);
-function noticeBody(n) {
+function noticeBody(n, gone) {
   const v = n.view;
   if (!v || !Array.isArray(v.blocks)) return n.body ? `<div class="body">${esc(n.body)}</div>` : '';
   const text = (t) => (t ? `<div class="line">${esc(t)}</div>` : '');
@@ -443,7 +446,7 @@ function noticeBody(n) {
   let lines = [];
   for (const b of v.blocks) {
     if (!b.table) { lines.push(text(b.text)); continue; }
-    const table = noticeTable(b.table);
+    const table = noticeTable(b.table, gone);
     if (table || !(b.table.rows || []).length) parts.push(...lines, table);
     lines = [];
   }
@@ -454,6 +457,7 @@ function noticeBody(n) {
 // the others, the soonest first, counting down to its next one; once they have all landed it goes
 // back among the others by when it came. Armies a recall notice names (`withdrawn`) went back: they
 // are not counted down to, and a notice of `withdrawn_drops` (one attack) all of whose armies did goes.
+// The recall notice itself is `hidden`: only what it names is used (2026-10-16 user).
 function withdrawnArmies() {
   return new Set(S.notices.flatMap((n) => (Array.isArray(n.withdrawn) ? n.withdrawn : [])));
 }
@@ -502,8 +506,8 @@ function latestOfPlaces(notices) {
 
 function renderNotices() {
   const gone = withdrawnArmies();
-  const list = latestOfPlaces(S.notices.filter((n) => n.seq > S.hiddenBefore && (S.filter === 'all' || n.level === S.filter)
-    && !withdrawnAll(n, gone))).filter((n) => !landedAll(n)).reverse();
+  const list = latestOfPlaces(S.notices.filter((n) => n.seq > S.hiddenBefore && !n.hidden && (S.filter === 'all' || n.level === S.filter)
+    && !withdrawnAll(n, gone))).filter((n) => !landedAll(n, gone)).reverse();
   const pinned = list.filter((n) => n.tapped && S.tapped[n.role] === n.tapped);
   const others = list.filter((n) => !pinned.includes(n));
   const coming = others.map((n) => [n, nextArrival(n, gone)]).filter(([, at]) => at).sort((a, b) => a[1] - b[1]);
@@ -517,7 +521,7 @@ function renderNotices() {
     return `<article class="notice ${esc(n.level)}${at ? ' coming' : ''}"><span class="tag ${esc(n.level)}">${esc(n.tag || '通知')}</span>
       <div class="title">${who && S.data.tokens.length > 1 ? `<span class="who">${esc(who)}</span>` : ''}${esc(n.title)}</div>
       ${when}
-      ${noticeBody(n)}</article>`;
+      ${noticeBody(n, gone)}</article>`;
   };
   const group = (label, cards) => (cards.length ? `<div class="notice-group">${label}</div>${cards.join('')}` : '');
   const html = list.length

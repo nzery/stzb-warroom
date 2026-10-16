@@ -264,6 +264,17 @@ class NotifyTests(unittest.TestCase):
                        "body": "a\n\nb", "role": 7}, color=False, label=True)
         self.assertEqual(text, "\a" + "22:13:20 [敌袭] [7] x[2J\n         a\n         b")
 
+    def test_a_hidden_notice_is_not_printed(self):
+        # a recall (2026-10-16 user): only the window uses the armies it names
+        folder = tempfile.TemporaryDirectory()
+        self.addCleanup(folder.cleanup)
+        follower = Follower(None, "t", Path(folder.name) / "c.json")
+        with unittest.mock.patch("builtins.print") as printed:
+            follower.print({"title": "撤回", "level": "info", "hidden": True})
+            self.assertFalse(printed.called)
+            follower.print({"title": "敌袭", "level": "info"})
+            self.assertTrue(printed.called)
+
     def test_follower_prints_notifications_and_keeps_its_cursor(self):
         folder = tempfile.TemporaryDirectory()
         self.addCleanup(folder.cleanup)
