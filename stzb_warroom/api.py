@@ -139,13 +139,17 @@ class Server:
         with self.open(path, tokens, body, compress, timeout) as response:
             return json.load(response)
 
-    def join(self, code, timeout=30):
+    def join(self, code, tokens=(), timeout=30):
         """Trade an invitation code for a new token -> {"token", "scope", "text"}.
-        ValueError with the server's own message when it is refused or unreachable."""
+        ValueError with the server's own message when it is refused or unreachable.
+        `tokens`: the ones already added, so the server can tell a code pasted twice."""
         data = json.dumps({"code": code}).encode()
+        headers = {"Content-Type": "application/json"}
+        if tokens:
+            headers["Authorization"] = "Bearer " + ",".join(tokens)
         try:
             with self.opener.open(request.Request(self.origin + "/v1/client/join", data=data, method="POST",
-                                                  headers={"Content-Type": "application/json"}),
+                                                  headers=headers),
                                   timeout=timeout) as response:
                 reply = json.load(response)
         except HTTPError as exc:

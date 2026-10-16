@@ -438,6 +438,10 @@ class JoinTests(unittest.TestCase):
         url, method, body, headers = sent[0]
         self.assertEqual((url, method, body), ("https://example.test/v1/client/join", "POST", {"code": self.CODE}))
         self.assertNotIn("Authorization", headers)
+        # the tokens already added go along, so the server can tell a code pasted twice
+        server, sent = self.server({"token": self.TOKEN, "text": "已加入"})
+        server.join(self.CODE, ["sta_a", "sta_b"])
+        self.assertEqual(sent[0][3]["Authorization"], "Bearer sta_a,sta_b")
 
     def test_a_refusal_is_the_servers_own_words(self):
         server, _ = self.server(error=(403, {"error": "邀请码无效"}))
