@@ -443,6 +443,12 @@ class JoinTests(unittest.TestCase):
         server.join(self.CODE, ["sta_a", "sta_b"])
         self.assertEqual(sent[0][3]["Authorization"], "Bearer sta_a,sta_b")
 
+    def test_every_request_names_the_client_version(self):
+        from stzb_warroom import __version__
+        headers = dict(api.Server("https://example.test").opener.addheaders)
+        self.assertEqual(headers["X-Client-Version"], __version__)
+        self.assertEqual(headers["User-Agent"], f"stzb-warroom/{__version__}")
+
     def test_a_refusal_is_the_servers_own_words(self):
         server, _ = self.server(error=(403, {"error": "邀请码无效"}))
         with self.assertRaisesRegex(ValueError, "邀请码无效"):
