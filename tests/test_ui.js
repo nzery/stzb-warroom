@@ -138,6 +138,15 @@ async function main() {
   const partly = vm.runInContext(`noticeTable({ columns: ['到达', '阵容'], countdown: { col: 0, at: [1, ${soon}] }, rows: [['a', '甲'], ['b', '乙']] })`, context);
   assert.ok(!partly.includes('甲') && partly.includes(`data-at="${soon}"`), partly);
   assert.equal(vm.runInContext(`landedAll({ view: { blocks: [{ table: { columns: ['到达'], countdown: { col: 0, at: [1] }, rows: [['a']] } }] } })`, context), true);
+  // a row whose army a recall named goes, and with all of them the notice (2026-10-16 user)
+  const recalled = vm.runInContext(`noticeTable({ columns: ['到达', '阵容'], countdown: { col: 0, at: [${soon}, ${soon}] },
+    armies: [7, 8], rows: [['a', '甲'], ['b', '乙']] }, new Set([7]))`, context);
+  assert.ok(!recalled.includes('甲') && recalled.includes('乙'), recalled);
+  assert.equal(vm.runInContext(`landedAll({ view: { blocks: [{ table: { columns: ['到达'], countdown: { col: 0, at: [${soon}] },
+    armies: [7], rows: [['a']] } }] } }, new Set([7]))`, context), true);
+  // the recall notice itself is not shown; what it names is still used
+  vm.runInContext(`S.notices = [{ seq: 1, title: '撤回', hidden: true, withdrawn: [7] }]`, context);
+  assert.deepEqual([...vm.runInContext('withdrawnArmies()', context)], [7]);
   // a tapped place's latest notice only
   const kept = vm.runInContext(`latestOfPlaces([{ seq: 1, role: 1, tapped: '9' }, { seq: 2, role: 1 },
     { seq: 3, role: 1, tapped: '9' }, { seq: 4, role: 2, tapped: '9' }]).map((n) => n.seq)`, context);
