@@ -168,23 +168,24 @@ nav { display: grid; gap: 4px; }
 .notice.alarm { border-color: #7a3c33; border-left-color: var(--red);
   background: linear-gradient(90deg, #3a211d, var(--panel) 55%); box-shadow: 0 0 0 1px #7a3c3366, 0 4px 16px #00000040; }
 .notice.warn { border-left-color: var(--amber); background: linear-gradient(90deg, #2f2a1c, var(--panel) 50%); }
-.notice > .tag { justify-self: stretch; text-align: center; padding: 2px 4px; font-size: 14px; line-height: 24px; font-weight: 600; }
-.notice .title { font-size: 17px; font-weight: 700; line-height: 28px; min-width: 0; }
+.notice > .tag { justify-self: stretch; align-self: start; text-align: center; padding: 3px 4px; font-size: 16px; line-height: 26px; font-weight: 700; }
+.notice .title { font-size: 20px; font-weight: 700; line-height: 32px; min-width: 0; }
 .notice.alarm .title { color: #ffd9d2; }
-.notice .when { color: var(--faint); font-size: 13px; line-height: 28px; font-variant-numeric: tabular-nums; }
-.notice .when.countdown { color: var(--amber); font-size: 16px; font-weight: 700; }
+.notice .when { color: var(--faint); font-size: 14px; line-height: 32px; font-variant-numeric: tabular-nums; }
+.notice .when.countdown { color: var(--amber); font-size: 19px; font-weight: 700; }
 .notice-group { color: var(--faint); font-size: 12px; padding: 4px 2px 0; }
-.notice .body { grid-column: 2 / 4; color: #d3dbd2; white-space: pre-wrap; line-height: 1.7; font-size: 15px; }
+.notice .body { grid-column: 2 / 4; color: #d3dbd2; white-space: pre-wrap; line-height: 1.7; font-size: 16px; }
 .notice .body.view { white-space: normal; grid-column: 1 / 4; }
 .notice .body.view .line { white-space: pre-wrap; }
 .notice .body.view .vtable { margin: 8px 0; overflow: hidden; }
-.notice .body.view .vtable table { font-size: 14px; }
+.notice .body.view .vtable table { font-size: 16px; }
 .notice .body.view .vtable table.fit { table-layout: fixed; width: 100%; }
-.notice .body.view .vtable td, .notice .body.view .vtable th { padding: 6px 8px; white-space: nowrap;
-  overflow: hidden; text-overflow: ellipsis; }
-.notice .body.view .vtable td.cd { color: var(--amber); font-weight: 700; font-size: 15px; }
+/* What does not fit goes on to a second line: nothing cut off at the larger size. */
+.notice .body.view .vtable td, .notice .body.view .vtable th { padding: 7px 8px; white-space: normal;
+  overflow-wrap: anywhere; vertical-align: middle; }
+.notice .body.view .vtable td.cd { color: var(--amber); font-weight: 700; font-size: 18px; white-space: nowrap; }
 .notice .body.view .vtable td.cd.soon { color: var(--red); }
-.notice .body.view .vtable td.key { color: var(--gold); font-weight: 700; font-size: 15px; }
+.notice .body.view .vtable td.key { color: var(--gold); font-weight: 700; font-size: 18px; }
 .notice .who { color: var(--gold); font-weight: 400; margin-right: 6px; }
 
 /* accounts */
@@ -303,7 +304,11 @@ input[type=text]:focus, input[type=password]:focus { border-color: var(--gold2);
   max-height: 260px; overflow-y: auto; }
 
 /* the server's pages (玩家队伍) */
-.vsearch { max-width: 520px; margin-bottom: 12px; }
+.vsearch { width: min(520px, 100%); }
+.vcards.grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(420px, 1fr)); gap: 10px; }
+.vcards.grid .vcard { margin: 0; padding: 12px 14px; }
+.vcards.grid .vtable { margin-top: 8px; }
+.vcards.grid .vtable td { padding: 5px 8px; }
 .vtoolbar { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; margin-bottom: 14px; }
 .vfilters { display: grid; gap: 8px; min-width: 0; }
 .vfilter { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
