@@ -90,7 +90,11 @@ def join(args):
     if not code:
         raise SystemExit("邀请码应是 stj_ 开头的 26 个字符")
     try:
-        reply = Server(args.server).join(code)
+        try:
+            held = client_tokens()  # so the server can tell the same code given twice
+        except SystemExit:
+            held = []
+        reply = Server(args.server).join(code, held)
     except ValueError as exc:
         raise SystemExit(str(exc))
     path = Path(args.env_file) if args.env_file else token_file()
