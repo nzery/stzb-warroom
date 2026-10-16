@@ -664,7 +664,7 @@ function viewCard(c) {
   const tags = (c.tags || []).map((t) => `<span class="vtag${level(t.level)}">${esc(t.text)}</span>`).join('');
   const stats = (c.stats || []).map((t) => `<div class="vstat"><span>${esc(t.label)}</span><b class="lv${level(t.level)}">${esc(t.value)}</b></div>`).join('');
   const lines = (c.lines || []).map((l) => `<li class="lv${level(l.level)}">${esc(l.text)}</li>`).join('');
-  const table = c.table && c.table.rows?.length ? `<div class="vtable"><table><thead><tr>${c.table.columns.map((h) => `<th>${esc(h)}</th>`).join('')}</tr></thead>
+  const table = c.table && c.table.rows?.length ? `<div class="vtable"><table>${c.table.columns?.length ? `<thead><tr>${c.table.columns.map((h) => `<th>${esc(h)}</th>`).join('')}</tr></thead>` : ''}
     <tbody>${c.table.rows.map((row) => `<tr>${row.map((v) => `<td>${cell(v)}</td>`).join('')}</tr>`).join('')}</tbody></table></div>` : '';
   return `<div class="card vcard"><div class="vhead"><div class="vtitle"><h3>${esc(c.title)}</h3>${c.subtitle ? `<small>${esc(c.subtitle)}</small>` : ''}</div>
     ${tags ? `<div class="vtags">${tags}</div>` : ''}</div>
@@ -695,12 +695,14 @@ function renderPersonal(page) {
   const box2 = search ? `<form class="inline-form vsearch" data-psearch="${esc(search.key)}"><input type="text" autocomplete="off" spellcheck="false"
     maxlength="40" value="${esc(view.query[search.key] ?? search.value ?? '')}" placeholder="${esc(search.placeholder || '')}">
     <button class="btn primary" type="submit"${view.loading ? ' disabled' : ''}>查询</button></form>` : '';
-  const toolbar = `${box2}<div class="vtoolbar"><div class="vfilters">${who}${filters}</div>${refresh}</div>`;
+  const toolbar = `<div class="vtoolbar"><div class="vfilters">${box2}${who}${filters}</div>${refresh}</div>`;
   let body;
   if (view.error) body = banner('warn', 'info', esc(view.error));
   else if (!d) body = '<div class="card empty">正在读取…</div>';
   else body = (d.note ? `<p class="muted prefs-note">${esc(d.note)}</p>` : '')
-    + (d.cards.length ? d.cards.map(viewCard).join('') : `<div class="card empty">${esc(d.empty || '没有内容')}</div>`)
+    // layout 'grid': the cards side by side as the width allows (玩家队伍: five armies at a glance).
+    + (d.cards.length ? `<div class="vcards${d.layout === 'grid' ? ' grid' : ''}">${d.cards.map(viewCard).join('')}</div>`
+      : `<div class="card empty">${esc(d.empty || '没有内容')}</div>`)
     + (d.page && d.page.pages > 1 ? `<div class="pager"><button class="btn ghost small" data-ppage="${d.page.page - 1}"${d.page.page <= 1 ? ' disabled' : ''}>上一页</button>
       <span>第 ${d.page.page} / ${d.page.pages} 页，共 ${d.page.total} 条</span>
       <button class="btn ghost small" data-ppage="${d.page.page + 1}"${d.page.page >= d.page.pages ? ' disabled' : ''}>下一页</button></div>` : '');
