@@ -134,6 +134,7 @@ class TLS:
         self.incoming, self.outgoing = ssl.MemoryBIO(), ssl.MemoryBIO()
         self.tls = context.wrap_bio(self.incoming, self.outgoing, server_hostname=host)
         self.lock = threading.Lock()
+        self.plain, self.eof = b"", False  # decrypted and not yet handed out; the peer ended TLS
         sock.setsockopt(socket.IPPROTO_TCP, socket.TCP_NODELAY, 1)
         first = True
         while True:
@@ -161,17 +162,36 @@ class TLS:
         if data:
             self.sock.sendall(data)
 
+    def _decrypt(self):
+        """Everything the bytes received so far decrypt to. A read takes one record only, and the
+        records left encrypted in the memory BIO are seen neither by select() (they were read from
+        the socket) nor by SSLObject.pending(): a phone's first message coming right behind the
+        relay's 101 answer waited there until the next packet, the phone giving up (2026-10-16)."""
+        parts = []
+        try:
+            while not self.eof:
+                data = self.tls.read(65536)
+                if not data:
+                    self.eof = True
+                parts.append(data)
+        except ssl.SSLWantReadError:
+            pass
+        except ssl.SSLZeroReturnError:
+            self.eof = True
+        finally:
+            self._flush()  # what reading made TLS answer (key updates, …)
+        return b"".join(parts)
+
     def recv(self, size):
         while True:
             with self.lock:
-                try:
-                    return self.tls.read(size)
-                except ssl.SSLWantReadError:
-                    pass
-                except ssl.SSLZeroReturnError:
+                if not self.plain:
+                    self.plain = self._decrypt()
+                if self.plain:
+                    chunk, self.plain = self.plain[:size], self.plain[size:]
+                    return chunk
+                if self.eof:
                     return b""
-                finally:
-                    self._flush()  # what reading made TLS answer (key updates, …)
             data = self.sock.recv(65536)
             if not data:
                 return b""
@@ -185,7 +205,9 @@ class TLS:
 
     def pending(self):
         with self.lock:
-            return self.tls.pending()
+            if not self.plain:
+                self.plain = self._decrypt()
+            return bool(self.plain) or self.eof
 
     def fileno(self):
         return self.sock.fileno()
