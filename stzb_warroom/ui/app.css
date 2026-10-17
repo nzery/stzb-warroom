@@ -302,10 +302,11 @@ input[type=text]:focus, input[type=password]:focus { border-color: var(--gold2);
 .notes-body { margin-top: 6px; white-space: pre-wrap; color: var(--muted); font-size: 13px; line-height: 1.6;
   max-height: 260px; overflow-y: auto; }
 
-/* the server's pages (玩家队伍) */
+/* the server's pages (玩家信息) */
 .vsearch { width: min(520px, 100%); }
 .vcards.grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(420px, 1fr)); gap: 10px; }
 .vcards.grid .vcard { margin: 0; padding: 12px 14px; }
+.vcards.grid .vcard.wide { grid-column: 1 / -1; }
 .vcards.grid .vtable { margin-top: 8px; }
 .vcards.grid .vtable td { padding: 5px 8px; }
 .vtoolbar { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; margin-bottom: 14px; }
