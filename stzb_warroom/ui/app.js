@@ -51,7 +51,7 @@ const store = {
 const PAGES = {
   overview: ['概览', '上报游戏数据，接收战局通知'],
   notices: ['通知', '服务器根据你的战局生成的通知'],
-  players: ['玩家队伍', '按名字查一名玩家最近的队伍：武将、战法、红度'],
+  players: ['玩家信息', '按名字查一名玩家：主城、分城、戍城，和他最近的队伍'],
   prefs: ['通知设置', '要哪些通知、过滤哪些敌军、推送哪些到手机'],
   phone: ['用手机玩', '手机上的游戏连接经这台电脑出去，照常上报'],
   accounts: ['账号与推送', 'Token、角色与手机推送（iPhone 用 Bark，安卓用 ntfy）'],
@@ -74,7 +74,7 @@ const S = {
   data: null, tapped: null, nextFlip: Infinity, page: 'notices', filter: 'all', notices: [], logs: [], n: 0, l: 0,
   hiddenBefore: store.get('hiddenBefore', 0), dismissed: new Set(store.get('dismissed', [])),
   seenNotices: store.get('seenNotices', 0), loaded: false, accountsKey: '', prefsKey: '', busy: new Set(),
-  // The server's pages (玩家队伍), as it gave them: {query, data, error, loading, key} each.
+  // The server's pages (玩家信息), as it gave them: {query, data, error, loading, key} each.
   personal: { players: { query: {} } },
   personalRole: store.get('personalRole', null),
   // The server's phone page for the chosen account: {data, error, loading, role, key}.
@@ -628,7 +628,7 @@ function renderPrefs(d) {
     + p.groups.map((g) => `<div class="card settings"><h3>${esc(g.title)}</h3>${g.items.map(item).join('')}</div>`).join('');
 }
 
-// ---------------------------------------------------------------- the server's pages (玩家队伍)
+// ---------------------------------------------------------------- the server's pages (玩家信息)
 // Pages the server makes (texts, filters and all): cards of tags, figures, lines and a table.
 
 // The accounts these pages can be about: approved, with a role the server has seen.
@@ -671,7 +671,7 @@ function viewCard(c) {
   const lines = (c.lines || []).map((l) => `<li class="lv${level(l.level)}">${esc(l.text)}</li>`).join('');
   const table = c.table && c.table.rows?.length ? `<div class="vtable"><table>${c.table.columns?.length ? `<thead><tr>${c.table.columns.map((h) => `<th>${esc(h)}</th>`).join('')}</tr></thead>` : ''}
     <tbody>${c.table.rows.map((row) => `<tr>${row.map((v) => `<td>${cell(v)}</td>`).join('')}</tr>`).join('')}</tbody></table></div>` : '';
-  return `<div class="card vcard"><div class="vhead"><div class="vtitle"><h3>${esc(c.title)}</h3>${c.subtitle ? `<small>${esc(c.subtitle)}</small>` : ''}</div>
+  return `<div class="card vcard${c.wide ? ' wide' : ''}"><div class="vhead"><div class="vtitle"><h3>${esc(c.title)}</h3>${c.subtitle ? `<small>${esc(c.subtitle)}</small>` : ''}</div>
     ${tags ? `<div class="vtags">${tags}</div>` : ''}</div>
     ${stats ? `<div class="vstats">${stats}</div>` : ''}${lines ? `<ul class="vlines">${lines}</ul>` : ''}${table}</div>`;
 }
@@ -694,7 +694,7 @@ function renderPersonal(page) {
   const filters = (d?.filters || []).map((f) => `<div class="vfilter"><span>${esc(f.label)}</span><div class="chips">${f.options.map((o) =>
     `<button class="chip${o.value === f.value ? ' active' : ''}" data-pfilter="${esc(f.key)}" data-value="${esc(o.value)}">${esc(o.label)}</button>`).join('')}</div></div>`).join('');
   const refresh = `<button class="btn ghost small" data-prefresh="1"${view.loading ? ' disabled' : ''}>${view.loading ? '<span class="spin"></span>读取中' : `${icon('refresh').replace('<svg', '<svg width="14" height="14"')}刷新`}</button>`;
-  // A page with a box to type in (玩家队伍: the name); what is typed goes as the server's `search.key`.
+  // A page with a box to type in (玩家信息: the name); what is typed goes as the server's `search.key`.
   const search = d?.search || view.search;
   if (search) view.search = search;
   const box2 = search ? `<form class="inline-form vsearch" data-psearch="${esc(search.key)}"><input type="text" autocomplete="off" spellcheck="false"
@@ -705,7 +705,8 @@ function renderPersonal(page) {
   if (view.error) body = banner('warn', 'info', esc(view.error));
   else if (!d) body = '<div class="card empty">正在读取…</div>';
   else body = (d.note ? `<p class="muted prefs-note">${esc(d.note)}</p>` : '')
-    // layout 'grid': the cards side by side as the width allows (玩家队伍: five armies at a glance).
+    // layout 'grid': the cards side by side as the width allows (玩家信息: five armies at a glance);
+    // a `wide` card takes a whole row (the player's own, above their armies).
     + (d.cards.length ? `<div class="vcards${d.layout === 'grid' ? ' grid' : ''}">${d.cards.map(viewCard).join('')}</div>`
       : `<div class="card empty">${esc(d.empty || '没有内容')}</div>`)
     + (d.page && d.page.pages > 1 ? `<div class="pager"><button class="btn ghost small" data-ppage="${d.page.page - 1}"${d.page.page <= 1 ? ' disabled' : ''}>上一页</button>

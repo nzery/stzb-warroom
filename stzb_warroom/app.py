@@ -10,7 +10,7 @@ minute's look only reads them, and a choice is sent only when the player makes i
 added here since, or again to a token it did not reach; a change made elsewhere (another
 computer with the same token) is followed, not undone.
 
-The 玩家队伍 page (any player's armies, looked up by name) is the server's too
+The 玩家信息 page (any player, looked up by name: their cities and armies) is the server's too
 (``/v1/client/personal/players``): asked for when the player opens it, passed to the window
 as it comes, the name typed, the page's filters and page number passed along unread.
 """
@@ -459,10 +459,10 @@ class App:
     def bark_test(self, index):
         return self._bark("POST", "/v1/client/bark/test", index, {})
 
-    # the server's pages (玩家队伍) ----------------------------------------------------
+    # the server's pages (玩家信息) ----------------------------------------------------
 
     def personal(self, index, page, query=None):
-        """One of the server's pages (玩家队伍), as it made it. `query`: the name typed, the page's
+        """One of the server's pages (玩家信息), as it made it. `query`: the name typed, the page's
         filters and page number ({name: text or number}), sent along as they are."""
         token = self._token(index)
         if page not in PERSONAL_PAGES:
