@@ -10,7 +10,7 @@ minute's look only reads them, and a choice is sent only when the player makes i
 added here since, or again to a token it did not reach; a change made elsewhere (another
 computer with the same token) is followed, not undone.
 
-The 玩家信息 page (any player, looked up by name: their cities and armies) is the server's too
+The 玩家信息 page (any player, looked up by name: union, main city, armies) is the server's too
 (``/v1/client/personal/players``): asked for when the player opens it, passed to the window
 as it comes, the name typed, the page's filters and page number passed along unread.
 """
