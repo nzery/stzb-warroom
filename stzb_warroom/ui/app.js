@@ -71,7 +71,7 @@ const accountState = (a) => (a.state === 'pending' && a.pending
 const LOGIN_STEPS = '请在本程序点「开始上报」，再进入游戏；如果已经在游戏里，退出后重新登录一次';
 
 const S = {
-  data: null, tapped: {}, nextFlip: Infinity, page: 'notices', filter: 'all', notices: [], logs: [], n: 0, l: 0,
+  data: null, tapped: null, nextFlip: Infinity, page: 'notices', filter: 'all', notices: [], logs: [], n: 0, l: 0,
   hiddenBefore: store.get('hiddenBefore', 0), dismissed: new Set(store.get('dismissed', [])),
   seenNotices: store.get('seenNotices', 0), loaded: false, accountsKey: '', prefsKey: '', busy: new Set(),
   // The server's pages (玩家队伍), as it gave them: {query, data, error, loading, key} each.
@@ -116,7 +116,7 @@ async function refresh() {
     for (const notice of data.notices) {
       if (!live(notice)) continue;
       S.notices.push(notice);
-      if (notice.tapped) S.tapped[notice.role] = notice.tapped;
+      if (notice.tapped) S.tapped = { role: notice.role, place: notice.tapped };
       if (S.loaded) announce(notice);
     }
     S.notices = S.notices.filter(live);
@@ -497,7 +497,8 @@ setInterval(tickCountdowns, 1000);
 
 // A place the player tapped (`tapped`, the server's) is told anew at each tap that finds a change:
 // only its latest notice is shown, and the latest tapped place's stays above all, until the
-// player taps another (2026-10-14 user).
+// player taps another (2026-10-14 user). One place for all the accounts: the one an account tapped
+// stayed above all after the player went over to another account (2026-10-17 user).
 function latestOfPlaces(notices) {
   const latest = new Map();
   for (const n of notices) if (n.tapped) latest.set(`${n.role}:${n.tapped}`, n.seq);
@@ -508,7 +509,7 @@ function renderNotices() {
   const gone = withdrawnArmies();
   const list = latestOfPlaces(S.notices.filter((n) => n.seq > S.hiddenBefore && !n.hidden && (S.filter === 'all' || n.level === S.filter)
     && !withdrawnAll(n, gone))).filter((n) => !landedAll(n, gone)).reverse();
-  const pinned = list.filter((n) => n.tapped && S.tapped[n.role] === n.tapped);
+  const pinned = list.filter((n) => n.tapped && S.tapped && S.tapped.role === n.role && S.tapped.place === n.tapped);
   const others = list.filter((n) => !pinned.includes(n));
   const coming = others.map((n) => [n, nextArrival(n, gone)]).filter(([, at]) => at).sort((a, b) => a[1] - b[1]);
   const rest = others.filter((n) => !nextArrival(n, gone));

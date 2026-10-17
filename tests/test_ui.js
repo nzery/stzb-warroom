@@ -151,6 +151,14 @@ async function main() {
   const kept = vm.runInContext(`latestOfPlaces([{ seq: 1, role: 1, tapped: '9' }, { seq: 2, role: 1 },
     { seq: 3, role: 1, tapped: '9' }, { seq: 4, role: 2, tapped: '9' }]).map((n) => n.seq)`, context);
   assert.deepEqual([...kept], [2, 3, 4]);
+  // the place tapped last stays above all, whichever account tapped it (2026-10-17 user)
+  nodes.get('notice-list').dataset = {};
+  vm.runInContext(`colWidths = () => {}; S.hiddenBefore = 0; S.filter = 'all'`, context);
+  vm.runInContext(`S.tapped = { role: 8, place: '5' }; S.notices = [
+    { seq: 1, role: 7, tapped: '9', level: 'info', title: '甲点开', view: { blocks: [] } },
+    { seq: 2, role: 8, tapped: '5', level: 'info', title: '乙点开', view: { blocks: [] } }]; renderNotices();`, context);
+  const html = vm.runInContext(`document.getElementById('notice-list').innerHTML`, context);
+  assert.ok(html.indexOf('乙点开') < html.indexOf('其他通知') && html.indexOf('其他通知') < html.indexOf('甲点开'), html);
   console.log('UI startup and refresh regression checks passed');
 }
 main().catch((error) => { console.error(error); process.exitCode = 1; });
