@@ -20,7 +20,9 @@ jobs:
         with:
           python-version: "3.12"
       - name: Test
-        run: python -m unittest discover -s tests -v
+        run: |
+          python -m unittest discover -s tests -v
+          node tests/test_ui.js
       - name: Build
         env:  # secrets, so the addresses stay out of the source and the public logs
           ST_SERVER: ${{ secrets.ST_SERVER }}
