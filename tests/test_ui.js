@@ -71,6 +71,24 @@ async function main() {
     'data-psearch="name"', 'value="&lt;张"', 'placeholder="输入玩家名字"']) {
     assert.ok(drawn.includes(part), part);
   }
+  // 甲 then 乙 asked quickly: 甲 answering last (or failing) does not put 甲 back, nor end 乙's loading
+  vm.runInContext(`S.personalRole = 7; S.personal.players = { query: {} }; pending = [];
+    act = (name, args) => new Promise((resolve, reject) => pending.push({ args, resolve, reject }));`, context);
+  for (const name of ['甲', '乙']) vm.runInContext(`S.personal.players.query = { name: '${name}' }; loadPersonal('players');`, context);
+  const answer = (i, how, value) => vm.runInContext('pending', context)[i][how](value);
+  answer(1, 'resolve', { cards: [], empty: '乙' });
+  await new Promise(setImmediate);
+  answer(0, 'resolve', { cards: [], empty: '甲' });
+  await new Promise(setImmediate);
+  assert.equal(vm.runInContext('S.personal.players.data.empty', context), '乙');
+  vm.runInContext(`loadPersonal('players'); loadPersonal('players');`, context);
+  answer(2, 'reject', new Error('旧的失败'));
+  await new Promise(setImmediate);
+  assert.equal(vm.runInContext('S.personal.players.error ?? null', context), null);
+  assert.equal(vm.runInContext('S.personal.players.loading', context), true, 'the newest is still loading');
+  answer(3, 'resolve', { cards: [], empty: '乙' });
+  await new Promise(setImmediate);
+  assert.equal(vm.runInContext('S.personal.players.loading', context), false);
   // the phone page: the server's QR code only as an image (nothing it sends runs), its texts escaped
   vm.runInContext(`S.page = 'phone'; S.data.settings = { phone_exit: true };
     S.data.phone = { enabled: true, running: true, waiting: false, exits: [{ relay: 'relay.example', state: 'online', since: 1, pipes: 1 }] };

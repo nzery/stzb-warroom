@@ -647,15 +647,21 @@ async function loadPersonal(page) {
   view.loading = true;
   renderPersonal(page);
   const role = account.a.role.id;
+  // Only the newest request of the page counts: an older one answering late (another player,
+  // filter or account chosen meanwhile) must not put back what was chosen before.
+  const seq = view.seq = (view.seq || 0) + 1;
+  const newest = () => S.personal[page] === view && view.seq === seq;
+  const current = () => newest() && personalAccount()?.a.role.id === role;  // not another account meanwhile
   try {
     const data = await act('personal', { index: account.index, page, query: view.query }, { quiet: true });
-    if (personalAccount()?.a.role.id !== role) return;  // another account was chosen meanwhile
-    view.data = data; view.error = null; view.role = role;
+    if (current()) { view.data = data; view.error = null; view.role = role; }
   } catch (error) {
-    view.error = error.message || String(error);
+    if (current()) view.error = error.message || String(error);
   } finally {
-    view.loading = false;
-    renderPersonal(page);
+    if (newest()) {
+      view.loading = false;
+      renderPersonal(page);
+    }
   }
 }
 
