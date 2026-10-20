@@ -5,6 +5,10 @@
 
 **官网：** <https://stzb.nzery.dev>（介绍、下载和使用说明）
 
+**网络要求：** 公网服务器受到的攻击较多，服务器（`*.nzery.dev`）已屏蔽国外 IP。下载和使用时请关闭代理、VPN 和加速器
+（包括全局 / TUN 模式），或在代理规则里把 `nzery.dev` 及其子域名设为直连（DIRECT）。官网下载不了时可以从本页
+[Releases](https://github.com/nzery/stzb-warroom/releases/latest) 下载，但客户端使用时仍要用国内网络直连服务器。
+
 **看看效果：** [公共域的战局网站](https://stzb.nzery.dev/43lBbwxrX3FKQjVsu8xD9NeSickoGNKjbOUFao5NwxA/)，所有公共域成员上传的战报、阵容对局和攻城记录都在这里。
 
 ## 能收到哪些通知
@@ -149,6 +153,7 @@ python3 -m stzb_warroom gui                  # 和 Windows 一样的窗口；也
 ## 遇到问题
 
 - 窗口顶部的红色提示条会说明问题和处理办法，按提示操作即可。
+- 官网打不开、连不上服务器：多半是开着代理、VPN 或加速器。服务器已屏蔽国外 IP，关掉它们或把 `nzery.dev` 设为直连再试。
 - 加入后一直没开始：确认已经登录过游戏；提示角色已被别人认领时，发邮件给管理员核实。
 - 其他问题：把“诊断”页的诊断信息发给管理员。
 
