@@ -81,12 +81,13 @@ class Follower:
     """One token's notifications; its cursor {"epoch", "after"} kept in `path`.
 
     `show(notice)` displays one (default: printed, coloured when `color`); `warn(text)` reports
-    a problem with the stream (default: stderr).
+    a problem with the stream, and that it is over once the stream opens again (default: stderr).
     """
 
     def __init__(self, server, token, path, color=False, label=False, show=None, warn=say):
         self.server, self.token, self.path, self.color, self.label = server, token, Path(path), color, label
         self.show, self.warn = show or self.print, warn
+        self.problem = None  # the last problem reported, until the stream opens again
         try:
             value = json.loads(self.path.read_text())
         except (OSError, ValueError):
@@ -117,6 +118,9 @@ class Follower:
             for kind, event_id, data in events(stream, stop):
                 if kind == "ready":
                     self.epoch = data.get("event_epoch")
+                    if self.problem:  # the problem's line would otherwise stay the last word
+                        self.warn("notifications resumed")
+                        self.problem = None
                 elif kind == "notify":
                     self.show(data)
                     self.after = int(event_id)
@@ -131,25 +135,25 @@ class Follower:
                     raise ConnectionError("no game login captured for this token yet")
 
     def follow(self, stop):
-        last, delay = None, 2
+        delay = 2
         while not stop.is_set():
             try:
                 self.follow_once(stop)
-                last, delay = None, 2
+                delay = 2
             except HTTPError as exc:
                 if exc.code == 401:
                     self.warn("a token was rejected (HTTP 401); its notifications stop")
                     return
                 # 403: the token has no approved role yet.
                 summary, delay = f"HTTP {exc.code}", 60 if exc.code == 403 else 10
-                if summary != last:
+                if summary != self.problem:
                     self.warn(f"notifications unavailable: {summary}")
-                    last = summary
+                    self.problem = summary
             except (OSError, ValueError) as exc:
                 summary, delay = f"{type(exc).__name__}: {exc}", min(delay * 2, 60)
-                if summary != last:
+                if summary != self.problem:
                     self.warn(f"notifications interrupted: {summary}")
-                    last = summary
+                    self.problem = summary
             stop.wait(delay)
 
 
