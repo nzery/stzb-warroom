@@ -118,6 +118,18 @@ class AppTests(unittest.TestCase):
         self.assertEqual(again.tokens, [GOOD])
         self.assertNotIn(GOOD.encode(), (self.folder / "tokens.bin").read_bytes())
 
+    def test_notifications_wait_for_an_approved_role(self):
+        app = self.app(saved=GOOD)
+        ready = app.notify_ready(GOOD)
+        self.assertFalse(ready())  # not checked yet
+        for value, expected in (({"state": "pending", "approved": False}, False),
+                                ({"state": "no_role", "approved": True, "role": None}, False),
+                                ({"state": "ok", "approved": True, "role": {"id": 1}}, True),
+                                ({"state": "offline", "error": "HTTP 502"}, True)):  # the stream says why
+            with self.subTest(value=value):
+                app.accounts[GOOD] = value
+                self.assertEqual(ready(), expected)
+
     def test_tokens_are_checked_before_they_are_kept(self):
         app = self.app()
         for text in ("", "hello", "sta_short"):

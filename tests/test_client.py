@@ -321,6 +321,24 @@ class NotifyTests(unittest.TestCase):
         self.assertEqual(warned, ["notifications unavailable: HTTP 403", "notifications resumed",
                                   "notifications unavailable: HTTP 403"])
 
+    def test_follower_asks_nothing_until_the_role_is_approved(self):
+        folder = tempfile.TemporaryDirectory()
+        self.addCleanup(folder.cleanup)
+        stop, asked, checks = threading.Event(), [], []
+        stop.wait = lambda _delay: stop.is_set()
+
+        class Server:
+            def json(self, path, token):
+                asked.append(path)
+                stop.set()
+                raise refuse(403)
+
+        def ready():
+            checks.append(1)
+            return len(checks) > 2
+        Follower(Server(), "t", Path(folder.name) / "c.json", warn=lambda _text: None, ready=ready).follow(stop)
+        self.assertEqual((len(checks), asked), (3, ["/v1/state/events?after=latest"]))
+
     def test_prompts_are_shown_and_answered(self):
         stop = threading.Event()
         server = FakeServer([{"id": "p1", "text": "扫码\033[2J", "ask": "验证码："}, {"ok": True},

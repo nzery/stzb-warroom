@@ -82,11 +82,13 @@ class Follower:
 
     `show(notice)` displays one (default: printed, coloured when `color`); `warn(text)` reports
     a problem with the stream, and that it is over once the stream opens again (default: stderr).
+    `ready()`: whether the server said the token has an approved role (the window's account
+    check); until then the stream is not asked, it would only be refused (403). None: always ask.
     """
 
-    def __init__(self, server, token, path, color=False, label=False, show=None, warn=say):
+    def __init__(self, server, token, path, color=False, label=False, show=None, warn=say, ready=None):
         self.server, self.token, self.path, self.color, self.label = server, token, Path(path), color, label
-        self.show, self.warn = show or self.print, warn
+        self.show, self.warn, self.ready = show or self.print, warn, ready
         self.problem = None  # the last problem reported, until the stream opens again
         try:
             value = json.loads(self.path.read_text())
@@ -137,6 +139,9 @@ class Follower:
     def follow(self, stop):
         delay = 2
         while not stop.is_set():
+            if self.ready and not self.ready():
+                stop.wait(5)
+                continue
             try:
                 self.follow_once(stop)
                 delay = 2
@@ -192,17 +197,19 @@ def follow_prompts(server, token, stop, show=ask_terminal):
         stop.wait(2 if prompt_id else 60)
 
 
-def start(server, tokens, state_dir, stop, prompt_for=lambda _token: ask_terminal, **options):
+def start(server, tokens, state_dir, stop, prompt_for=lambda _token: ask_terminal, ready_for=lambda _token: None,
+          **options):
     """Follow every token's notifications and prompts until `stop`; the notification threads.
 
-    `prompt_for(token)`: follow_prompts's `show` for that token. `options`: Follower's color,
-    show and warn.
+    `prompt_for(token)`: follow_prompts's `show` for that token; `ready_for(token)`: its
+    Follower's `ready`. The prompts are asked from the start: they say why a token's capture is
+    not uploaded before it is approved. `options`: Follower's color, show and warn.
     """
     threads = []
     for token in tokens:
         key = hashlib.sha256(token.encode()).hexdigest()[:8]
         follower = Follower(server, token, Path(state_dir) / f"notify-{key}.json", label=len(tokens) > 1,
-                            **options)
+                            ready=ready_for(token), **options)
         threads.append(threading.Thread(target=follower.follow, args=(stop,), daemon=True))
         threading.Thread(target=follow_prompts, args=(server, token, stop, prompt_for(token)), daemon=True).start()
     for thread in threads:

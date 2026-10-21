@@ -613,6 +613,18 @@ class App:
             self.notices.append(dict(notice, seq=self.seq, time=notice.get("time") or time.time()))
         self.touch()
 
+    def notify_ready(self, token):
+        """Whether the token's notifications can be asked: once the account check found its role
+        approved (before, the server refuses them with 403 every minute). When the check cannot
+        reach the server, the stream is tried and reports its own problem."""
+        def ready():
+            with self.lock:
+                value = self.accounts.get(token)
+            if value is None:  # not checked yet: the check runs at start
+                return False
+            return value.get("state") in ("offline", "invalid") or bool(value.get("approved") and value.get("role"))
+        return ready
+
     def prompt_for(self, token):
         def show(text, ask):  # only hints now; nothing is ever asked
             with self.lock:
@@ -649,7 +661,7 @@ class App:
                                                  daemon=True)
             session["thread"].start()
         notify.start(self.server, session["tokens"], self.state_dir, stop, prompt_for=self.prompt_for,
-                     show=self.on_notice, warn=lambda text: self.log(text, "warn"))
+                     ready_for=self.notify_ready, show=self.on_notice, warn=lambda text: self.log(text, "warn"))
         if self.settings["phone_exit"]:
             self._start_exits(session)  # the phone's connections are reported by this capture
         self.touch()
