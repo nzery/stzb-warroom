@@ -179,3 +179,8 @@ python3 -m unittest discover -s tests
 ```
 
 Windows 整合包的构建和发版见 [packaging/windows/README.md](packaging/windows/README.md)。
+想参与改进请看 [CONTRIBUTING.md](CONTRIBUTING.md)。
+
+## 许可证
+
+[GPL-3.0](LICENSE)
