@@ -255,6 +255,44 @@ class AppTests(unittest.TestCase):
         self.assertEqual(self.server.prefs[NEW]["mode"], "active")
         self.assertNotIn(NEW, json.dumps(later.settings))
 
+    def test_a_look_under_way_does_not_undo_a_save(self):
+        # Codex 2026-10-21: the minute's look and a save ran side by side; a look that read the old
+        # settings before the save ended after it, and the page showed (and the next save sent) the
+        # old values again. A token added during a look was dropped from those due the choice.
+        app = self.app(saved=f"{GOOD},{NEW}")
+        app.check_accounts()
+        reading, release, real = threading.Event(), threading.Event(), self.server.json
+
+        def slow(path, token, body=None, timeout=45):
+            value = real(path, token, body, timeout)
+            if body is None and token == GOOD and not release.is_set():
+                reading.set()
+                release.wait(5)
+            return value
+        self.server.json = slow
+        look = threading.Thread(target=app.sync_notice_prefs)
+        look.start()
+        self.assertTrue(reading.wait(5))
+        app.add_token(THIRD := "sta_" + "e" * 43)
+        release.set()
+        look.join(5)
+        self.assertIn(appmod.tag(THIRD), app._prefs_due())
+        reading.clear()
+        release.clear()
+        look = threading.Thread(target=app.sync_notice_prefs)
+        look.start()
+        self.assertTrue(reading.wait(5))
+        save = threading.Thread(target=app.set_notice_pref, args=("skip_spartan", False))
+        save.start()
+        time.sleep(0.2)
+        release.set()
+        look.join(5)
+        save.join(5)
+        self.server.json = real
+        self.assertFalse(app.snapshot()["notice_prefs"]["values"]["skip_spartan"])
+        self.assertFalse(app.settings["notice_prefs"]["skip_spartan"])
+        self.assertFalse(self.server.prefs[GOOD]["skip_spartan"])
+
     def test_the_players_page_is_the_servers(self):
         app = self.app(saved=f"{GOOD},{NEW}")
         page = app.personal(0, "players", {"name": "张三", "page": 2, "x": True, "y": None})
