@@ -297,6 +297,30 @@ class NotifyTests(unittest.TestCase):
         self.assertIn("notify=1", server.path)
         self.assertEqual(json.loads((Path(folder.name) / "c.json").read_text()), {"epoch": "e", "after": 12})
 
+    def test_follower_says_when_notifications_resume(self):
+        folder = tempfile.TemporaryDirectory()
+        self.addCleanup(folder.cleanup)
+        stop = threading.Event()
+        stop.wait = lambda _delay: stop.is_set()
+        opened = [refuse(403), refuse(403), b'event: ready\ndata: {"event_epoch": "e"}\n\n', refuse(403)]
+
+        class Server:
+            def json(self, path, token):
+                return {"event_epoch": "e", "next_id": 10}
+
+            def open(self, path, token, timeout):
+                value = opened.pop(0)
+                if not opened:
+                    stop.set()
+                if isinstance(value, Exception):
+                    raise value
+                return io.BytesIO(value)
+
+        warned = []
+        Follower(Server(), "t", Path(folder.name) / "c.json", warn=warned.append).follow(stop)
+        self.assertEqual(warned, ["notifications unavailable: HTTP 403", "notifications resumed",
+                                  "notifications unavailable: HTTP 403"])
+
     def test_prompts_are_shown_and_answered(self):
         stop = threading.Event()
         server = FakeServer([{"id": "p1", "text": "扫码\033[2J", "ask": "验证码："}, {"ok": True},
