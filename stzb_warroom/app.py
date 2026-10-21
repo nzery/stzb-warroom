@@ -107,6 +107,9 @@ class App:
         self.accounts = {}  # token -> what /v1/client/status said, or why it could not
         self.capture = {"state": "stopped", "error": None, "hint": None, "since": None, "dumpcap": None}
         self.notice_prefs = {"note": None, "groups": None, "values": None, "error": None}  # as the server gave it
+        # One look or save of the notice settings at a time: a minute's look still under way would
+        # otherwise end after a save and put back what it read before it, or clear the save's retries.
+        self.prefs_lock = threading.Lock()
         self.session = None
         self.update = None  # a newer release: {"version", "url", "code_only", "state", "error"}
         self.update_lock = threading.Lock()  # one download at a time
@@ -372,6 +375,11 @@ class App:
         """Read the settings page; send the player's choice only to the tokens still due it (added
         here since, or not reached when it was made). The first token's settings are shown, and
         kept as this computer's choice: one made elsewhere is followed, not undone."""
+        with self.prefs_lock:
+            self._sync_notice_prefs()
+        self.touch()
+
+    def _sync_notice_prefs(self):
         with self.lock:
             chosen, due = self._chosen_prefs(), self._prefs_due()
         page, errors, left = None, [], set()  # left: the tags still due after this look
@@ -387,7 +395,9 @@ class App:
                 if send:
                     left.add(tag(token))
         with self.lock:
-            if left != due:  # sent, or a token gone or no longer valid
+            current = self._prefs_due()
+            left |= current - due  # a token added here meanwhile is still due the choice
+            if left != current:  # sent, or a token gone or no longer valid
                 self.settings["notice_prefs_due"] = sorted(left)
                 self._write_settings()
             if page is not None:
@@ -397,10 +407,15 @@ class App:
                     self.settings["notice_prefs"] = page["values"]
                     self._write_settings()
             self.notice_prefs["error"] = "；".join(errors) or None
-        self.touch()
 
     def set_notice_pref(self, key, value):
         """The player changed one setting: saved here and given to every token."""
+        with self.prefs_lock:
+            values = self._set_notice_pref(key, value)
+        self.touch()
+        return values
+
+    def _set_notice_pref(self, key, value):
         with self.lock:
             values = dict(self.notice_prefs.get("values") or {})
         if not isinstance(key, str) or key not in values:
@@ -423,7 +438,6 @@ class App:
             self._write_settings()
             self.notice_prefs = {"note": page.get("note"), "groups": page.get("groups"), "values": page["values"],
                                  "error": ("有账号没保存上，稍后自动重试：" + "；".join(errors)) if errors else None}
-        self.touch()
         return page["values"]
 
     def _bark(self, method, path, index, body=None):
