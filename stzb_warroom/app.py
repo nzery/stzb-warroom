@@ -668,6 +668,7 @@ class App:
 
     def _capture(self, session, dumpcap):
         def started(uploader):
+            uploader.on_role = self.poke.set  # check_accounts now, not at the next minute
             with self.lock:
                 session["uploader"] = uploader
                 if session is self.session:
