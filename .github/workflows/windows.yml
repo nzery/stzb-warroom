@@ -19,10 +19,12 @@ jobs:
       - uses: actions/setup-python@v6
         with:
           python-version: "3.12"
+      # One command per step: on Windows a step runs in PowerShell, which takes the last command's
+      # exit code, so a failed Python run followed by a passing Node run would still show green.
       - name: Test
-        run: |
-          python -m unittest discover -s tests -v
-          node tests/test_ui.js
+        run: python -m unittest discover -s tests -v
+      - name: Test the window's page
+        run: node tests/test_ui.js
       - name: Build
         env:  # secrets, so the addresses stay out of the source and the public logs
           ST_SERVER: ${{ secrets.ST_SERVER }}

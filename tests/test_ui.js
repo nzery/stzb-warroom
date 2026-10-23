@@ -120,6 +120,24 @@ async function main() {
   vm.runInContext(`S.data.settings = { phone_exit: true }; S.phone.key = null;`, context);
   vm.runInContext(`S.phone = { role: 7, data: { problem: '还没审核通过', nodes: [], relays: [] } }; renderPhone(S.data);`, context);
   assert.ok(nodes.get('phone-box').innerHTML.includes('还没审核通过'));
+  // a read that set out before a reset and comes back after it does not put back the revoked QR code
+  {
+    const replies = [];
+    vm.runInContext(`personalAccount = () => ({ index: 0, a: { role: { id: 7 } } });
+      toast = () => {};`, context);
+    context.act = (name, extra) => new Promise((resolve) => replies.push({ resolve, reset: extra.reset }));
+    vm.runInContext(`S.phone = {};`, context);
+    const read = vm.runInContext('loadPhone()', context);
+    assert.ok(nodes.get('phone-box').innerHTML.includes('data-phone-refresh="1" disabled'));
+    const reset = vm.runInContext('loadPhone(true)', context);
+    const fresh = { problem: null, note: '', steps: [], rule: 'r', nodes: [{ link: 'new', qr: '' }] };
+    replies[1].resolve(fresh);
+    await reset;
+    replies[0].resolve({ problem: null, note: '', steps: [], rule: 'r', nodes: [{ link: 'old', qr: '' }] });
+    await read;
+    assert.strictEqual(vm.runInContext('S.phone.data.nodes[0].link', context), 'new');
+    assert.strictEqual(vm.runInContext('S.phone.loading', context), false);
+  }
   // enemy armies are a table, a row an army, each row on one line; texts escaped; another notice is its body
   assert.ok(vm.runInContext(`noticeBody({ body: '<b>' })`, context).includes('&lt;b&gt;'));
   assert.ok(vm.runInContext(`noticeBody({ body: '旧格式', view: { head: 'x' } })`, context).includes('旧格式'));

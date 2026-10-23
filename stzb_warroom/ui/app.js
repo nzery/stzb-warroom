@@ -750,23 +750,30 @@ const EXIT_STATES = { online: ['已连接', 'ok'], connecting: ['连接中', '']
   busy: ['另一台电脑正在用', 'warn'],
   unreachable: ['连不上', 'warn'], stopped: ['已停止', ''] };
 
+// Only the latest call's answer is shown: a read that set out before a reset and comes back after
+// it would put back the QR code the reset just revoked.
+let phoneCall = 0;
+
 async function loadPhone(reset = false) {
   const account = personalAccount();
   const view = S.phone;
   if (!account) { S.phone = {}; renderPhone(S.data); return; }
+  const call = ++phoneCall;
   view.loading = true;
   renderPhone(S.data);
   const role = account.a.role.id;
   try {
     const data = await act('phone', { index: account.index, reset }, { quiet: true });
-    if (personalAccount()?.a.role.id !== role) return;
+    if (call !== phoneCall || personalAccount()?.a.role.id !== role) return;
     Object.assign(view, { data, error: null, role });
     if (reset) toast('已换新节点：手机要重新扫码，旧的 30 秒内失效');
   } catch (error) {
-    view.error = error.message || String(error);
+    if (call === phoneCall) view.error = error.message || String(error);
   } finally {
-    view.loading = false;
-    renderPhone(S.data);
+    if (call === phoneCall) {
+      view.loading = false;
+      renderPhone(S.data);
+    }
   }
 }
 
@@ -828,7 +835,7 @@ function renderPhone(d) {
     body = `<p class="muted prefs-note">${esc(data.note || '')}</p>
     <div class="phone-nodes">${iphone}${android}</div>
     <div class="card"><div class="setting"><div><b>二维码外泄了？</b><p>拿到二维码或订阅地址的人能借你的电脑连游戏。重置后换新的，旧的 30 秒内失效，手机要重新扫码。</p></div>
-      <button class="btn ghost small" data-phone-reset="1">重置</button></div></div>`;
+      <button class="btn ghost small" data-phone-reset="1"${view.loading ? ' disabled' : ''}>重置</button></div></div>`;
   }
   const refresh = `<button class="btn ghost small" data-phone-refresh="1"${view.loading ? ' disabled' : ''}>${view.loading ? '<span class="spin"></span>读取中' : `${icon('refresh').replace('<svg', '<svg width="14" height="14"')}刷新`}</button>`;
   box.innerHTML = `<div class="vtoolbar"><div class="vfilters">${who}</div>${refresh}</div>` + body;
@@ -852,7 +859,7 @@ async function phoneClick(event) {
     return true;
   }
   if (event.target.closest('[data-phone-reset]')) {
-    if (confirm('换一个新节点？旧二维码 30 秒内失效，手机上要删掉旧节点、重新扫码。')) loadPhone(true);
+    if (!S.phone.loading && confirm('换一个新节点？旧二维码 30 秒内失效，手机上要删掉旧节点、重新扫码。')) loadPhone(true);
     return true;
   }
   if (event.target.closest('[data-phone-refresh]')) { loadPhone(); return true; }
