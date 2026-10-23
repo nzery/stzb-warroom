@@ -123,6 +123,18 @@ class UploadTests(unittest.TestCase):
         uploader.on_packet(3.0, 1, packet(b"", 999, from_client=True, port=50001, flags=0x04))
         self.assertEqual(uploader.connections(), 0)
 
+    def test_the_window_hears_once_when_the_server_first_names_the_role(self):
+        # 2026-10-23: approved at the login, the window still said "waiting" for up to a minute.
+        uploader = self.uploader(accept(), accept(role=7), accept(role=7))
+        named = []
+        uploader.on_role = lambda: named.append(1)
+        sent = 0
+        for frame in (server_frame(9, [0, {"login": 1}]), server_frame(9, [1]), server_frame(9, [2])):
+            self.feed(uploader, (frame, False), skip=sent)
+            sent += len(frame)
+            self.assertTrue(uploader.upload_once())
+        self.assertEqual(named, [1])
+
     def test_frames_go_with_every_token_and_reports_are_sent_once_per_role(self):
         uploader = self.uploader(accept(role=7), accept(role=7))
         reports = server_frame(0x0A, [0, [report(5), report(6)]])

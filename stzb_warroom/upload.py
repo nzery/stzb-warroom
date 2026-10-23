@@ -206,6 +206,11 @@ class Uploader:
         self.error = None
         self.uploaded_at = None  # time of the last acknowledged batch
         self.uploaded = 0  # rows acknowledged since the start
+        # Called when the server names a stream's role the first time (a login just claimed it, or
+        # a waiting token was approved): the window looks at the accounts at once instead of
+        # showing "waiting" for up to a minute (2026-10-23: a player removed the token just
+        # approved and joined again).
+        self.on_role = None
 
     # capture thread -----------------------------------------------------------------
 
@@ -288,7 +293,10 @@ class Uploader:
         self.uploaded_at = time.time()
         self.uploaded += len(rows)
         if type(result.get("role")) is int:
+            new = self.roles.get(stream_id) != result["role"]
             self.roles[stream_id] = result["role"]
+            if new and self.on_role:
+                self.on_role()
         if isinstance(result.get("drop"), dict):
             self.drop = {side: set(result["drop"].get(side) or ()) for side in ("client", "server")}
         if result.get("rejected_tokens"):
