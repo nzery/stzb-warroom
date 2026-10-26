@@ -479,15 +479,22 @@ class Exit:
             self.control.close()
         with self.games_lock:
             games = list(self.games)
-        # Both sockets are shut down, not closed: copy() may be blocked on either one (the rest of a
-        # frame from a stalled relay, or a send the relay does not take), and pipe.close() would first
-        # send CLOSE, which can block the same way. Its copy() then fails and closes both.
+        # Both sockets are ended here, not through pipe.close(): copy() may be blocked on either one
+        # (the rest of a frame from a stalled relay, or a send the relay does not take), and
+        # pipe.close() would first send CLOSE, which can block the same way. A shutdown wakes a
+        # blocked call on Linux but not on Windows, where only closing the socket cancels it (and on
+        # Linux closing it would not). Its copy() then fails and closes both.
         for game, pipe in games:
             for sock in (game, pipe.sock):
                 try:
                     sock.shutdown(socket.SHUT_RDWR)
                 except OSError:
                     pass
+                if os.name == "nt":
+                    try:
+                        sock.close()
+                    except OSError:
+                        pass
 
     def handle(self, data):
         try:
