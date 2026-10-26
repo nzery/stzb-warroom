@@ -420,7 +420,7 @@ class Exit:
         self.own = set()  # this computer's public address, as the relay saw it
         self.pipes = threading.BoundedSemaphore(MAX_PIPES)
         self.handlers = threading.BoundedSemaphore(MAX_HANDLERS)
-        self.games = set()  # the game sockets of the connections being copied now (close() ends them)
+        self.games = set()  # (game socket, pipe) of the connections being copied now (close() ends them)
         self.games_lock = threading.Lock()
         self.stop = threading.Event()
         self.control = None
@@ -479,11 +479,15 @@ class Exit:
             self.control.close()
         with self.games_lock:
             games = list(self.games)
-        for game in games:
-            try:
-                game.shutdown(socket.SHUT_RDWR)  # its copy() sees the end (or the stop) and closes the pipe
-            except OSError:
-                pass
+        # Both sockets are shut down, not closed: copy() may be blocked on either one (the rest of a
+        # frame from a stalled relay, or a send the relay does not take), and pipe.close() would first
+        # send CLOSE, which can block the same way. Its copy() then fails and closes both.
+        for game, pipe in games:
+            for sock in (game, pipe.sock):
+                try:
+                    sock.shutdown(socket.SHUT_RDWR)
+                except OSError:
+                    pass
 
     def handle(self, data):
         try:
@@ -548,14 +552,14 @@ class Exit:
             with self.games_lock:
                 stopped = self.stop.is_set()  # close() came while this was connecting
                 if not stopped:
-                    self.games.add(game)
+                    self.games.add((game, pipe))
             try:
                 if not stopped:
                     self.log(event="pipe_open", relay=self.origin, host=address)
                     self.copy(game, pipe, address)
             finally:
                 with self.games_lock:
-                    self.games.discard(game)
+                    self.games.discard((game, pipe))
                 game.close()
                 pipe.close()
         finally:

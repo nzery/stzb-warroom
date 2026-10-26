@@ -138,6 +138,46 @@ class CloseTests(unittest.TestCase):
         self.assertEqual(exit_.open_pipes, 0)
         pipe_end.close()
 
+    def test_closing_ends_a_pipe_stalled_in_the_middle_of_a_frame(self):
+        # The relay sent part of a frame and stopped: copy() waits in pipe.recv() for the rest, where
+        # neither the game socket's shutdown nor the stop flag reaches it.
+        exit_ = relay.Exit("https://relay.example", ["t"], log=lambda **fields: None)
+        mine, _game_server = socket.socketpair()
+        pipe_end, relay_end = socket.socketpair()
+        self.addCleanup(_game_server.close)
+        self.addCleanup(relay_end.close)
+
+        class Game(socket.socket):
+            def connect(self, address):
+                pass
+
+        websocket = relay.WebSocket
+
+        def stalled_pipe(url, headers):
+            pipe = websocket.__new__(websocket)
+            pipe.sock, pipe.buffer, pipe.lock, pipe.closed = pipe_end, b"", threading.Lock(), False
+            return pipe
+
+        game = Game(fileno=mine.detach())
+        with unittest.mock.patch.object(relay, "resolve", return_value=[(socket.AF_INET, "1.2.3.4")]), \
+                unittest.mock.patch.object(relay.socket, "socket", return_value=game), \
+                unittest.mock.patch.object(relay, "WebSocket", stalled_pipe):
+            worker = threading.Thread(target=exit_.open, args=("a" * 32, "game.example", 8001), daemon=True)
+            worker.start()
+            for _ in range(200):
+                if exit_.open_pipes:
+                    break
+                time.sleep(0.01)
+            self.assertEqual(exit_.open_pipes, 1)
+            relay_end.sendall(bytes([0x82, 10]) + b"half")  # 4 of the frame's 10 bytes
+            time.sleep(0.2)  # past select(), into the frame
+            exit_.close()
+            worker.join(2)
+        self.assertFalse(worker.is_alive())
+        self.assertEqual(exit_.open_pipes, 0)
+        self.assertTrue(exit_.pipes.acquire(blocking=False))  # the pipe's permit came back
+        exit_.pipes.release()
+
 
 class BusyTests(unittest.TestCase):
     def test_another_computer_serving_the_phone_means_waiting(self):
