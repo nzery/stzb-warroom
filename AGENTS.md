@@ -13,4 +13,4 @@
 - Windows 整合包用 PyInstaller 构建（`packaging/windows/`，只在构建时用，不是运行依赖），Electron 由构建脚本按固定版本和 SHA-256 下载放进包里。不要把 Npcap 安装程序放进包里，它的免费版不允许再分发。
 - 不写个人环境信息（主机名、内网地址、私有服务配置）。
 - 本仓库是公开的：README 只写用户能做什么、怎么用，不写原理、协议和服务器相关内容。
-- 测试：`python3 -m unittest discover -s tests`。提交和推送只在用户要求时进行。
+- 测试：`python3 -m unittest discover -s tests`。测试通过后提交并推送，不必等维护者要求；发版是推带说明的 `v*` tag（见 `packaging/windows/README.md`）。
