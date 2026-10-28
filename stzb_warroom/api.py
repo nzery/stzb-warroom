@@ -15,6 +15,9 @@ from urllib.parse import urlsplit
 from . import __version__
 
 INVITE = re.compile(r"stj_[A-Za-z0-9_-]{22}")
+# Every request and relay socket names the client's version (0.0.0 run from source): the server
+# tells an old major version to upgrade, and its access log tells this client from other callers.
+CLIENT_HEADERS = (("User-Agent", f"stzb-warroom/{__version__}"), ("X-Client-Version", __version__))
 
 # Let's Encrypt's roots (ISRG Root X1 and X2), which sign the server's certificate. Python checks a certificate with
 # OpenSSL against the roots Windows has stored, and Windows stores a root only once something it verifies itself
@@ -124,9 +127,7 @@ class Server:
         self.origin = origin.rstrip("/")
         self.opener = request.build_opener(request.ProxyHandler({}), request.HTTPSHandler(
             context=tls_context(ca)))
-        # Every request names the client's version (0.0.0 run from source), so the server can tell
-        # an old major version to upgrade instead of failing it quietly.
-        self.opener.addheaders = [("User-Agent", f"stzb-warroom/{__version__}"), ("X-Client-Version", __version__)]
+        self.opener.addheaders = list(CLIENT_HEADERS)
 
     def open(self, path, tokens, body=None, compress=False, timeout=45, method=None):
         """`tokens`: one token, or a list (the capture upload names all of them)."""

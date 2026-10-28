@@ -180,6 +180,18 @@ class AppTests(unittest.TestCase):
         self.assertIsNone(app.session)
         self.assertEqual(app.capture["state"], "error")
 
+    def test_a_rejected_token_is_looked_at_again_only_when_asked_or_much_later(self):
+        app = self.app(saved=f"{GOOD},{BAD}")
+        with unittest.mock.patch.object(app.server, "json", wraps=app.server.json) as asked:
+            app.check_accounts()
+            app.check_accounts()
+            self.assertEqual([c.args[1] for c in asked.call_args_list if c.args[0] == "/v1/client/status"].count(BAD), 1)
+            app.check_accounts(asked=True)
+            app.accounts[BAD]["checked"] -= appmod.INVALID_EVERY
+            app.check_accounts()
+            self.assertEqual([c.args[1] for c in asked.call_args_list if c.args[0] == "/v1/client/status"].count(BAD), 3)
+        self.assertEqual(app.accounts[BAD]["state"], "invalid")
+
     def test_accounts_show_what_the_server_says_and_never_a_whole_token(self):
         app = self.app(saved=f"{GOOD},{BAD},{NEW},{TAKEN}")
         app.check_accounts()

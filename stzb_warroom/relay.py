@@ -28,7 +28,7 @@ import uuid
 from urllib.error import HTTPError
 from urllib.parse import urlsplit
 
-from .api import tls_context
+from .api import CLIENT_HEADERS, tls_context
 from .capture import GAME_PORT
 from .frames import CLIENT_HEADER, Direction, is_game
 
@@ -246,7 +246,7 @@ class WebSocket:
             key = base64.b64encode(os.urandom(16)).decode("ascii")
             lines = [f"GET {parts.path} HTTP/1.1", f"Host: {parts.netloc}", "Upgrade: websocket",
                      "Connection: Upgrade", f"Sec-WebSocket-Key: {key}", "Sec-WebSocket-Version: 13"]
-            lines += [f"{name}: {value}" for name, value in headers.items()]
+            lines += [f"{name}: {value}" for name, value in (*CLIENT_HEADERS, *headers.items())]
             sock.sendall(("\r\n".join(lines) + "\r\n\r\n").encode("latin-1"))
             raw = b""
             while b"\r\n\r\n" not in raw:

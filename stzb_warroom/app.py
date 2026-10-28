@@ -35,6 +35,7 @@ from .capture import find_dumpcap
 from .runner import run_capture
 
 ACCOUNT_EVERY = 60  # seconds between two looks at the accounts' status
+INVALID_EVERY = 1800  # a token the server rejected (401) is looked at again this rarely, unless asked
 PREFS = "/v1/client/notice-prefs"
 PERSONAL = "/v1/client/personal/"
 PERSONAL_PAGES = ("players",)
@@ -316,8 +317,13 @@ class App:
 
     # the accounts' status and Bark --------------------------------------------------
 
-    def check_accounts(self):
+    def check_accounts(self, asked=False):
         for token in list(self.tokens):
+            known = self.accounts.get(token) or {}
+            # A rejected token stays rejected until the player acts (asked) or a long while passed.
+            if (not asked and known.get("state") == "invalid"
+                    and time.monotonic() - known.get("checked", 0) < INVALID_EVERY):
+                continue
             try:
                 value = self.server.json("/v1/client/status", token, timeout=20)
                 # A problem the server names comes first (a role another token holds, another
@@ -327,7 +333,7 @@ class App:
                         "pending" if not value.get("approved") else "no_role"))
                 value = dict(value, state=state)
             except HTTPError as exc:
-                value = {"state": "invalid"} if exc.code == 401 else dict(
+                value = {"state": "invalid", "checked": time.monotonic()} if exc.code == 401 else dict(
                     self.accounts.get(token) or {}, state="offline", error=f"HTTP {exc.code}")
             except (OSError, ValueError) as exc:
                 value = dict(self.accounts.get(token) or {}, state="offline", error=f"{type(exc).__name__}: {exc}")
@@ -808,9 +814,10 @@ class App:
         while not self.quit.is_set():
             now = time.monotonic()
             if self.poke.is_set() or now - last_accounts >= ACCOUNT_EVERY:
+                asked = self.poke.is_set()
                 self.poke.clear()
                 last_accounts = now
-                self.check_accounts()
+                self.check_accounts(asked)
             if now - last_update >= UPDATE_EVERY:
                 last_update = now
                 try:

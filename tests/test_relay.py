@@ -9,7 +9,7 @@ import time
 import unittest
 import unittest.mock
 
-from stzb_warroom import relay
+from stzb_warroom import __version__, relay
 
 SESSION = b"0123456789abcdef0123456789abcdef"
 
@@ -218,6 +218,27 @@ class RobustnessTests(unittest.TestCase):
         with unittest.mock.patch("socket.create_connection", return_value=Socket()):
             with self.assertRaises(ConnectionError):
                 relay.WebSocket("http://relay.example/relay/agent", {})
+
+    def test_relay_sockets_name_the_client(self):
+        sent = []
+
+        class Socket:
+            def sendall(self, data):
+                sent.append(data)
+
+            def recv(self, size):
+                return b"HTTP/1.1 401 Unauthorized\r\n\r\n"
+
+            def close(self):
+                pass
+
+        with unittest.mock.patch("socket.create_connection", return_value=Socket()):
+            with self.assertRaises(relay.Refused):
+                relay.WebSocket("http://relay.example/relay/agent", {"Authorization": "Bearer t"})
+        head = sent[0].decode("latin-1")
+        self.assertIn(f"\r\nUser-Agent: stzb-warroom/{__version__}\r\n", head)
+        self.assertIn(f"\r\nX-Client-Version: {__version__}\r\n", head)
+        self.assertIn("\r\nAuthorization: Bearer t\r\n", head)
 
     def test_orders_beyond_the_handlers_are_dropped(self):
         exit_ = relay.Exit("https://relay.example", ["t"], log=lambda **fields: logged.append(fields))
