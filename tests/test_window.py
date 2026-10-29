@@ -592,6 +592,7 @@ class PageServerTests(unittest.TestCase):
 
     def test_only_the_ui_folder_is_served(self):
         self.assertEqual(self.request("GET", "/ui/app.css")[0], 200)
+        self.assertEqual(self.request("GET", "/ui/classic.css")[0], 200)
         for path in ("/ui/../app.py", "/ui/%2e%2e/app.py", "/ui/missing.js"):
             with self.subTest(path=path):
                 self.assertEqual(self.request("GET", path)[0], 404)

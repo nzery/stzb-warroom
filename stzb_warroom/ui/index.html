@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>工作台</title>
   <link rel="icon" href="/ui/icon.ico" sizes="16x16 20x20 24x24 32x32 40x40 48x48 64x64 96x96 128x128 256x256">
-  <link rel="stylesheet" href="/ui/app.css">
+  <link rel="stylesheet" href="/ui/app.css" id="style">
   <script src="/ui/app.js" defer></script>
 </head>
 <body>
@@ -136,6 +136,16 @@
     </section>
 
     <section class="page" id="page-settings">
+      <div class="card settings">
+        <h3>外观</h3>
+        <div class="setting column">
+          <div><b>配色</b><p>只换颜色，内容和位置不变。</p></div>
+          <div class="options" id="set-theme">
+            <label class="option"><input type="radio" name="theme" value="light"><div><b>浅色</b><small>白底蓝色，像办公软件</small></div></label>
+            <label class="option"><input type="radio" name="theme" value="classic"><div><b>深色</b><small>原来的墨绿底金色</small></div></label>
+          </div>
+        </div>
+      </div>
       <div class="card settings">
         <h3>运行</h3>
         <div class="setting">

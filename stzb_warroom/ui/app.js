@@ -49,6 +49,17 @@ const store = {
   },
 };
 
+// 设置 › 外观: the light colours (app.css) or the dark ones the window had before (classic.css); only the colours change.
+function setTheme(theme) {
+  const sheet = theme === 'classic' ? '/ui/classic.css' : '/ui/app.css';
+  if ($('style').getAttribute('href') !== sheet) $('style').setAttribute('href', sheet);
+  document.querySelectorAll('#set-theme input').forEach((input) => {
+    input.checked = input.value === (theme === 'classic' ? 'classic' : 'light');
+    input.closest('.option').classList.toggle('active', input.checked);
+  });
+}
+setTheme(store.get('theme', 'light'));
+
 const PAGES = {
   overview: ['概览', '上传数据，接收通知'],
   notices: ['通知', '服务器发来的通知'],
@@ -1165,6 +1176,7 @@ document.addEventListener('change', async (event) => {
   }
 });
 
+$('set-theme').addEventListener('change', (e) => { store.set('theme', e.target.value); setTheme(e.target.value); });
 $('set-autostart').addEventListener('change', (e) => act('set_setting', { name: 'autostart', value: e.target.checked }).catch(() => {}));
 $('set-keep').addEventListener('change', (e) => act('set_setting', { name: 'keep_running', value: e.target.checked }).catch(() => {}));
 $('set-phone').addEventListener('change', (e) => act('set_setting', { name: 'phone_exit', value: e.target.checked }).catch(() => {}));

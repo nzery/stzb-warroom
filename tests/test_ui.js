@@ -8,6 +8,7 @@ const ui = path.join(__dirname, '../stzb_warroom/ui');
 const html = fs.readFileSync(path.join(ui, 'index.html'), 'utf8');
 const nodes = new Map([...html.matchAll(/\bid="([^"]+)"/g)].map((match) => [match[1], {
   addEventListener() {}, classList: { add() {}, remove() {}, toggle() {} },
+  attrs: {}, getAttribute(name) { return this.attrs[name] ?? null; }, setAttribute(name, value) { this.attrs[name] = value; },
 }]));
 assert.equal(nodes.has('quit'), false);
 let resolveFetch;
@@ -26,6 +27,12 @@ async function main() {
   // Execute every startup binding against the real HTML IDs (removed buttons must not break startup).
   vm.runInContext(fs.readFileSync(path.join(ui, 'app.js'), 'utf8'), context);
   assert.equal(requests, 1);
+  // 设置 › 外观: light unless the dark colours were chosen; only the stylesheet changes.
+  assert.equal(nodes.get('style').getAttribute('href'), '/ui/app.css');
+  vm.runInContext("setTheme('classic')", context);
+  assert.equal(nodes.get('style').getAttribute('href'), '/ui/classic.css');
+  vm.runInContext("setTheme('light')", context);
+  assert.equal(nodes.get('style').getAttribute('href'), '/ui/app.css');
   vm.runInContext('render = () => {}; appendLogs = () => {}; announce = () => {};', context);
   await vm.runInContext('refresh()', context);
   await vm.runInContext('refresh()', context);
