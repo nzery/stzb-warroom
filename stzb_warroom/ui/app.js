@@ -50,12 +50,12 @@ const store = {
 };
 
 const PAGES = {
-  overview: ['概览', '上报游戏数据，接收战局通知'],
-  notices: ['通知', '服务器根据你的战局生成的通知'],
-  chat: ['群聊', '所有开着率土战局的人都在这里；消息只存在各自电脑上，没开程序时的消息收不到'],
-  players: ['玩家信息', '按名字查一名玩家：同盟、主城坐标，和他最近的队伍'],
-  prefs: ['通知设置', '要哪些通知、过滤哪些敌军、推送哪些到手机'],
-  phone: ['用手机玩', '手机上的游戏连接经这台电脑出去，照常上报'],
+  overview: ['概览', '上传数据，接收通知'],
+  notices: ['通知', '服务器发来的通知'],
+  chat: ['群聊', '所有开着本程序的人都在这里；消息只存在各自电脑上，没开程序时的消息收不到'],
+  players: ['查询', '按名字查询'],
+  prefs: ['通知设置', '要哪些通知、推送哪些到手机'],
+  phone: ['手机连接', '手机的连接经这台电脑出去，照常上报'],
   accounts: ['账号与推送', 'Token、角色与手机推送（iPhone 用 Bark，安卓用 ntfy）'],
   settings: ['设置', '启动方式、网络组件与数据'],
   diagnostics: ['诊断', '检查运行环境，查看运行日志'],
@@ -298,7 +298,7 @@ function renderChrome(d) {
   $('badge-chat').textContent = S.page === 'chat' || !unread ? '' : unread > 99 ? '99+' : unread;
   const problems = d.tokens.filter((a) => a.state === 'invalid' || a.state === 'problem').length;
   $('badge-accounts').textContent = problems || '';
-  document.title = d.capture.state === 'error' || problems ? '率土战局 · 需要处理' : '率土战局';
+  document.title = d.capture.state === 'error' || problems ? '工作台 · 需要处理' : '工作台';
 }
 
 function banner(kind, iconName, text, actions = '', id = '') {
@@ -565,8 +565,8 @@ function renderAccounts(d) {
     else if (a.state === 'no_role') problem = '<div class="account-problem warn">还没收到这个账号的游戏登录。' + LOGIN_STEPS + '。</div>';
     else if (a.state === 'offline') problem = `<div class="account-problem warn">暂时连不上服务器（${esc(a.error || '')}），稍后会自动重试。</div>`;
     // The server gives the link of the account's website once the account is set up.
-    const site = a.state !== 'invalid' && /^https:\/\//.test(a.site || '') ? `<div class="bark"><div class="label"><b>战局网站</b>网页</div>
-      <div class="value"><small>这个账号所在的战局网站。链接请只发给自己人，拿到链接的人都能看。</small></div>
+    const site = a.state !== 'invalid' && /^https:\/\//.test(a.site || '') ? `<div class="bark"><div class="label"><b>网站</b>网页</div>
+      <div class="value"><small>这个账号的网站。链接请只发给自己人，拿到链接的人都能看。</small></div>
       <div class="row-actions"><a class="btn primary small" href="${esc(a.site)}" target="_blank" rel="noopener">打开</a>
       <button class="btn ghost small" data-copy-site="${index}" type="button">复制链接</button></div></div>` : '';
     let bark = '';
@@ -898,7 +898,7 @@ function renderChecks(d) {
     row(accounts.length ? accounts.every((a) => a.state === 'ok') : false, '账号', accounts.length ? accounts.map((a) => `${a.token} ${accountState(a)[0]}`).join('；') : '没有 Token'),
     row(Boolean(d.settings.dumpcap), '网络组件', d.settings.dumpcap || '没有找到 dumpcap.exe（Wireshark）'),
     row(d.capture.state === 'running' ? true : d.capture.state === 'error' ? false : null, '上报', d.capture.state === 'running' ? '运行中' : d.capture.error || '未运行'),
-    row(d.stats.connections > 0 ? true : null, '游戏连接', d.stats.connections > 0 ? `${d.stats.connections} 条` : '最近 5 分钟没有看到游戏连接（没在玩游戏时正常）'),
+    row(d.stats.connections > 0 ? true : null, '连接', d.stats.connections > 0 ? `${d.stats.connections} 条` : '最近 5 分钟没有看到游戏连接（没在玩游戏时正常）'),
   ];
   const html = rows.join('');
   if ($('checks').dataset.html !== html) { $('checks').innerHTML = html; $('checks').dataset.html = html; }
@@ -955,7 +955,7 @@ function avatar(name) {
 function renderChat(d) {
   const c = d.chat || { state: 'connecting' };
   const [stateText, stateClass] = (CHAT_STATES[c.state] || CHAT_STATES.connecting)(c);
-  $('chat-title').textContent = c.online != null && c.state === 'online' ? `率土战局群聊（${c.online}）` : '率土战局群聊';
+  $('chat-title').textContent = c.online != null && c.state === 'online' ? `群聊（${c.online}）` : '群聊';
   $('chat-state').textContent = stateText;
   $('chat-state').className = stateClass;
   const canSend = c.state === 'online';

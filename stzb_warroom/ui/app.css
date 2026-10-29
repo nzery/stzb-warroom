@@ -45,6 +45,8 @@ code { font-family: Consolas, "Cascadia Mono", monospace; color: var(--gold); }
 .mark { display: grid; place-items: center; width: 36px; height: 36px; flex: none; border-radius: 6px;
   color: #fff; font-size: 19px; font-weight: 600; background: var(--gold); }
 .mark.big { width: 60px; height: 60px; font-size: 32px; border-radius: 10px; margin: 0 auto; }
+.mark i { width: 22px; height: 22px; display: inline-grid; }
+.mark.big i { width: 36px; height: 36px; }
 nav { display: grid; gap: 4px; }
 .nav-sep { height: 1px; margin: 6px 8px; background: var(--line); }
 .nav-item { position: relative; display: flex; align-items: center; gap: 10px; width: 100%; padding: 10px 8px;

@@ -840,7 +840,7 @@ class App:
     def begin(self):
         """At launch: the background work, and the capture when it can start."""
         sys.stdout = sys.stderr = Lines(self.log)
-        self.log(f"率土战局 {__version__} 已启动")
+        self.log(f"程序 {__version__} 已启动")
         threading.Thread(target=self.run_background, name="background", daemon=True).start()
         threading.Thread(target=self.chat.run, args=(self.quit,), name="chat", daemon=True).start()
         if self.tokens:

@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>率土战局</title>
+  <title>工作台</title>
   <link rel="icon" href="/ui/icon.ico" sizes="16x16 20x20 24x24 32x32 40x40 48x48 64x64 96x96 128x128 256x256">
   <link rel="stylesheet" href="/ui/app.css">
   <script src="/ui/app.js" defer></script>
@@ -12,17 +12,17 @@
 <div class="app">
   <aside class="sidebar">
     <div class="brand">
-      <span class="mark">率</span>
-      <div><strong>率土战局</strong><small>率土游戏助手</small></div>
+      <span class="mark"><i data-icon="chat"></i></span>
+      <div><strong>工作台</strong></div>
     </div>
     <nav id="nav">
       <button class="nav-item nav-main active" data-page="notices"><i data-icon="bell"></i><span>通知</span><b class="badge" id="badge-notices"></b></button>
       <button class="nav-item" data-page="chat"><i data-icon="chat"></i><span>群聊</span><b class="badge" id="badge-chat"></b></button>
       <div class="nav-sep"></div>
       <button class="nav-item" data-page="overview"><i data-icon="home"></i><span>概览</span></button>
-      <button class="nav-item" data-page="players"><i data-icon="search"></i><span>玩家信息</span></button>
+      <button class="nav-item" data-page="players"><i data-icon="search"></i><span>查询</span></button>
       <button class="nav-item" data-page="prefs"><i data-icon="sliders"></i><span>通知设置</span></button>
-      <button class="nav-item" data-page="phone"><i data-icon="phone"></i><span>用手机玩</span></button>
+      <button class="nav-item" data-page="phone"><i data-icon="phone"></i><span>手机连接</span></button>
       <button class="nav-item" data-page="accounts"><i data-icon="user"></i><span>账号与推送</span><b class="badge alert" id="badge-accounts"></b></button>
       <button class="nav-item" data-page="settings"><i data-icon="gear"></i><span>设置</span></button>
       <button class="nav-item" data-page="diagnostics"><i data-icon="pulse"></i><span>诊断</span></button>
@@ -38,7 +38,7 @@
     <header class="topbar">
       <div>
         <h1 id="page-title">概览</h1>
-        <p id="page-sub" class="sub">上报游戏数据，接收战局通知</p>
+        <p id="page-sub" class="sub">上传数据，接收通知</p>
       </div>
       <button id="toggle" class="btn primary" disabled>开始上报</button>
     </header>
@@ -57,7 +57,7 @@
         <div class="metric"><span>已上传</span><strong id="m-uploaded">0</strong><small>本次运行的数据条数</small></div>
         <div class="metric"><span>待上传</span><strong id="m-pending">-</strong><small>网络断开时先存在本机</small></div>
         <div class="metric"><span>最近上传</span><strong id="m-last">-</strong><small id="m-last-at">还没有上传</small></div>
-        <div class="metric"><span>游戏连接</span><strong id="m-conn">0</strong><small>最近 5 分钟看到的</small></div>
+        <div class="metric"><span>连接</span><strong id="m-conn">0</strong><small>最近 5 分钟看到的</small></div>
       </div>
       <div class="columns">
         <div class="card">
@@ -193,9 +193,9 @@
 
     <section class="page" id="page-about">
       <div class="card about">
-        <span class="mark big">率</span>
-        <h2>率土战局</h2>
-        <p class="muted">率土游戏助手 · 电脑客户端</p>
+        <span class="mark big"><i data-icon="chat"></i></span>
+        <h2>工作台</h2>
+        <p class="muted">电脑客户端</p>
         <p class="version">版本 <b id="about-version">-</b></p>
         <p id="update-state" class="muted"></p>
         <div class="row-actions center">
@@ -214,7 +214,7 @@
 </div>
 <div id="toasts" class="toasts"></div>
 <div id="gone" class="gone hidden">
-  <div><span class="mark big">率</span><h2>程序已退出</h2><p>需要时双击 stzb-warroom.exe 重新打开。</p></div>
+  <div><span class="mark big"><i data-icon="chat"></i></span><h2>程序已退出</h2><p>需要时双击 stzb-warroom.exe 重新打开。</p></div>
 </div>
 </body>
 </html>

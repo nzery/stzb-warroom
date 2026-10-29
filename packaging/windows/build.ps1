@@ -67,7 +67,7 @@ Get-ChildItem "$window\locales" -Exclude zh-CN.pak, en-US.pak | Remove-Item  # i
 Rename-Item "$window\electron.exe" stzb-window.exe
 $app = New-Item -ItemType Directory "$window\resources\app"
 Copy-Item electron\main.js, electron\package.json, stzb_warroom\ui\icon.ico $app
-$name = -join ([char[]](0x7387, 0x571F, 0x6218, 0x5C40))  # the program's name; Windows PowerShell 5 misreads a BOM-less script's Chinese
+$name = -join ([char[]](0x5DE5, 0x4F5C, 0x53F0))  # the window's plain name (工作台); Windows PowerShell 5 misreads a BOM-less script's Chinese
 & build\downloads\rcedit-x64.exe "$window\stzb-window.exe" --set-icon stzb_warroom\ui\icon.ico `
     --set-version-string ProductName $name --set-version-string FileDescription $name `
     --set-version-string OriginalFilename stzb-window.exe --set-version-string InternalName stzb-window `

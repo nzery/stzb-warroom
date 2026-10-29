@@ -24,7 +24,7 @@ function openOutside(url) {
 
 function create() {
   window = new BrowserWindow({
-    width: 1200, height: 820, minWidth: 720, minHeight: 520, title: '率土战局', icon,
+    width: 1200, height: 820, minWidth: 720, minHeight: 520, title: '工作台', icon,
     show: false, autoHideMenuBar: true,
     webPreferences: { contextIsolation: true, sandbox: true, nodeIntegration: false, spellcheck: false },
   });

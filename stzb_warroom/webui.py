@@ -32,7 +32,7 @@ from . import winsys
 from .app import App
 
 UI = Path(__file__).resolve().parent / "ui"
-TITLE = "率土战局"  # the page's <title>, which names the window
+TITLE = "工作台"  # the page's <title>, which names the window; plain so it passes for office software (2026-10-29 user)
 OPENING = 15  # seconds a window may take to open (Electron starting) before another is opened
 CLOSED_AFTER = 3  # seconds without any page open before the program ends (a reload comes back sooner)
 KEEP_ALIVE = 2  # seconds between writes to a quiet events stream, which find a page that is gone
