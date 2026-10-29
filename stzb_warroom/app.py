@@ -13,6 +13,9 @@ computer with the same token) is followed, not undone.
 The 玩家信息 page (any player, looked up by name: union, main city, armies) is the server's too
 (``/v1/client/personal/players``): asked for when the player opens it, passed to the window
 as it comes, the name typed, the page's filters and page number passed along unread.
+
+The 群聊 page (chat.py) runs from the start to the end of the program, captured or not, with
+the first account whose role is approved.
 """
 
 import collections
@@ -29,7 +32,7 @@ from pathlib import Path
 from urllib.error import HTTPError
 from urllib.parse import urlencode
 
-from . import __version__, notify, relay, update as updates, vault, winsys
+from . import __version__, chat, notify, relay, update as updates, vault, winsys
 from .api import client_tokens, invite_code, site
 from .capture import find_dumpcap
 from .runner import run_capture
@@ -127,6 +130,7 @@ class App:
                                         else os.environ.get("ST_CLIENT_TOKEN", ""))
         except SystemExit:
             self.tokens = []
+        self.chat = chat.Chat(server, self.state_dir, self.chat_token, self.touch)
 
     # state for the page -----------------------------------------------------------------
 
@@ -147,7 +151,7 @@ class App:
             self.logs.append({"seq": self.seq, "time": time.time(), "text": str(text), "level": level})
         self.touch()
 
-    def snapshot(self, notices_after=0, logs_after=0):
+    def snapshot(self, notices_after=0, logs_after=0, chat_after=0):
         with self.lock:
             self._drop_expired()
             uploader = self.session and self.session.get("uploader")
@@ -170,6 +174,7 @@ class App:
                 "update": self.update,
                 "updated": self._updated(),
                 "notice_prefs": dict(self.notice_prefs),
+                "chat": self.chat.view(chat_after),
             }
 
     def _account(self, token):
@@ -644,6 +649,12 @@ class App:
             return None
         return show
 
+    def chat_token(self):
+        """The token the chat uses: the first one whose role is approved, else None."""
+        with self.lock:
+            return next((token for token in self.tokens
+                         if (self.accounts.get(token) or {}).get("state") == "ok"), None)
+
     # capture ------------------------------------------------------------------------
 
     def start(self):
@@ -831,6 +842,7 @@ class App:
         sys.stdout = sys.stderr = Lines(self.log)
         self.log(f"率土战局 {__version__} 已启动")
         threading.Thread(target=self.run_background, name="background", daemon=True).start()
+        threading.Thread(target=self.chat.run, args=(self.quit,), name="chat", daemon=True).start()
         if self.tokens:
             self.start()
 

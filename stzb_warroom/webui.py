@@ -93,7 +93,7 @@ class Handler(BaseHTTPRequestHandler):
         if url.path == "/api/state":
             query = parse_qs(url.query)
             try:
-                numbers = [int(query.get(name, ["0"])[0] or 0) for name in ("n", "l")]
+                numbers = [int(query.get(name, ["0"])[0] or 0) for name in ("n", "l", "c")]
             except ValueError:
                 return self.send(400, {"error": "bad cursor"})
             return self.send(200, self.server.app.snapshot(*numbers))
@@ -237,6 +237,8 @@ class Window(ThreadingHTTPServer):
             "set_notice_pref": lambda: app.set_notice_pref(body.get("key"), body.get("value")),
             "personal": lambda: app.personal(int(index), body.get("page"), body.get("query")),
             "phone": lambda: app.phone(int(index), reset=body.get("reset") is True),
+            "chat_send": lambda: app.chat.send(body.get("text")),
+            "chat_older": lambda: app.chat.older(body.get("before")),
             "pick_dumpcap": app.pick_dumpcap,
             "forget_dumpcap": app.forget_dumpcap,
             "open_folder": lambda: winsys.open_folder(app.state_dir),

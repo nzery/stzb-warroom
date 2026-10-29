@@ -17,6 +17,7 @@
     </div>
     <nav id="nav">
       <button class="nav-item nav-main active" data-page="notices"><i data-icon="bell"></i><span>通知</span><b class="badge" id="badge-notices"></b></button>
+      <button class="nav-item" data-page="chat"><i data-icon="chat"></i><span>群聊</span><b class="badge" id="badge-chat"></b></button>
       <div class="nav-sep"></div>
       <button class="nav-item" data-page="overview"><i data-icon="home"></i><span>概览</span></button>
       <button class="nav-item" data-page="players"><i data-icon="search"></i><span>玩家信息</span></button>
@@ -87,6 +88,16 @@
       <div id="notice-list" class="notice-list"></div>
     </section>
 
+    <section class="page" id="page-chat">
+      <div class="chat">
+        <div class="chat-head"><b id="chat-title">群聊</b><small id="chat-state"></small></div>
+        <div id="chat-list" class="chat-list"></div>
+        <form id="chat-form" class="chat-input">
+          <textarea id="chat-text" rows="3" maxlength="500" spellcheck="false" placeholder="说点什么…（Enter 发送，Shift+Enter 换行）"></textarea>
+          <div class="chat-send"><small id="chat-count"></small><button class="btn primary small" type="submit" id="chat-submit">发送</button></div>
+        </form>
+      </div>
+    </section>
     <section class="page" id="page-players"><div id="personal-players"></div></section>
     <section class="page" id="page-phone">
       <div class="card settings">

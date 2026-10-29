@@ -23,6 +23,7 @@ const ICONS = {
   refresh: '<path d="M20 11a8 8 0 1 0-2.3 5.7"/><path d="M20 4v7h-7"/>',
   phone: '<rect x="7" y="2.5" width="10" height="19" rx="2"/><path d="M11 18.5h2"/>',
   search: '<circle cx="11" cy="11" r="7"/><path d="m20 20-4-4"/>',
+  chat: '<path d="M4 5h16v11H9l-5 4z"/><path d="M8 9.5h8M8 12.5h5"/>',
   copy: '<rect x="9" y="9" width="11" height="11" rx="2"/><path d="M5 15V5a1 1 0 0 1 1-1h10"/>',
 };
 const icon = (name) => `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">${ICONS[name] || ''}</svg>`;
@@ -51,6 +52,7 @@ const store = {
 const PAGES = {
   overview: ['概览', '上报游戏数据，接收战局通知'],
   notices: ['通知', '服务器根据你的战局生成的通知'],
+  chat: ['群聊', '所有开着率土战局的人都在这里；消息只存在各自电脑上，没开程序时的消息收不到'],
   players: ['玩家信息', '按名字查一名玩家：同盟、主城坐标，和他最近的队伍'],
   prefs: ['通知设置', '要哪些通知、过滤哪些敌军、推送哪些到手机'],
   phone: ['用手机玩', '手机上的游戏连接经这台电脑出去，照常上报'],
@@ -79,6 +81,9 @@ const S = {
   personalRole: store.get('personalRole', null),
   // The server's phone page for the chosen account: {data, error, loading, role, key}.
   phone: {},
+  // 群聊: the messages this page has (the newest when it opened, older ones as asked), the program's
+  // cursor, whether older ones are kept, and the newest one read (the badge counts those after it).
+  chat: { messages: [], c: 0, more: false, loading: false, seen: store.get('chatSeen', 0), key: '', bottom: true },
 };
 const PERSONAL = new Set(['players']);
 
@@ -110,7 +115,7 @@ async function refresh() {
   if (refreshing) return;
   refreshing = true;
   try {
-    const response = await fetch(`/api/state?n=${S.n}&l=${S.l}`);
+    const response = await fetch(`/api/state?n=${S.n}&l=${S.l}&c=${S.chat.c}`);
     if (!response.ok) throw new Error(response.status);
     const data = await response.json();
     for (const notice of data.notices) {
@@ -124,6 +129,7 @@ async function refresh() {
     if (data.notices.length) S.n = data.notices[data.notices.length - 1].seq;
     if (data.logs.length) { S.logs.push(...data.logs); S.l = data.logs[data.logs.length - 1].seq; appendLogs(data.logs); }
     if (S.logs.length > 1000) S.logs.splice(0, S.logs.length - 1000);
+    takeChat(data.chat);
     S.data = data;
     S.loaded = true;
     render();
@@ -251,6 +257,7 @@ function render() {
     else renderPersonal(S.page);
   }
   if (S.page === 'phone') renderPhone(d);
+  if (S.page === 'chat') renderChat(d);
   renderSettings(d);
   renderChecks(d);
   $('about-version').textContent = d.app_version;
@@ -287,6 +294,8 @@ function renderChrome(d) {
   }
   const unseen = S.notices.filter((n) => n.seq > S.seenNotices && !n.hidden).length;
   $('badge-notices').textContent = S.page === 'notices' || !unseen ? '' : unseen > 99 ? '99+' : unseen;
+  const unread = S.chat.messages.filter((m) => !m.mine && m.seq > S.chat.seen).length;
+  $('badge-chat').textContent = S.page === 'chat' || !unread ? '' : unread > 99 ? '99+' : unread;
   const problems = d.tokens.filter((a) => a.state === 'invalid' || a.state === 'problem').length;
   $('badge-accounts').textContent = problems || '';
   document.title = d.capture.state === 'error' || problems ? '率土战局 · 需要处理' : '率土战局';
@@ -909,6 +918,117 @@ function appendLogs(lines) {
   if ($('log-follow').checked) box.scrollTop = box.scrollHeight;
 }
 
+// ---------------------------------------------------------------- 群聊
+
+const CHAT_KEEP = 500;  // messages the page holds; older ones are asked for again
+function takeChat(chat) {
+  if (!chat || !Array.isArray(chat.messages)) return;
+  const first = !S.chat.c;
+  const fresh = chat.messages.filter((m) => m.seq > S.chat.c);
+  if (fresh.length) {
+    S.chat.messages.push(...fresh);
+    S.chat.c = fresh[fresh.length - 1].seq;
+  }
+  if (first) S.chat.more = chat.oldest != null && S.chat.messages.length > 0 && chat.oldest < S.chat.messages[0].seq;
+  if (S.chat.messages.length > CHAT_KEEP) { S.chat.messages.splice(0, S.chat.messages.length - CHAT_KEEP); S.chat.more = true; }
+}
+const CHAT_STATES = {
+  online: (c) => [c.online != null ? `在线 ${c.online} 人` : '已连接', ''],
+  connecting: () => ['连接中…', ''],
+  offline: (c) => [c.error || '连不上群聊，稍后自动重连', 'err'],
+  unavailable: () => ['账号审批通过、登录过游戏后才能群聊', 'err'],
+};
+function chatClock(seconds) {
+  const date = new Date(seconds * 1000), now = new Date();
+  const pad = (n) => String(n).padStart(2, '0');
+  const time = `${pad(date.getHours())}:${pad(date.getMinutes())}`;
+  if (date.toDateString() === now.toDateString()) return time;
+  return `${date.getFullYear() !== now.getFullYear() ? date.getFullYear() + '年' : ''}${date.getMonth() + 1}月${date.getDate()}日 ${time}`;
+}
+function avatar(name) {
+  const text = String(name);
+  const shown = text.includes('的') ? text.split('的').pop()[0] : text[0];
+  let hash = 0;
+  for (const ch of text) hash = (hash * 31 + ch.charCodeAt(0)) >>> 0;
+  return `<span class="av c${hash % 6}">${esc(shown || '?')}</span>`;
+}
+function renderChat(d) {
+  const c = d.chat || { state: 'connecting' };
+  const [stateText, stateClass] = (CHAT_STATES[c.state] || CHAT_STATES.connecting)(c);
+  $('chat-title').textContent = c.online != null && c.state === 'online' ? `率土战局群聊（${c.online}）` : '率土战局群聊';
+  $('chat-state').textContent = stateText;
+  $('chat-state').className = stateClass;
+  const canSend = c.state === 'online';
+  $('chat-text').disabled = !canSend;
+  if (!S.busy.has('chat')) $('chat-submit').disabled = !canSend;
+  const list = $('chat-list'), messages = S.chat.messages;
+  const last = messages.length ? messages[messages.length - 1].seq : 0;
+  if (last > S.chat.seen) { S.chat.seen = last; store.set('chatSeen', last); }
+  const key = `${messages.length}:${messages[0]?.seq}:${last}:${S.chat.more}:${S.chat.loading}:${c.name}`;
+  if (key === S.chat.key) return;
+  S.chat.key = key;
+  const atBottom = S.chat.bottom || list.scrollHeight - list.scrollTop - list.clientHeight < 80;
+  const parts = [];
+  if (S.chat.more) parts.push(`<button class="link chat-more" data-chat-older="1">${S.chat.loading ? '加载中…' : '查看更早的消息'}</button>`);
+  if (c.name) parts.push(`<div class="chat-tip">你在群聊里叫「${esc(c.name)}」，所有在线的人都看得到你发的消息</div>`);
+  let previous = 0;
+  for (const m of messages) {
+    if (m.time - previous > 300) parts.push(`<div class="chat-time">${esc(chatClock(m.time))}</div>`);
+    previous = m.time;
+    parts.push(`<div class="msg${m.mine ? ' mine' : ''}">${avatar(m.name)}<div class="col">${m.mine ? '' : `<span class="who">${esc(m.name)}</span>`}<div class="bubble">${esc(m.text)}</div></div></div>`);
+  }
+  if (!messages.length) parts.push('<div class="empty">还没有消息。打个招呼吧</div>');
+  list.innerHTML = parts.join('');
+  if (atBottom) list.scrollTop = list.scrollHeight;
+  S.chat.bottom = false;
+}
+async function chatOlder() {
+  if (S.chat.loading || !S.chat.messages.length) return;
+  S.chat.loading = true;
+  render();
+  const list = $('chat-list'), height = list.scrollHeight;
+  try {
+    const older = await act('chat_older', { before: S.chat.messages[0].seq });
+    S.chat.messages.unshift(...older);
+    S.chat.more = older.length >= 30;
+  } catch { /* shown */ } finally {
+    S.chat.loading = false;
+    S.chat.key = '';
+    render();
+    list.scrollTop += list.scrollHeight - height;  // stays at what was read
+  }
+}
+function chatCount() {
+  const length = $('chat-text').value.length;
+  $('chat-count').textContent = length > 400 ? `${length}/500` : '';
+  $('chat-count').className = length > 500 ? 'over' : '';
+}
+async function chatSend() {
+  const input = $('chat-text');
+  const text = input.value.trim();
+  if (!text || S.busy.has('chat')) return;
+  if (text.length > 500) return toast('消息太长了，最多 500 个字', true);
+  S.busy.add('chat');
+  try {
+    await withBusy($('chat-submit'), '', () => act('chat_send', { text }));
+    input.value = '';
+    chatCount();
+    S.chat.bottom = true;
+  } catch { /* shown */ } finally {
+    S.busy.delete('chat');
+    render();
+    input.focus();
+  }
+}
+$('chat-text').addEventListener('keydown', (event) => {
+  // Enter sends; not while an input method is still composing (Chinese is typed that way).
+  if (event.key === 'Enter' && !event.shiftKey && !event.isComposing && event.keyCode !== 229) {
+    event.preventDefault();
+    chatSend();
+  }
+});
+$('chat-text').addEventListener('input', chatCount);
+
 // ---------------------------------------------------------------- navigation and actions
 
 function show(page) {
@@ -921,6 +1041,7 @@ function show(page) {
   history.replaceState(null, '', '#' + page);
   render();
   if (page === 'diagnostics') $('log').scrollTop = $('log').scrollHeight;
+  if (page === 'chat') { S.chat.bottom = true; S.chat.key = ''; render(); $('chat-text').focus(); }
   if (PERSONAL.has(page)) loadPersonal(page);  // read again each time it is opened
 }
 
@@ -934,6 +1055,7 @@ document.addEventListener('click', async (event) => {
   if (nav) return show(nav.dataset.page);
   const goto = event.target.closest('[data-goto]');
   if (goto) return show(goto.dataset.goto);
+  if (event.target.closest('[data-chat-older]')) return chatOlder();
   if (personalClick(event)) return;
   if (await phoneClick(event)) return;
   if (event.target.closest('[data-guide]')) {
@@ -968,7 +1090,9 @@ document.addEventListener('click', async (event) => {
 document.addEventListener('submit', async (event) => {
   const form = event.target;
   event.preventDefault();
-  if (form.id === 'add-form') {
+  if (form.id === 'chat-form') {
+    chatSend();
+  } else if (form.id === 'add-form') {
     const input = $('add-token');
     const button = form.querySelector('button');
     try {

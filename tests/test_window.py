@@ -566,6 +566,23 @@ class PageServerTests(unittest.TestCase):
                 self.assertEqual(self.request("POST", "/api/action", headers, json.dumps(body))[0], 400)
         self.assertEqual(self.app.tokens, [GOOD])
         self.assertEqual(self.request("GET", "/api/state?n=invalid", self.cookie())[0], 400)
+        self.assertEqual(self.request("GET", "/api/state?c=x", self.cookie())[0], 400)
+        # the chat's actions: what the page sends is checked, never sent on unchecked
+        for body in ({"action": "chat_send"}, {"action": "chat_send", "text": ["x"]},
+                     {"action": "chat_send", "text": "好"},  # not connected (no approved account here)
+                     {"action": "chat_older", "before": "1"}):
+            with self.subTest(body=body):
+                self.assertEqual(self.request("POST", "/api/action", headers, json.dumps(body))[0], 400)
+
+    def test_the_chat_in_the_state(self):
+        for n in range(40):
+            self.app.chat._keep({"name": "甲", "text": str(n), "time": n, "mine": False})
+        status, _, data = self.request("GET", "/api/state", self.cookie())
+        view = json.loads(data)["chat"]
+        self.assertEqual((status, len(view["messages"]), view["messages"][-1]["text"]), (200, 30, "39"))
+        last = view["messages"][-2]["seq"]
+        view = json.loads(self.request("GET", f"/api/state?c={last}", self.cookie())[2])["chat"]
+        self.assertEqual([m["text"] for m in view["messages"]], ["39"])
 
     def test_the_window_is_electron_from_source_too(self):
         with unittest.mock.patch.dict("os.environ", {"ST_ELECTRON": "/opt/electron/electron"}):
