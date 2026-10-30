@@ -218,6 +218,16 @@ class UploadTests(unittest.TestCase):
         uploader.on_packet(1.0, 1, packet(server_frame(9, [2]), 100 + len(server_frame(9, [1]))))
         self.assertIsNone(self.queue.batch())
 
+    def test_report_lists_the_server_wants_whole_go_as_frames_too(self):
+        uploader = self.uploader(lambda body: dict(accept()(body), whole=[0x0A]))
+        self.feed(uploader, (server_frame(9, [1]), False))
+        uploader.upload_once()
+        first = server_frame(0x0A, [report(5)])
+        self.feed(uploader, (first, False), skip=len(server_frame(9, [1])))
+        rows = self.queue.batch()[2]
+        self.assertEqual([("frame" in row, "reports" in row) for row in rows], [(True, False), (False, True)])
+        self.assertEqual(base64.b64decode(rows[0]["frame"]), first)
+
     def test_battle_reports_are_found_anywhere_in_a_list(self):
         self.assertEqual([r["battle_id"] for r in battle_reports([0, {"x": [report(5)]}, {"battle_id": 1}])], [5])
 

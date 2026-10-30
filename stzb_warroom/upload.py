@@ -200,6 +200,7 @@ class Uploader:
         self.roles = {}  # stream id -> role, as the server said
         self.dead = set()  # streams the server refused: their connection starts a new one
         self.drop = {"client": set(), "server": set()}  # message ids the server does not want
+        self.whole = set()  # report lists the server also wants as they came, besides their reports
         self.waiting = {}  # stream id -> [monotonic time to try again, wait]: held back by the server
         self.swept = time.monotonic()
         self.stop = threading.Event()
@@ -229,8 +230,9 @@ class Uploader:
 
     def add_frame(self, ends, at, client, frame):
         channel = None if client else BATTLE_LISTS.get(message_id(frame, client))
-        if channel is None:
+        if channel is None or message_id(frame, client) in self.whole:
             self.add(ends, frame_row(at, client, frame))
+        if channel is None:
             return
         reports = battle_reports(body(frame, client)[1])
         if not reports:
@@ -299,6 +301,7 @@ class Uploader:
                 self.on_role()
         if isinstance(result.get("drop"), dict):
             self.drop = {side: set(result["drop"].get(side) or ()) for side in ("client", "server")}
+        self.whole = set(result.get("whole") or ())
         if result.get("rejected_tokens"):
             self.log(event="tokens_rejected", count=result["rejected_tokens"])
         return True
