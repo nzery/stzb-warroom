@@ -1,9 +1,10 @@
 """The group chat of every client online (the window's 群聊 page).
 
-The server keeps nothing: it passes a message to the clients connected at that moment, so this
-client keeps what it got and sent (``chat.jsonl`` in the state folder, the newest KEEP), and what
-came while it was not running is not there. The chat follows ``/v1/chat/stream`` with the first
-account whose role is approved, and sends with ``/v1/chat/send`` naming its stream.
+This client keeps what it got and sent (``chat.jsonl`` in the state folder, the newest KEEP). The
+chat follows ``/v1/chat/stream`` with the first account whose role is approved, asking for what
+came after the newest message it got (the server keeps a week of them), and sends with
+``/v1/chat/send`` naming its stream. A message is kept with its id, so one given again (what this
+account sent from another computer, or a stream that broke) is not kept twice.
 
 Everything that comes from the stream is checked before it is kept or shown: the page shows it as
 text, never as markup.
@@ -42,7 +43,9 @@ def message_of(data, mine=False):
     name, text, stamp = text_of(data.get("name"), 32), text_of(data.get("text"), MAX_TEXT * 2), data.get("time")
     if name is None or text is None or isinstance(stamp, bool) or not isinstance(stamp, (int, float)):
         return None
-    return {"name": name, "text": text, "time": float(stamp), "mine": bool(mine)}
+    message_id = data.get("id")
+    return {"id": message_id if type(message_id) is int and message_id > 0 else None,
+            "name": name, "text": text, "time": float(stamp), "mine": bool(mine)}
 
 
 def server_error(exc):
@@ -63,6 +66,7 @@ class Chat:
         self.lock = threading.Lock()
         self.messages = collections.deque(maxlen=KEEP)
         self.seq = 0
+        self.after = 0  # the newest id the stream gave: what came after it is asked for
         self.state, self.name, self.online, self.error = "connecting", None, None, None
         self.conn = None  # this client's stream, named when sending
         self._load()
@@ -85,6 +89,8 @@ class Chat:
                 seq = value.get("seq")
                 self.seq = seq if type(seq) is int and seq > self.seq else self.seq + 1
                 self.messages.append(dict(message, seq=self.seq))
+                if message["id"] and not message["mine"]:
+                    self.after = max(self.after, message["id"])
         if len(lines) > KEEP + KEEP // 2:  # the file only grows between starts: cut it back
             self._rewrite()
 
@@ -98,10 +104,16 @@ class Chat:
 
     @staticmethod
     def _line(message):
-        return json.dumps({key: message[key] for key in ("seq", "name", "text", "time", "mine")}, ensure_ascii=False) + "\n"
+        return json.dumps({key: message.get(key) for key in ("seq", "id", "name", "text", "time", "mine")}, ensure_ascii=False) + "\n"
 
-    def _keep(self, message):
+    def _keep(self, message, streamed=False):
         with self.lock:
+            if message.get("id"):
+                if streamed:
+                    self.after = max(self.after, message["id"])
+                kept = next((m for m in self.messages if m.get("id") == message["id"]), None)
+                if kept:
+                    return kept
             self.seq += 1
             message = dict(message, seq=self.seq)
             self.messages.append(message)
@@ -166,7 +178,9 @@ class Chat:
         self.changed()
 
     def follow_once(self, token, stop):
-        with self.server.open(STREAM, token, timeout=60) as stream:
+        with self.lock:
+            after = self.after
+        with self.server.open(f"{STREAM}?after={after}", token, timeout=60) as stream:
             for kind, _id, data in events(stream, stop):
                 if not isinstance(data, dict):
                     continue
@@ -176,7 +190,7 @@ class Chat:
                 elif kind == "online" and type(data.get("online")) is int:
                     self._set(online=data["online"])
                 elif kind == "msg" and (message := message_of(data)) is not None:
-                    self._keep(message)
+                    self._keep(message, streamed=True)
                 if self.token() != token:  # the account was removed or another comes first now
                     return
 

@@ -29,10 +29,11 @@ def sse(*events):
 
 class Server:
     def __init__(self, stream=None, reply=None):
-        self.stream, self.reply, self.sent = stream, reply, []
+        self.stream, self.reply, self.sent, self.opened = stream, reply, [], []
 
     def open(self, path, token, timeout=45):
-        assert path == chat.STREAM
+        assert path.startswith(chat.STREAM + "?after=")
+        self.opened.append(path)
         if isinstance(self.stream, Exception):
             raise self.stream
         return self.stream
@@ -61,7 +62,9 @@ class ChatTests(unittest.TestCase):
         self.assertIsNone(message_of({"name": "甲", "text": "a", "time": True}))
         self.assertIsNone(message_of("text"))
         self.assertEqual(message_of({"name": "甲\x1b", "text": "<b>a‮</b>", "time": 5, "extra": 1}),
-                         {"name": "甲", "text": "<b>a</b>", "time": 5.0, "mine": False})
+                         {"id": None, "name": "甲", "text": "<b>a</b>", "time": 5.0, "mine": False})
+        for bad in (0, -1, "3", 2.0, True):
+            self.assertIsNone(message_of({"id": bad, "name": "甲", "text": "a", "time": 1})["id"])
 
     def test_the_stream_keeps_messages_and_follows_the_count(self):
         stream = sse(("hello", {"conn": "c1", "name": "沉稳的赤兔", "online": 3}), ("msg", {"bad": 1}),
@@ -73,6 +76,24 @@ class ChatTests(unittest.TestCase):
         self.assertEqual((view["state"], view["name"], view["online"]), ("online", "沉稳的赤兔", 2))
         self.assertEqual([(m["name"], m["text"], m["mine"]) for m in view["messages"]], [("机灵的白马", "集合", False)])
         self.assertEqual(room.conn, "c1")
+
+    def test_what_came_while_away_is_asked_for_and_kept_once(self):
+        mine = {"id": 5, "name": "沉稳的赤兔", "text": "我说的", "time": 150}
+        room = self.chat(Server(sse(("hello", {"conn": "c1", "name": "沉稳的赤兔", "online": 1}),
+                                    ("msg", {"id": 4, "name": "机灵的白马", "text": "一", "time": 140}))))
+        room.follow_once(TOKEN, threading.Event())
+        self.assertEqual(room.server.opened, [chat.STREAM + "?after=0"])  # never connected: the recent ones
+        room.server.reply = mine
+        room.send("我说的")
+        # Started again: asks after the newest it got (not its own: one of the others' may be before it),
+        # and what it has already is not kept twice.
+        again = self.chat(Server(sse(("hello", {"conn": "c2", "name": "沉稳的赤兔", "online": 1}),
+                                     ("msg", {"id": 4, "name": "机灵的白马", "text": "一", "time": 140}),
+                                     ("msg", mine), ("msg", {"id": 6, "name": "机灵的白马", "text": "二", "time": 160}))))
+        again.follow_once(TOKEN, threading.Event())
+        self.assertEqual(again.server.opened, [chat.STREAM + "?after=4"])
+        self.assertEqual([(m["text"], m["mine"]) for m in again.messages], [("一", False), ("我说的", True), ("二", False)])
+        self.assertEqual(again.after, 6)
 
     def test_sending(self):
         room = self.chat(Server(reply={"id": 3, "name": "沉稳的赤兔", "text": "好", "time": 200}))
