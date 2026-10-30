@@ -11,6 +11,7 @@
 - Windows 窗口是本机网页（`webui.py` + `stzb_warroom/ui/`，用 Electron 窗口打开），只监听 127.0.0.1 并校验密钥 Cookie、Host 和 Origin；
   页面只用自己的文件（CSP 禁止外部脚本和内联脚本）。
 - Windows 整合包用 PyInstaller 构建（`packaging/windows/`，只在构建时用，不是运行依赖），Electron 由构建脚本按固定版本和 SHA-256 下载放进包里。不要把 Npcap 安装程序放进包里，它的免费版不允许再分发。
-- 不写个人环境信息（主机名、内网地址、私有服务配置）。
+- 不写个人环境信息（主机名、内网地址、私有服务配置）。也不写任何服务器的地址、节点和主机商：只出现玩家要用的 `stzb.nzery.dev`、`api.nzery.dev`，
+  其余地址由服务器下发；注释、测试、提交说明和 tag 说明同样适用。`tests/test_public.py` 检查文件和全部历史，提交前必须通过。
 - 本仓库是公开的：README 只写用户能做什么、怎么用，不写原理、协议和服务器相关内容。
 - 测试：`python3 -m unittest discover -s tests`。测试通过后提交并推送，不必等维护者要求；发版是推带说明的 `v*` tag（见 `packaging/windows/README.md`）。
