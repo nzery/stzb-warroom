@@ -575,6 +575,7 @@ class PageServerTests(unittest.TestCase):
                 self.assertEqual(self.request("POST", "/api/action", headers, json.dumps(body))[0], 400)
 
     def test_the_chat_in_the_state(self):
+        self.app.chat.use("sta_" + "a" * 43)
         for n in range(40):
             self.app.chat._keep({"name": "甲", "text": str(n), "time": n, "mine": False})
         status, _, data = self.request("GET", "/api/state", self.cookie())

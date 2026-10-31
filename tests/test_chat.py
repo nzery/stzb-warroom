@@ -124,7 +124,7 @@ class ChatTests(unittest.TestCase):
         room = self.chat(Server(reply=None))
         for n in range(chat.FIRST + 5):
             room._keep({"name": "甲", "text": str(n), "time": n, "mine": n % 2 == 0})
-        with (self.dir / "chat.jsonl").open("a", encoding="utf-8") as file:
+        with room.path.open("a", encoding="utf-8") as file:
             file.write("not json\n[1]\n{\"name\": 1}\n")
         again = self.chat(Server())
         view = again.view()
@@ -143,8 +143,29 @@ class ChatTests(unittest.TestCase):
                 file.write(json.dumps({"seq": n + 1, "name": "甲", "text": str(n), "time": n, "mine": False}) + "\n")
         room = self.chat(Server())
         self.assertEqual(len(room.messages), chat.KEEP)
-        self.assertEqual(len((self.dir / "chat.jsonl").read_text(encoding="utf-8").splitlines()), chat.KEEP)
+        self.assertEqual(len(room.path.read_text(encoding="utf-8").splitlines()), chat.KEEP)
+        self.assertFalse((self.dir / "chat.jsonl").exists())  # the one for all before: the first account took it
         self.assertEqual(room.messages[-1]["seq"], chat.KEEP * 2)
+
+    def test_each_account_keeps_its_own_messages(self):
+        other = "sta_" + "b" * 43
+        room = self.chat(Server(sse(), reply={"id": 7, "name": "仗义的犀牛", "text": "有人么？", "time": 300}))
+        room.follow_once(other, threading.Event())  # the chat moved to another account
+        self.token, room.conn = other, "c1"
+        room.send("有人么？")
+        self.assertEqual(room.view()["account"], Chat.key_of(other))
+        self.assertNotIn(other, room.path.name)
+        # back to the first: the other account's message is someone else's, given again by the server
+        self.token = TOKEN
+        room.server.stream = sse(("hello", {"conn": "c2", "name": "沉稳的赤兔"}),
+                                 ("msg", {"id": 7, "name": "仗义的犀牛（曹操）", "text": "有人么？", "time": 300}))
+        room.follow_once(TOKEN, threading.Event())
+        self.assertEqual(room.server.opened[-1], chat.STREAM + "?after=0")
+        self.assertEqual([(m["name"], m["mine"]) for m in room.view()["messages"]], [("仗义的犀牛（曹操）", False)])
+        self.assertIsNone(room.view()["online"])  # not told: none shown
+        self.token = other  # and the other's are as they were
+        again = self.chat(Server())
+        self.assertEqual([(m["text"], m["mine"]) for m in again.messages], [("有人么？", True)])
 
     def test_run_waits_for_an_approved_account_and_reports_problems(self):
         stop = threading.Event()

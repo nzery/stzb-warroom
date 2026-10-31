@@ -93,8 +93,9 @@ const S = {
   // The server's phone page for the chosen account: {data, error, loading, role, key}.
   phone: {},
   // 群聊: the messages this page has (the newest when it opened, older ones as asked), the program's
-  // cursor, whether older ones are kept, and the newest one read (the badge counts those after it).
-  chat: { messages: [], c: 0, more: false, loading: false, seen: store.get('chatSeen', 0), key: '', bottom: true },
+  // cursor, whether older ones are kept, and the newest one read (the badge counts those after it);
+  // each account's messages are apart, so all of it starts again when the chat's account changes.
+  chat: { account: '', messages: [], c: 0, more: false, loading: false, seen: 0, key: '', bottom: true },
 };
 const PERSONAL = new Set(['players']);
 
@@ -932,8 +933,15 @@ function appendLogs(lines) {
 // ---------------------------------------------------------------- 群聊
 
 const CHAT_KEEP = 500;  // messages the page holds; older ones are asked for again
+const chatSeenKey = () => `chatSeen:${S.chat.account}`;
 function takeChat(chat) {
   if (!chat || !Array.isArray(chat.messages)) return;
+  if ((chat.account || '') !== S.chat.account) {
+    const stale = S.chat.c !== 0;
+    Object.assign(S.chat, { account: chat.account || '', messages: [], c: 0, more: false, key: '', bottom: true });
+    S.chat.seen = store.get(chatSeenKey(), store.get('chatSeen', 0));  // before v1.13.2: one for all
+    if (stale) { schedule(); return; }  // asked after the other account's: ask again for the newest
+  }
   const first = !S.chat.c;
   const fresh = chat.messages.filter((m) => m.seq > S.chat.c);
   if (fresh.length) {
@@ -974,7 +982,7 @@ function renderChat(d) {
   if (!S.busy.has('chat')) $('chat-submit').disabled = !canSend;
   const list = $('chat-list'), messages = S.chat.messages;
   const last = messages.length ? messages[messages.length - 1].seq : 0;
-  if (last > S.chat.seen) { S.chat.seen = last; store.set('chatSeen', last); }
+  if (last > S.chat.seen) { S.chat.seen = last; store.set(chatSeenKey(), last); }
   const key = `${messages.length}:${messages[0]?.seq}:${last}:${S.chat.more}:${S.chat.loading}:${c.name}`;
   if (key === S.chat.key) return;
   S.chat.key = key;

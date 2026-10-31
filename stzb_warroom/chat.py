@@ -1,6 +1,9 @@
 """The group chat of every client online (the window's 群聊 page).
 
-This client keeps what it got and sent (``chat.jsonl`` in the state folder, the newest KEEP). The
+This client keeps what it got and sent, each account apart (``chat-<key>.jsonl`` in the state
+folder, the newest KEEP; the key is drawn from the token and tells nothing of it): switching
+accounts is like another player opening the chat, what the other account sent is someone
+else's. The
 chat follows ``/v1/chat/stream`` with the first account whose role is approved (else the first the
 server lets chat, App.chat_token), asking for what
 came after the newest message it got (the server keeps a week of them), and sends with
@@ -12,6 +15,7 @@ text, never as markup.
 """
 
 import collections
+import hashlib
 import json
 import re
 import threading
@@ -63,16 +67,43 @@ class Chat:
 
     def __init__(self, server, state_dir, token, changed=lambda: None):
         self.server, self.token, self.changed = server, token, changed
-        self.path = Path(state_dir) / "chat.jsonl"
+        self.dir = Path(state_dir)
         self.lock = threading.Lock()
+        self.key, self.path = None, None  # the account whose messages are kept and shown
         self.messages = collections.deque(maxlen=KEEP)
         self.seq = 0
         self.after = 0  # the newest id the stream gave: what came after it is asked for
         self.state, self.name, self.online, self.error = "connecting", None, None, None
         self.conn = None  # this client's stream, named when sending
-        self._load()
+        first = token()
+        if first is not None:
+            self.use(first)
 
     # what is kept ---------------------------------------------------------------------
+
+    @staticmethod
+    def key_of(token):
+        return hashlib.sha256(f"stzb-chat:{token}".encode()).hexdigest()[:16]
+
+    def use(self, token):
+        """Keep and show `token`'s messages from now on (they were another account's)."""
+        key = self.key_of(token)
+        with self.lock:
+            if key == self.key:
+                return
+            if self.key is not None:  # the other account's stream and name are not this one's
+                self.conn, self.name, self.online = None, None, None
+            self.key, self.path = key, self.dir / f"chat-{key}.jsonl"
+            self.messages.clear()
+            self.seq = self.after = 0
+            legacy = self.dir / "chat.jsonl"  # before v1.13.2 one for all: the first account used takes it
+            if legacy.is_file() and not self.path.exists():
+                try:
+                    legacy.replace(self.path)
+                except OSError:
+                    pass
+            self._load()
+        self.changed()
 
     def _load(self):
         try:
@@ -109,6 +140,8 @@ class Chat:
 
     def _keep(self, message, streamed=False):
         with self.lock:
+            if self.path is None:
+                return message
             if message.get("id"):
                 if streamed:
                     self.after = max(self.after, message["id"])
@@ -134,7 +167,7 @@ class Chat:
         opening it is not handed everything kept)."""
         with self.lock:
             messages = [m for m in self.messages if m["seq"] > after] if after else list(self.messages)[-FIRST:]
-            return {"state": self.state, "name": self.name, "online": self.online, "error": self.error,
+            return {"account": self.key, "state": self.state, "name": self.name, "online": self.online, "error": self.error,
                     "messages": messages, "oldest": self.messages[0]["seq"] if self.messages else None}
 
     def older(self, before, limit=FIRST):
@@ -152,9 +185,11 @@ class Chat:
             raise ValueError(f"消息太长了，最多 {MAX_TEXT} 个字")
         token = self.token()  # not under self.lock: the window's lock is taken before it (view)
         with self.lock:
-            conn = self.conn
+            conn, key = self.conn, self.key
         if token is None:
             raise ValueError("账号还没通过服务器检查，稍后再试")
+        if self.key_of(token) != key:
+            raise ValueError("群聊正在切换账号，稍等一下")
         if conn is None:
             raise ValueError("群聊还没连上，稍等一下")
         try:
@@ -166,6 +201,8 @@ class Chat:
         message = message_of(value, mine=True)
         if message is None:
             raise ValueError("服务器的回复不对")
+        if self.key != key:  # switched meanwhile: it is the other account's
+            return message
         return self._keep(message)
 
     # the stream -----------------------------------------------------------------------
@@ -179,6 +216,7 @@ class Chat:
         self.changed()
 
     def follow_once(self, token, stop):
+        self.use(token)
         with self.lock:
             after = self.after
         with self.server.open(f"{STREAM}?after={after}", token, timeout=60) as stream:
