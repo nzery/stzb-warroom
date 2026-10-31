@@ -198,6 +198,22 @@ class BusyTests(unittest.TestCase):
         self.assertEqual(logged[0]["event"], "relay_busy")
         self.assertEqual(calls[0]["X-Relay-Agent"], relay.INSTANCE)
         self.assertEqual(exit_.state, "stopped")
+        self.assertNotIn("X-Relay-Standby", calls[0])
+
+    def test_a_standby_says_so(self):
+        exit_ = relay.Exit("https://relay.example", ["t"], log=lambda **fields: None)
+        calls = []
+
+        def refuse(url, headers, timeout=10):
+            calls.append(headers)
+            exit_.stop.set()
+            raise relay.Refused(409)
+
+        exit_.stop.wait = lambda seconds: None
+        with unittest.mock.patch.object(relay, "STANDBY", True), \
+                unittest.mock.patch.object(relay, "WebSocket", side_effect=refuse):
+            exit_.run()
+        self.assertEqual(calls[0]["X-Relay-Standby"], "1")
 
 
 class RobustnessTests(unittest.TestCase):
