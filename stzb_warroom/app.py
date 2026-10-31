@@ -15,7 +15,8 @@ The 玩家信息 page (any player, looked up by name: union, main city, armies) 
 as it comes, the name typed, the page's filters and page number passed along unread.
 
 The 群聊 page (chat.py) runs from the start to the end of the program, captured or not, with
-the first account whose role is approved, else the first the server lets chat.
+the account chosen on that page, else the first whose role is approved, else the first the
+server lets chat.
 """
 
 import collections
@@ -174,7 +175,7 @@ class App:
                 "update": self.update,
                 "updated": self._updated(),
                 "notice_prefs": dict(self.notice_prefs),
-                "chat": self.chat.view(chat_after),
+                "chat": {**self.chat.view(chat_after), **self.chat_accounts()},
             }
 
     def _account(self, token):
@@ -649,14 +650,43 @@ class App:
             return None
         return show
 
+    def _chat_tokens(self):
+        """The tokens that may chat: approved, or let chat by the server (``chat`` in its status:
+        one not bound to a role yet too). Under self.lock."""
+        accounts = [self.accounts.get(token) or {} for token in self.tokens]
+        return [token for token, value in zip(self.tokens, accounts)
+                if value.get("state") == "ok" or (value.get("chat") is True and value.get("state") != "invalid")]
+
     def chat_token(self):
-        """The token the chat uses: the first one whose role is approved, else the first the
-        server lets chat (``chat`` in its status: one not bound to a role yet too), else None."""
+        """The token the chat uses: the one the player chose on the 群聊 page (settings.json keeps
+        its tag) while it may chat, else the first one whose role is approved, else the first the
+        server lets chat, else None."""
         with self.lock:
-            accounts = [self.accounts.get(token) or {} for token in self.tokens]
-            return next((token for token, value in zip(self.tokens, accounts) if value.get("state") == "ok"),
-                        next((token for token, value in zip(self.tokens, accounts)
-                              if value.get("chat") is True and value.get("state") != "invalid"), None))
+            able = self._chat_tokens()
+            chosen = self.settings.get("chat_account")
+            return next((token for token in able if tag(token) == chosen), None) \
+                or next((token for token in able if (self.accounts.get(token) or {}).get("state") == "ok"),
+                        able[0] if able else None)
+
+    def chat_accounts(self):
+        """For the page: the accounts the chat may use (their indexes) and the one it uses."""
+        using = self.chat_token()
+        with self.lock:
+            able = set(self._chat_tokens())
+            return {"choices": [index for index, token in enumerate(self.tokens) if token in able],
+                    "using": self.tokens.index(using) if using in self.tokens else None}
+
+    def use_chat(self, index):
+        """Chat with the account `index` from now on (2026-10-31 user: to test with another
+        account without removing one); its messages are shown instead."""
+        token = self._token(index)
+        with self.lock:
+            if token not in self._chat_tokens():
+                raise ValueError("这个账号还不能群聊：服务器确认后才能用")
+            self.settings["chat_account"] = tag(token)
+            self._write_settings()
+        self.chat.switch(token)
+        self.touch()
 
     # capture ------------------------------------------------------------------------
 

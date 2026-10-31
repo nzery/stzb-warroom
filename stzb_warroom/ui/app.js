@@ -977,6 +977,16 @@ function renderChat(d) {
   $('chat-title').textContent = c.online != null && c.state === 'online' ? `群聊（${c.online}）` : '群聊';
   $('chat-state').textContent = stateText;
   $('chat-state').className = stateClass;
+  // Which account speaks (2026-10-31 user: testing with another account without removing one).
+  const choices = (c.choices || []).filter((index) => d.tokens[index]);
+  const whoKey = JSON.stringify([choices, c.using, choices.map((index) => d.tokens[index].role?.label || d.tokens[index].name || '')]);
+  if (whoKey !== S.chat.whoKey) {
+    S.chat.whoKey = whoKey;
+    $('chat-who').innerHTML = choices.length > 1 ? `<span>用哪个账号聊</span><div class="chips">${choices.map((index) => {
+      const a = d.tokens[index];
+      return `<button class="chip${index === c.using ? ' active' : ''}" data-chat-use="${index}">${esc(a.role ? roleName(a.role.label) : a.name || a.token)}</button>`;
+    }).join('')}</div>` : '';
+  }
   const canSend = c.state === 'online';
   $('chat-text').disabled = !canSend;
   if (!S.busy.has('chat')) $('chat-submit').disabled = !canSend;
@@ -1075,6 +1085,12 @@ document.addEventListener('click', async (event) => {
   const goto = event.target.closest('[data-goto]');
   if (goto) return show(goto.dataset.goto);
   if (event.target.closest('[data-chat-older]')) return chatOlder();
+  const chatUse = event.target.closest('[data-chat-use]');
+  if (chatUse) {
+    if (chatUse.classList.contains('active')) return;
+    try { await act('chat_use', { index: Number(chatUse.dataset.chatUse) }); } catch { /* act said why */ }
+    return;
+  }
   if (personalClick(event)) return;
   if (await phoneClick(event)) return;
   if (event.target.closest('[data-guide]')) {

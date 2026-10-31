@@ -175,6 +175,40 @@ class ChatTests(unittest.TestCase):
         again = self.chat(Server())
         self.assertEqual([(m["text"], m["mine"]) for m in again.messages], [("有人么？", True)])
 
+    def test_switching_shows_the_other_accounts_messages_and_connects_with_it(self):
+        other = "sta_" + "b" * 43
+        stop = threading.Event()
+        lines = threading.Event()
+
+        class Quiet(Stream):  # a stream with only keep-alives, as when nobody speaks
+            def __iter__(self):
+                while not stop.is_set():
+                    lines.set()
+                    yield b": keepalive\n"
+                    stop.wait(0.01)
+
+        room = self.chat(Server(sse(("msg", {"id": 1, "name": "甲", "text": "第一个号的", "time": 1}))))
+        room.follow_once(TOKEN, threading.Event())
+        room.server.stream = Quiet()
+        opened = []
+        open_ = room.server.open
+        room.server.open = lambda path, token, timeout=45: (opened.append(token), open_(path, token, timeout))[1]
+        thread = threading.Thread(target=room.run, args=(stop,))
+        thread.start()
+        self.assertTrue(lines.wait(5))
+        self.token = other
+        room.switch(other)
+        self.assertEqual((room.view()["account"], room.view()["messages"], room.state), (Chat.key_of(other), [], "connecting"))
+        for _ in range(500):  # not left on the first account's quiet stream: connected with the other
+            if opened[-1:] == [other]:
+                break
+            stop.wait(0.01)
+        stop.set()
+        thread.join(5)
+        self.assertEqual(opened, [TOKEN, other])
+        self.token = TOKEN  # the first one's are where they were
+        self.assertEqual([m["text"] for m in self.chat(Server()).messages], ["第一个号的"])
+
     def test_run_waits_for_an_approved_account_and_reports_problems(self):
         stop = threading.Event()
         self.token = None

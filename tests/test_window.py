@@ -11,7 +11,7 @@ from http.client import HTTPConnection
 from pathlib import Path
 from urllib.error import HTTPError
 
-from stzb_warroom import app as appmod, vault, webui, winsys
+from stzb_warroom import app as appmod, chat, vault, webui, winsys
 from stzb_warroom.app import App
 
 GOOD, BAD, NEW, TAKEN = "sta_" + "a" * 43, "sta_" + "b" * 43, "sta_" + "c" * 43, "sta_" + "d" * 43
@@ -598,6 +598,30 @@ class PageServerTests(unittest.TestCase):
         with self.app.lock:
             self.app.accounts[tokens[2]] = {"state": "ok", "chat": True}
         self.assertEqual(self.app.chat_token(), tokens[2])
+
+    def test_the_player_chooses_the_account_the_chat_uses(self):
+        tokens = ["sta_" + c * 43 for c in "abc"]
+        with self.app.lock:
+            self.app.tokens[:] = tokens
+            self.app.accounts.clear()
+            self.app.accounts.update({tokens[0]: {"state": "ok"}, tokens[1]: {"state": "ok"}, tokens[2]: {"state": "pending"}})
+        self.assertEqual({k: self.app.snapshot()["chat"][k] for k in ("choices", "using")}, {"choices": [0, 1], "using": 0})
+        with self.assertRaisesRegex(ValueError, "还不能群聊"):
+            self.window.act("chat_use", {"index": 2})
+        with self.assertRaisesRegex(ValueError, "没有这个账号"):
+            self.window.act("chat_use", {"index": "1"})
+        self.window.act("chat_use", {"index": 1})
+        self.assertEqual(self.app.chat_token(), tokens[1])
+        self.assertEqual(self.app.snapshot()["chat"]["using"], 1)
+        self.assertEqual(self.app.chat.key, chat.Chat.key_of(tokens[1]))  # its messages are shown at once
+        self.assertNotIn(tokens[1], json.dumps(self.app.settings))  # kept by its tag only
+        self.assertEqual(App(FakeServer(), self.app.state_dir).settings["chat_account"], self.app.settings["chat_account"])
+        with self.app.lock:  # no longer able to chat: the first approved one again
+            self.app.accounts[tokens[1]] = {"state": "invalid"}
+        self.assertEqual(self.app.chat_token(), tokens[0])
+        with self.app.lock:
+            self.app.accounts[tokens[1]] = {"state": "ok"}
+        self.assertEqual(self.app.chat_token(), tokens[1])
 
     def test_the_window_is_electron_from_source_too(self):
         with unittest.mock.patch.dict("os.environ", {"ST_ELECTRON": "/opt/electron/electron"}):

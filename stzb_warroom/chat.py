@@ -4,8 +4,8 @@ This client keeps what it got and sent, each account apart (``chat-<key>.jsonl``
 folder, the newest KEEP; the key is drawn from the token and tells nothing of it): switching
 accounts is like another player opening the chat, what the other account sent is someone
 else's. The
-chat follows ``/v1/chat/stream`` with the first account whose role is approved (else the first the
-server lets chat, App.chat_token), asking for what
+chat follows ``/v1/chat/stream`` with the account the player chose on the page (else the first
+whose role is approved, else the first the server lets chat: App.chat_token), asking for what
 came after the newest message it got (the server keeps a week of them), and sends with
 ``/v1/chat/send`` naming its stream. A message is kept with its id, so one given again (what this
 account sent from another computer, or a stream that broke) is not kept twice.
@@ -18,6 +18,7 @@ import collections
 import hashlib
 import json
 import re
+import socket
 import threading
 import time
 from pathlib import Path
@@ -75,6 +76,7 @@ class Chat:
         self.after = 0  # the newest id the stream gave: what came after it is asked for
         self.state, self.name, self.online, self.error = "connecting", None, None, None
         self.conn = None  # this client's stream, named when sending
+        self.stream = None  # the response being read, cut when the player switches accounts
         first = token()
         if first is not None:
             self.use(first)
@@ -103,6 +105,17 @@ class Chat:
                 except OSError:
                     pass
             self._load()
+        self.changed()
+
+    def switch(self, token):
+        """The player chose `token` to chat with: show its messages now, and connect with it
+        (the stream of the other account is cut, run connects again at once)."""
+        self.use(token)
+        with self.lock:
+            stream = self.stream
+            self.state, self.conn, self.online, self.error = "connecting", None, None, None
+        if stream is not None:
+            cut(stream)
         self.changed()
 
     def _load(self):
@@ -219,20 +232,34 @@ class Chat:
         self.use(token)
         with self.lock:
             after = self.after
+        # Looked at on every line (the keep-alives too), not only on a message: a switch is not
+        # left waiting for someone to speak.
+        gone = Either(stop, lambda: self.token() != token)
         with self.server.open(f"{STREAM}?after={after}", token, timeout=60) as stream:
-            for kind, _id, data in events(stream, stop):
-                if not isinstance(data, dict):
-                    continue
-                if kind == "hello" and isinstance(data.get("conn"), str):
-                    self._set(state="online", conn=data["conn"][:64], name=text_of(data.get("name"), 32),
-                              online=data.get("online") if type(data.get("online")) is int else None, error=None)
-                elif kind == "online" and type(data.get("online")) is int:
-                    self._set(online=data["online"])
-                # `mine`: this account's own, sent from another computer or the console (server 2026-10-31)
-                elif kind == "msg" and (message := message_of(data, data.get("mine") is True)) is not None:
-                    self._keep(message, streamed=True)
-                if self.token() != token:  # the account was removed or another comes first now
-                    return
+            with self.lock:
+                self.stream = stream
+            try:
+                for kind, _id, data in events(stream, gone):
+                    self._take(kind, data)
+                    if self.token() != token:
+                        return  # the account was removed, or another chosen
+            finally:
+                with self.lock:
+                    if self.stream is stream:
+                        self.stream = None
+
+    def _take(self, kind, data):
+        """Keep or show one event of the stream."""
+        if not isinstance(data, dict):
+            return
+        if kind == "hello" and isinstance(data.get("conn"), str):
+            self._set(state="online", conn=data["conn"][:64], name=text_of(data.get("name"), 32),
+                      online=data.get("online") if type(data.get("online")) is int else None, error=None)
+        elif kind == "online" and type(data.get("online")) is int:
+            self._set(online=data["online"])
+        # `mine`: this account's own, sent from another computer or the console (server 2026-10-31)
+        elif kind == "msg" and (message := message_of(data, data.get("mine") is True)) is not None:
+            self._keep(message, streamed=True)
 
     def run(self, stop):
         delay = 2
@@ -251,8 +278,37 @@ class Chat:
                 wait = 60 if exc.code == 403 else 30
                 self._set(state="offline", conn=None, error=server_error(exc))
             except (OSError, ValueError) as exc:
-                delay = min(delay * 2, 60)
-                self._set(state="offline", conn=None, error=f"连不上群聊：{type(exc).__name__}")
-            # The stream ended (the server restarted, another account comes first): connect again.
+                if self.token() == token:  # not the stream cut by a switch
+                    delay = min(delay * 2, 60)
+                    self._set(state="offline", conn=None, error=f"连不上群聊：{type(exc).__name__}")
+            if self.token() != token:  # another account chosen (or this one removed): connect with it now
+                self._set(state="connecting", conn=None, online=None, error=None)
+                delay = 2
+                continue
+            # The stream ended (the server restarted): connect again.
             self._set(conn=None, **({"state": "connecting"} if self.state in ("online", "unavailable") else {}))
-            stop.wait(wait or delay)
+            self._pause(stop, wait or delay, token)
+
+    def _pause(self, stop, seconds, token):
+        """Wait `seconds` before connecting again, less when the program quits or another account is chosen."""
+        end = time.monotonic() + seconds
+        while not stop.is_set() and self.token() == token and time.monotonic() < end:
+            stop.wait(min(1, max(0, end - time.monotonic())))
+
+
+class Either:
+    """A stop that is also set when `gone()` says so (notify.events looks at it on every line)."""
+
+    def __init__(self, stop, gone):
+        self.stop, self.gone = stop, gone
+
+    def is_set(self):
+        return self.stop.is_set() or self.gone()
+
+
+def cut(stream):
+    """End the reading of `stream` from another thread (closing it alone leaves a read blocked)."""
+    try:
+        stream.fp.raw._sock.shutdown(socket.SHUT_RDWR)
+    except (AttributeError, OSError):
+        pass
