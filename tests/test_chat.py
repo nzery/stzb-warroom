@@ -95,6 +95,14 @@ class ChatTests(unittest.TestCase):
         self.assertEqual([(m["text"], m["mine"]) for m in again.messages], [("一", False), ("我说的", True), ("二", False)])
         self.assertEqual(again.after, 6)
 
+    def test_what_the_account_sent_elsewhere_shows_as_its_own(self):
+        room = self.chat(Server(sse(("hello", {"conn": "c1", "name": "沉稳的赤兔"}),
+                                    ("msg", {"id": 7, "name": "沉稳的赤兔", "text": "后台回的", "time": 170, "mine": True}),
+                                    ("msg", {"id": 8, "name": "机灵的白马", "text": "谢谢", "time": 180, "mine": "yes"}))))
+        room.follow_once(TOKEN, threading.Event())
+        self.assertEqual([(m["text"], m["mine"]) for m in room.messages], [("后台回的", True), ("谢谢", False)])
+        self.assertEqual(room.after, 8)
+
     def test_sending(self):
         room = self.chat(Server(reply={"id": 3, "name": "沉稳的赤兔", "text": "好", "time": 200}))
         with self.assertRaises(ValueError):

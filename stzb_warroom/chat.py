@@ -228,7 +228,8 @@ class Chat:
                               online=data.get("online") if type(data.get("online")) is int else None, error=None)
                 elif kind == "online" and type(data.get("online")) is int:
                     self._set(online=data["online"])
-                elif kind == "msg" and (message := message_of(data)) is not None:
+                # `mine`: this account's own, sent from another computer or the console (server 2026-10-31)
+                elif kind == "msg" and (message := message_of(data, data.get("mine") is True)) is not None:
                     self._keep(message, streamed=True)
                 if self.token() != token:  # the account was removed or another comes first now
                     return
