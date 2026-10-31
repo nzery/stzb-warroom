@@ -1,7 +1,8 @@
 """The group chat of every client online (the window's 群聊 page).
 
 This client keeps what it got and sent (``chat.jsonl`` in the state folder, the newest KEEP). The
-chat follows ``/v1/chat/stream`` with the first account whose role is approved, asking for what
+chat follows ``/v1/chat/stream`` with the first account whose role is approved (else the first the
+server lets chat, App.chat_token), asking for what
 came after the newest message it got (the server keeps a week of them), and sends with
 ``/v1/chat/send`` naming its stream. A message is kept with its id, so one given again (what this
 account sent from another computer, or a stream that broke) is not kept twice.
@@ -153,7 +154,7 @@ class Chat:
         with self.lock:
             conn = self.conn
         if token is None:
-            raise ValueError("账号审批通过、登录过游戏后才能群聊")
+            raise ValueError("账号还没通过服务器检查，稍后再试")
         if conn is None:
             raise ValueError("群聊还没连上，稍等一下")
         try:

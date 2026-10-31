@@ -947,7 +947,7 @@ const CHAT_STATES = {
   online: (c) => [c.online != null ? `在线 ${c.online} 人` : '已连接', ''],
   connecting: () => ['连接中…', ''],
   offline: (c) => [c.error || '连不上群聊，稍后自动重连', 'err'],
-  unavailable: () => ['账号审批通过、登录过游戏后才能群聊', 'err'],
+  unavailable: () => ['添加 Token 后，服务器确认了就能群聊', 'err'],
 };
 function chatClock(seconds) {
   const date = new Date(seconds * 1000), now = new Date();

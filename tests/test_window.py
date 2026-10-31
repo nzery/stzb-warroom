@@ -584,6 +584,20 @@ class PageServerTests(unittest.TestCase):
         view = json.loads(self.request("GET", f"/api/state?c={last}", self.cookie())[2])["chat"]
         self.assertEqual([m["text"] for m in view["messages"]], ["39"])
 
+    def test_the_chat_uses_an_approved_role_first_else_whichever_the_server_lets_chat(self):
+        tokens = ["sta_" + c * 43 for c in "abc"]
+        with self.app.lock:
+            self.app.tokens[:] = tokens
+            self.app.accounts.clear()
+        self.assertIsNone(self.app.chat_token())  # nothing checked yet
+        with self.app.lock:
+            self.app.accounts.update({tokens[0]: {"state": "invalid", "chat": True},
+                                      tokens[1]: {"state": "pending", "chat": True}, tokens[2]: {"state": "no_role"}})
+        self.assertEqual(self.app.chat_token(), tokens[1])  # not bound yet: chats when the server says so
+        with self.app.lock:
+            self.app.accounts[tokens[2]] = {"state": "ok", "chat": True}
+        self.assertEqual(self.app.chat_token(), tokens[2])
+
     def test_the_window_is_electron_from_source_too(self):
         with unittest.mock.patch.dict("os.environ", {"ST_ELECTRON": "/opt/electron/electron"}):
             command = winsys.window_command()

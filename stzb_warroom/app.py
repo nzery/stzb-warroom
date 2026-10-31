@@ -15,7 +15,7 @@ The 玩家信息 page (any player, looked up by name: union, main city, armies) 
 as it comes, the name typed, the page's filters and page number passed along unread.
 
 The 群聊 page (chat.py) runs from the start to the end of the program, captured or not, with
-the first account whose role is approved.
+the first account whose role is approved, else the first the server lets chat.
 """
 
 import collections
@@ -650,10 +650,13 @@ class App:
         return show
 
     def chat_token(self):
-        """The token the chat uses: the first one whose role is approved, else None."""
+        """The token the chat uses: the first one whose role is approved, else the first the
+        server lets chat (``chat`` in its status: one not bound to a role yet too), else None."""
         with self.lock:
-            return next((token for token in self.tokens
-                         if (self.accounts.get(token) or {}).get("state") == "ok"), None)
+            accounts = [self.accounts.get(token) or {} for token in self.tokens]
+            return next((token for token, value in zip(self.tokens, accounts) if value.get("state") == "ok"),
+                        next((token for token, value in zip(self.tokens, accounts)
+                              if value.get("chat") is True and value.get("state") != "invalid"), None))
 
     # capture ------------------------------------------------------------------------
 
