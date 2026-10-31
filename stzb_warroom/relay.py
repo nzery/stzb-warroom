@@ -49,6 +49,10 @@ MAX_HANDLERS = 2 * MAX_PIPES  # orders being handled at once; more are dropped (
 # this one by it when it reconnects (another computer gets 409 until this one is gone).
 INSTANCE = uuid.uuid4().hex
 BUSY_WAIT = 60  # seconds between two tries while another computer serves the phone
+# ST_RELAY_STANDBY=1: this computer only stands in for the player's own one. The relay gives it the
+# phone's game connections while no other computer serves the token, and the other again once it is
+# back (a server kept running for when the home computer is off).
+STANDBY = os.environ.get("ST_RELAY_STANDBY") == "1"
 
 
 class Refused(Exception):
@@ -434,8 +438,10 @@ class Exit:
         wait = 2
         while not self.stop.is_set():
             try:
-                self.control = WebSocket(self.origin + "/relay/agent", {"Authorization": self.auth,
-                                                                        "X-Relay-Agent": INSTANCE})
+                headers = {"Authorization": self.auth, "X-Relay-Agent": INSTANCE}
+                if STANDBY:
+                    headers["X-Relay-Standby"] = "1"
+                self.control = WebSocket(self.origin + "/relay/agent", headers)
                 self.control.sock.settimeout(CONTROL_TIMEOUT)
                 self._state("online")
                 self.log(event="relay_connected", relay=self.origin)
