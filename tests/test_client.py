@@ -6,6 +6,7 @@ import sqlite3
 import struct
 import tempfile
 import threading
+import time
 import unittest
 import unittest.mock
 import zlib
@@ -13,6 +14,7 @@ from pathlib import Path
 from urllib.error import HTTPError
 
 from stzb_warroom import api, vault, winsys
+from stzb_warroom import capture as capturemod
 from stzb_warroom.capture import Capture, command_folder, find_dumpcap
 from stzb_warroom.frames import Splitter, body
 from stzb_warroom.notify import Follower, follow_prompts, render
@@ -388,6 +390,66 @@ class NotifyTests(unittest.TestCase):
                 shown = []
                 follow_prompts(server, "t", stop, show=lambda text, ask: shown.append(text))
                 self.assertEqual(shown, ["x", None])
+
+class FollowTests(unittest.TestCase):
+    """The computer moves to another network: the capture moves with it."""
+
+    def capture(self, route=("eth0", "10.0.0.1")):
+        capture = Capture(lambda *_: None, dumpcap="dumpcap")
+        capture.route, capture.interface, capture.hosts = route, route[0], [route[1]]
+        capture.route_checked = time.monotonic() - capturemod.ROUTE_EVERY
+        capture.ran = []
+
+        def run(settle=0):
+            capture.ran.append((capture.interface, list(capture.hosts)))
+            if capture.interface in getattr(capture, "broken", ()):
+                raise RuntimeError("dumpcap did not start capturing")
+        capture._run = run
+        capture.close = unittest.mock.Mock()
+        return capture
+
+    def follow(self, capture, route):
+        with unittest.mock.patch.object(capturemod, "default_interface", **route):
+            capture.follow()
+
+    def test_a_new_route_restarts_dumpcap_on_its_adapter(self):
+        capture = self.capture()
+        self.follow(capture, {"return_value": ("wlan0", "192.168.1.5")})
+        capture.close.assert_called_once()
+        self.assertEqual(capture.ran, [("wlan0", ["192.168.1.5"])])
+        self.assertEqual(capture.route, ("wlan0", "192.168.1.5"))
+
+    def test_the_same_route_changes_nothing_and_is_not_looked_at_every_second(self):
+        capture = self.capture()
+        self.follow(capture, {"return_value": ("eth0", "10.0.0.1")})
+        self.assertEqual(capture.ran, [])
+        with unittest.mock.patch.object(capturemod, "default_interface") as look:
+            capture.follow()
+        look.assert_not_called()
+
+    def test_no_route_for_now_keeps_the_capture(self):
+        capture = self.capture()
+        self.follow(capture, {"side_effect": OSError("network unreachable")})
+        capture.close.assert_not_called()
+        self.assertEqual(capture.route, ("eth0", "10.0.0.1"))
+
+    def test_an_adapter_dumpcap_cannot_use_goes_back_and_is_not_tried_again(self):
+        capture = self.capture()
+        capture.broken = ("tun0",)
+        self.follow(capture, {"return_value": ("tun0", "172.16.0.2")})
+        self.assertEqual(capture.ran, [("tun0", ["172.16.0.2"]), ("eth0", ["10.0.0.1"])])
+        self.assertEqual(capture.interface, "eth0")
+        capture.route_checked -= capturemod.ROUTE_EVERY
+        self.follow(capture, {"return_value": ("tun0", "172.16.0.2")})
+        self.assertEqual(len(capture.ran), 2)
+
+    def test_an_adapter_asked_for_by_name_stays(self):
+        capture = Capture(lambda *_: None, interface="eth0", dumpcap="dumpcap")
+        capture.route_checked = time.monotonic() - capturemod.ROUTE_EVERY
+        with unittest.mock.patch.object(capturemod, "default_interface") as look:
+            capture.follow()
+        look.assert_not_called()
+
 
 class LocalTests(unittest.TestCase):
     def test_capture_close_waits_for_buffered_packets(self):

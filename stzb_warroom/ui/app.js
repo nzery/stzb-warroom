@@ -277,7 +277,8 @@ function captureView(d) {
   const c = d.capture;
   if (!d.tokens.length) return { cls: 'idle', icon: 'user', title: '还没有添加账号', desc: '添加管理员发给你的 Token 后就能开始上报。', dot: '', side: '未开始' };
   switch (c.state) {
-    case 'running': return { cls: '', icon: 'wave', title: '正在上报', desc: `已运行 ${duration(Date.now() / 1000 - c.since)}。玩游戏时保持程序开着，可以最小化这个窗口。`, dot: 'run', side: '上报中' };
+    case 'running': if (d.phone?.blind) return { cls: 'wait', icon: 'alert', title: '手机的游戏数据没有抓到', desc: '手机正在经这台电脑玩游戏，但电脑没抓到数据，战报不会上传。点“暂停上报”再开始试试；开着 VPN 或代理的话先关掉。', dot: 'wait', side: '没抓到数据' };
+      return { cls: '', icon: 'wave', title: '正在上报', desc: `已运行 ${duration(Date.now() / 1000 - c.since)}。玩游戏时保持程序开着，可以最小化这个窗口。`, dot: 'run', side: '上报中' };
     case 'starting': return { cls: 'wait', icon: 'clock', title: '正在启动…', desc: '正在启动网络组件。', dot: 'wait', side: '启动中' };
     case 'stopping': return { cls: 'wait', icon: 'clock', title: '正在停止…', desc: '正在把没上传完的数据保存好。', dot: 'wait', side: '停止中' };
     case 'error': return { cls: 'err', icon: 'alert', title: '上报已停止', desc: c.hint || c.error || '', dot: 'err', side: '出错' };

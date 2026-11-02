@@ -344,6 +344,20 @@ class AppTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "没有这个账号"):
             app.phone(5)
 
+    def test_the_phone_game_flowing_with_nothing_captured_shows(self):
+        app = self.app(saved=GOOD)
+        now = time.monotonic()
+        moving = unittest.mock.Mock(origin="https://r.example", state="online", since=1.0, open_pipes=1)
+        uploader = unittest.mock.Mock()
+        app.session = {"stop": threading.Event(), "tokens": [GOOD], "exits": [moving], "uploader": uploader}
+        for heard, flowing, blind in ((now - 300, 300, True), (now, 300, False),  # captured just now
+                                      (now - 300, 5, False),  # the game has only just started
+                                      (now - 300, 0, False)):  # in the background: nothing to capture
+            uploader.heard_at = heard
+            moving.moving_for.return_value = flowing
+            self.assertEqual(app._phone_status()["blind"], blind)
+        app.session = None
+
     def test_the_phone_exit_is_off_until_asked_and_follows_the_capture(self):
         app = self.app(saved=GOOD)
         self.assertFalse(app.snapshot()["settings"]["phone_exit"])

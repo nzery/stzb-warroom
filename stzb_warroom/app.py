@@ -47,6 +47,7 @@ PHONE = "/v1/client/phone"
 RELAYS_EVERY = 60  # seconds between two asks for the relays while none is known
 RELAYS_REFRESH = 600  # and once there are some (a token approved or moved since: more relays)
 UPDATE_EVERY = 6 * 3600
+BLIND_AFTER = 60  # seconds of the phone's game flowing with no packet captured before the window says so
 HINTS = (  # what a player can do about a capture failure, from its text
     ("another capture process", "已经有一个程序在上报（可能是另一个窗口），先关掉它。"),
     ("401", "所有 Token 都无效：到“账号与推送”检查 Token。"),
@@ -545,7 +546,10 @@ class App:
     def _phone_status(self):
         session = self.session
         exits = (session or {}).get("exits") or []
+        uploader = (session or {}).get("uploader")
         return {"enabled": self.settings["phone_exit"], "running": session is not None,
+                "blind": bool(uploader and time.monotonic() - uploader.heard_at >= BLIND_AFTER
+                              and any(e.moving_for() >= BLIND_AFTER for e in exits)),
                 "waiting": bool(session and self.settings["phone_exit"] and not exits),
                 "exits": [{"relay": e.origin.removeprefix("https://"), "state": e.state, "since": e.since,
                            "pipes": e.open_pipes} for e in exits]}

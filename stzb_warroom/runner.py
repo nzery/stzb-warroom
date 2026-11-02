@@ -53,6 +53,7 @@ def run_capture(server, tokens, folder, stop, interface=None, all_hosts=False, d
                 started(uploader)
             while not stop.wait(1):
                 source.check()
+                source.follow()
         finally:
             stop.set()
             source.close()

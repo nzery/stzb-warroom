@@ -41,6 +41,7 @@ CHECK_BYTES = 256 * 1024
 CHECK_STRIKES = 5
 MAX_PIPES = 8
 STOP_CHECK = 1  # seconds between a game connection's looks at whether the exit was closed
+MOVING_GAP = 30  # seconds without data from the game that count as a pause (a game in the background)
 CONTROL_TIMEOUT = 90  # the relay pings every 25 s
 NAT64 = ipaddress.ip_network("64:ff9b::/96")
 SIX_TO_FOUR = ipaddress.ip_network("2002::/16")
@@ -429,6 +430,7 @@ class Exit:
         self.stop = threading.Event()
         self.control = None
         self.state, self.since = "connecting", time.time()
+        self.moved_at = self.moving_since = -MOVING_GAP  # when the game last sent data, since when without a pause
 
     def _state(self, state):
         if state != self.state:
@@ -476,6 +478,11 @@ class Exit:
     @property
     def open_pipes(self):
         return len(self.games)
+
+    def moving_for(self):
+        """Seconds the game has been sending data here without a pause (a game in the background sends nothing)."""
+        now = time.monotonic()
+        return now - self.moving_since if now - self.moved_at < MOVING_GAP else 0
 
     def close(self):
         """Stop: the connection to the relay and every game connection made through it (the
@@ -600,6 +607,10 @@ class Exit:
                         if not data:
                             return
                         down += len(data)
+                        now = time.monotonic()
+                        if now - self.moved_at >= MOVING_GAP:
+                            self.moving_since = now
+                        self.moved_at = now
                         pipe.send(data)
                         continue
                     message = pipe.recv()

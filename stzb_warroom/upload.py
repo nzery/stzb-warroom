@@ -207,6 +207,7 @@ class Uploader:
         self.error = None
         self.uploaded_at = None  # time of the last acknowledged batch
         self.uploaded = 0  # rows acknowledged since the start
+        self.heard_at = time.monotonic()  # the last packet captured
         # Called when the server names a stream's role the first time (a login just claimed it, or
         # a waiting token was approved): the window looks at the accounts at once instead of
         # showing "waiting" for up to a minute (2026-10-23: a player removed the token just
@@ -216,6 +217,7 @@ class Uploader:
     # capture thread -----------------------------------------------------------------
 
     def on_packet(self, captured_at, linktype, packet):
+        self.heard_at = time.monotonic()
         for ends, at, client, frame in self.splitter.feed(captured_at, linktype, packet):
             if message_id(frame, client) in self.drop["client" if client else "server"]:
                 continue

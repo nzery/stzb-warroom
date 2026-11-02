@@ -276,6 +276,17 @@ class RobustnessTests(unittest.TestCase):
         self.assertTrue(exit_.handlers.acquire(blocking=False))  # released
 
 
+class MovingTests(unittest.TestCase):
+    def test_moving_for_counts_from_the_last_pause(self):
+        exit_ = relay.Exit("https://relay.example", ["t"], log=lambda **fields: None)
+        self.assertEqual(exit_.moving_for(), 0)
+        now = time.monotonic()
+        exit_.moving_since, exit_.moved_at = now - 100, now - 1
+        self.assertGreaterEqual(exit_.moving_for(), 100)
+        exit_.moved_at = now - relay.MOVING_GAP - 1
+        self.assertEqual(exit_.moving_for(), 0)
+
+
 class TLSTests(unittest.TestCase):
     def test_records_already_received_are_pending(self):
         # 2026-10-16: the relay's 101 answer and the phone's first message (90008, 57 bytes) came in

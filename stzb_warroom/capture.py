@@ -15,11 +15,14 @@ import shutil
 import socket
 import subprocess
 import threading
+import time
 from pathlib import Path
 
 from .pcap import read_timed_packets
 
 GAME_PORT = 8001
+ROUTE_EVERY = 15  # seconds between two looks at which adapter the default route uses
+SETTLE = 2  # dumpcap says "Capturing on" even for an adapter it then fails on: seconds to see that
 UNINSTALL = r"SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall"
 APP_PATH = r"SOFTWARE\Microsoft\Windows\CurrentVersion\App Paths\Wireshark.exe"
 
@@ -150,6 +153,9 @@ class Capture:
 
     def __init__(self, on_packet, interface=None, all_hosts=False, dumpcap=None):
         self.on_packet, self.interface, self.all_hosts, self.dumpcap = on_packet, interface, all_hosts, dumpcap
+        self.follows_route = interface is None  # an adapter asked for by name stays
+        self.route, self.hosts = None, []
+        self.route_checked = time.monotonic()
         self.process = None
         self.error = None
         self.stderr = collections.deque(maxlen=20)
@@ -164,13 +170,19 @@ class Capture:
         elif not Path(self.dumpcap).is_file():
             raise RuntimeError(f"dumpcap not found at {self.dumpcap}; install Wireshark or pass --dumpcap")
         print(f"dumpcap: {self.dumpcap}", flush=True)
-        if self.interface:
-            hosts = interface_addresses(self.interface) if os.name != "nt" else []
+        if self.follows_route:
+            self.route = default_interface()
+            self.interface, self.hosts = self.route[0], [self.route[1]]
         else:
-            self.interface, local_ip = default_interface()
-            hosts = [local_ip]
-        bpf = capture_filter(GAME_PORT, () if self.all_hosts else hosts)
+            self.hosts = interface_addresses(self.interface) if os.name != "nt" else []
+        self._run(timeout)
+
+    def _run(self, timeout=15, settle=0):
+        """Start dumpcap on self.interface and self.hosts; RuntimeError if it does not run for `settle` seconds."""
+        bpf = capture_filter(GAME_PORT, () if self.all_hosts else self.hosts)
         print(f"capture interface: {self.interface} filter: {bpf}", flush=True)
+        self.error = None
+        self.stderr.clear()
         self.process = subprocess.Popen([self.dumpcap, "-q", "-i", self.interface, "-f", bpf, "-w", "-"],
                                         stdout=subprocess.PIPE, stderr=subprocess.PIPE,
                                         creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
@@ -182,6 +194,41 @@ class Capture:
         if not ready.wait(timeout) or self.process.poll() is not None:
             self.close()
             raise RuntimeError("dumpcap did not start capturing: " + " | ".join(self.stderr))
+        try:
+            self.process.wait(settle)
+        except subprocess.TimeoutExpired:
+            return
+        self.close()
+        raise RuntimeError("dumpcap stopped: " + " | ".join(self.stderr))
+
+    def follow(self):
+        """Capture on the adapter of the default route when the computer moved to another network.
+
+        The game connections made from now on leave through it (2026-11-02: a computer moving
+        between two networks kept relaying the phone's game with nothing captured for 20 minutes,
+        the window still saying it was reporting). No route for now: stay until there is one.
+        An adapter dumpcap cannot capture on (some VPNs): back to the one that worked.
+        """
+        now = time.monotonic()
+        if not self.follows_route or now - self.route_checked < ROUTE_EVERY:
+            return
+        self.route_checked = now
+        try:
+            route = default_interface()
+        except (OSError, RuntimeError, ValueError, subprocess.SubprocessError):
+            return
+        if route == self.route:
+            return
+        self.route = route  # tried once, whatever comes of it
+        working = self.interface, self.hosts
+        self.close()
+        self.interface, self.hosts = route[0], [route[1]]
+        try:
+            self._run(settle=SETTLE)
+        except (OSError, RuntimeError) as exc:
+            print(f"cannot capture on {route[0]}: {exc}", flush=True)
+            self.interface, self.hosts = working
+            self._run()
 
     def _read_stderr(self, ready):
         for raw in self.process.stderr:
