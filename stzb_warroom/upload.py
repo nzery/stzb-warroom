@@ -28,6 +28,9 @@ MAX_ROWS = 100  # per request, as the server takes them
 MAX_BODY = 3 * 1024 * 1024
 MAX_QUEUED = 50000
 LINK_IDLE = 3600  # a connection unseen this long is forgotten
+PLAYING_WITHIN = 300  # a packet this recent when the network changed: a game was being captured
+LOST_AFTER = 60  # seconds after the change with nothing captured before the window says so
+LOST_FOR = 600  # and until when: by then the game was more likely closed
 WAIT_FIRST, WAIT_MAX = 15, 300  # a held-back stream is tried again after this, doubling up to the max
 
 
@@ -208,6 +211,8 @@ class Uploader:
         self.uploaded_at = None  # time of the last acknowledged batch
         self.uploaded = 0  # rows acknowledged since the start
         self.heard_at = time.monotonic()  # the last packet captured
+        self.heard = False  # any packet at all since the start
+        self.moved_at = None  # when the computer changed network while a game was being captured
         # Called when the server names a stream's role the first time (a login just claimed it, or
         # a waiting token was approved): the window looks at the accounts at once instead of
         # showing "waiting" for up to a minute (2026-10-23: a player removed the token just
@@ -216,8 +221,25 @@ class Uploader:
 
     # capture thread -----------------------------------------------------------------
 
+    def network_moved(self):
+        """The computer changed network; only counts when a game was being captured just before."""
+        now = time.monotonic()
+        if self.heard and now - self.heard_at <= PLAYING_WITHIN:
+            self.moved_at = now
+
+    def lost_after_move(self):
+        """A game was being captured, the computer changed network and nothing was captured since.
+
+        Without the phone's relay nothing tells a game that went quiet from a game not captured,
+        so this asks the player only for a while after the move (the game may have been closed).
+        """
+        if self.moved_at is None or self.heard_at >= self.moved_at:
+            return False
+        return LOST_AFTER <= time.monotonic() - self.moved_at <= LOST_FOR
+
     def on_packet(self, captured_at, linktype, packet):
         self.heard_at = time.monotonic()
+        self.heard = True
         for ends, at, client, frame in self.splitter.feed(captured_at, linktype, packet):
             if message_id(frame, client) in self.drop["client" if client else "server"]:
                 continue

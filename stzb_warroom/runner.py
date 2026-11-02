@@ -51,9 +51,15 @@ def run_capture(server, tokens, folder, stop, interface=None, all_hosts=False, d
             thread.start()
             if started:
                 started(uploader)
+            told = False
             while not stop.wait(1):
                 source.check()
-                source.follow()
+                if source.follow():
+                    uploader.network_moved()
+                    told = False
+                if not told and uploader.lost_after_move():
+                    told = True
+                    print("network changed and no game packet captured since", flush=True)
         finally:
             stop.set()
             source.close()

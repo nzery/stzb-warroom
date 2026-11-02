@@ -165,7 +165,7 @@ class App:
                      "connections": uploader.connections() if uploader else 0}
             return {
                 "version": self.version, "app_version": __version__, "server": self.server.origin, "site": site(),
-                "capture": dict(self.capture), "stats": stats,
+                "capture": dict(self.capture, lost=bool(uploader and uploader.lost_after_move())), "stats": stats,
                 "tokens": [self._account(token) for token in self.tokens],
                 "hints": [dict(hint, token=mask(token)) for token, hint in self.hints.items()],
                 "notices": [n for n in self.notices if n["seq"] > notices_after],

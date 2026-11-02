@@ -358,6 +358,19 @@ class AppTests(unittest.TestCase):
             self.assertEqual(app._phone_status()["blind"], blind)
         app.session = None
 
+    def test_a_game_lost_after_the_network_changed_shows(self):
+        app = self.app(saved=GOOD)
+        self.assertFalse(app.snapshot()["capture"]["lost"])  # not capturing
+        uploader = unittest.mock.Mock(uploaded=0, uploaded_at=None)
+        uploader.connections.return_value = 0
+        uploader.queue.pending.return_value = 0
+        app.session = {"stop": threading.Event(), "tokens": [GOOD], "exits": [], "uploader": uploader}
+        uploader.heard_at = time.monotonic()
+        for lost in (True, False):
+            uploader.lost_after_move.return_value = lost
+            self.assertEqual(app.snapshot()["capture"]["lost"], lost)
+        app.session = None
+
     def test_the_phone_exit_is_off_until_asked_and_follows_the_capture(self):
         app = self.app(saved=GOOD)
         self.assertFalse(app.snapshot()["settings"]["phone_exit"])

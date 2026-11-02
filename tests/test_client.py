@@ -414,10 +414,35 @@ class FollowTests(unittest.TestCase):
 
     def test_a_new_route_restarts_dumpcap_on_its_adapter(self):
         capture = self.capture()
-        self.follow(capture, {"return_value": ("wlan0", "192.168.1.5")})
+        with unittest.mock.patch.object(capturemod, "default_interface", return_value=("wlan0", "192.168.1.5")):
+            self.assertTrue(capture.follow())
         capture.close.assert_called_once()
         self.assertEqual(capture.ran, [("wlan0", ["192.168.1.5"])])
         self.assertEqual(capture.route, ("wlan0", "192.168.1.5"))
+
+    def test_a_game_lost_after_the_network_changed_is_told_for_a_while(self):
+        folder = tempfile.TemporaryDirectory()
+        self.addCleanup(folder.cleanup)
+        queue = Queue(Path(folder.name) / "q.sqlite")
+        self.addCleanup(queue.close)
+        uploader = Uploader(queue, FakeServer([]), ["t"], log=lambda **_: None)
+        now = time.monotonic()
+
+        uploader.network_moved()  # started just now, nothing captured yet: no game was seen
+        self.assertIsNone(uploader.moved_at)
+        uploader.heard, uploader.heard_at = True, now - 1000
+        uploader.network_moved()  # the game had long gone quiet
+        self.assertIsNone(uploader.moved_at)
+
+        uploader.heard_at = now - 10
+        uploader.network_moved()
+        for since, lost in ((5, False), (120, True), (2000, False)):  # too soon, told, given up
+            uploader.moved_at = now - since
+            uploader.heard_at = uploader.moved_at - 10
+            self.assertEqual(uploader.lost_after_move(), lost, since)
+        uploader.moved_at = now - 120
+        uploader.heard_at = now - 5  # captured again on the new network
+        self.assertFalse(uploader.lost_after_move())
 
     def test_the_same_route_changes_nothing_and_is_not_looked_at_every_second(self):
         capture = self.capture()

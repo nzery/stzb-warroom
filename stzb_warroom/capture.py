@@ -208,17 +208,18 @@ class Capture:
         between two networks kept relaying the phone's game with nothing captured for 20 minutes,
         the window still saying it was reporting). No route for now: stay until there is one.
         An adapter dumpcap cannot capture on (some VPNs): back to the one that worked.
+        True when the route changed.
         """
         now = time.monotonic()
         if not self.follows_route or now - self.route_checked < ROUTE_EVERY:
-            return
+            return False
         self.route_checked = now
         try:
             route = default_interface()
         except (OSError, RuntimeError, ValueError, subprocess.SubprocessError):
-            return
+            return False
         if route == self.route:
-            return
+            return False
         self.route = route  # tried once, whatever comes of it
         working = self.interface, self.hosts
         self.close()
@@ -229,6 +230,7 @@ class Capture:
             print(f"cannot capture on {route[0]}: {exc}", flush=True)
             self.interface, self.hosts = working
             self._run()
+        return True
 
     def _read_stderr(self, ready):
         for raw in self.process.stderr:
