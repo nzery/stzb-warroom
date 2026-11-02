@@ -34,6 +34,9 @@ from .app import App
 UI = Path(__file__).resolve().parent / "ui"
 TITLE = "工作台"  # the page's <title>, which names the window; plain so it passes for office software (2026-10-29 user)
 OPENING = 15  # seconds a window may take to open (Electron starting) before another is opened
+BANNER_POLL = 20  # seconds a banner request waits for a notice before answering "nothing"
+BANNER_QUIET = 30  # seconds without a banner request before its window is taken to be gone
+BANNER_RETRY = 60  # seconds between tries to start the banner window
 CLOSED_AFTER = 3  # seconds without any page open before the program ends (a reload comes back sooner)
 KEEP_ALIVE = 2  # seconds between writes to a quiet events stream, which find a page that is gone
 COOKIE = "stzb_key"
@@ -78,14 +81,14 @@ class Handler(BaseHTTPRequestHandler):
         if not self.host_ok():
             return self.send(403, {"error": "forbidden"})
         url = urlsplit(self.path)
-        if url.path == "/":
+        if url.path in ("/", "/banner"):
             key = parse_qs(url.query).get("k", [""])[0]
             if key and hmac.compare_digest(key.encode(), self.server.key.encode()):
                 cookie = f"{COOKIE}={self.server.key}; Path=/; HttpOnly; SameSite=Strict"
-                return self.send(303, b"", headers=(("Location", "/"), ("Set-Cookie", cookie)))
+                return self.send(303, b"", headers=(("Location", url.path), ("Set-Cookie", cookie)))
             if not self.key_ok():
                 return self.send(403, "请双击 stzb-warroom.exe 打开窗口。", "text/plain; charset=utf-8")
-            return self.static("index.html")
+            return self.static("index.html" if url.path == "/" else "banner.html")
         if url.path.startswith("/ui/"):
             return self.static(url.path[4:])
         if not self.key_ok():
@@ -99,6 +102,15 @@ class Handler(BaseHTTPRequestHandler):
             return self.send(200, self.server.app.snapshot(*numbers))
         if url.path == "/api/events":
             return self.events(parse_qs(url.query).get("page", [""])[0] or secrets.token_hex(8))
+        if url.path == "/api/banners":
+            try:
+                after = int(parse_qs(url.query).get("after", ["-1"])[0])
+            except ValueError:
+                return self.send(400, {"error": "bad cursor"})
+            self.server.banner_asked()
+            value = self.server.app.banners_after(after, BANNER_POLL)
+            self.server.banner_asked(value["on"])
+            return self.send(200, value)
         if url.path == "/api/ping":
             return self.send(200, {"ok": True})
         if url.path == "/api/ui":  # the page's settings, read as it loads
@@ -179,6 +191,31 @@ class Window(ThreadingHTTPServer):
         self.count_lock = threading.Lock()
         self.opener, self.opened_at = None, None  # opener(): opens a window on the page
         self.show_lock = threading.Lock()
+        self.banner_opener, self.banner_seen, self.banner_tried = None, None, None
+
+    def banner_asked(self, on=True):
+        """The banner window asked for notices; told they are off, it closes."""
+        with self.count_lock:
+            self.banner_seen = time.monotonic() if on else None
+            if not on:
+                self.banner_tried = None
+
+    def keep_banner(self):
+        """Start the banner window when the player wants banners and none is asking for them: after
+        the player turned them on, at a start in the background (no window), or if it ended."""
+        if not self.banner_opener or (self.app.settings.get("ui") or {}).get("desktop") is not True:
+            return
+        now = time.monotonic()
+        with self.count_lock:
+            if self.banner_seen is not None and now - self.banner_seen < BANNER_QUIET:
+                return
+            if self.banner_tried is not None and now - self.banner_tried < BANNER_RETRY:
+                return
+            self.banner_tried = now
+        try:
+            self.banner_opener()
+        except OSError as exc:
+            self.app.log(f"桌面弹窗没有启动：{exc}", "warn")
 
     def page_open(self, page):
         with self.count_lock:
@@ -233,6 +270,7 @@ class Window(ThreadingHTTPServer):
             "bark_unbind": lambda: app.bark_unbind(int(index)),
             "bark_test": lambda: app.bark_test(int(index)),
             "set_setting": lambda: app.set_setting(body.get("name"), body.get("value")),
+            "banner_test": app.banner_test,
             "set_ui": lambda: app.set_ui(body.get("key"), body.get("value")),
             "set_notice_pref": lambda: app.set_notice_pref(body.get("key"), body.get("value")),
             "personal": lambda: app.personal(int(index), body.get("page"), body.get("query")),
@@ -316,6 +354,7 @@ def main(server, state_dir, background=False, show=None, after=None):
     app = App(server, state_dir)
     window = Window(app)
     window.opener = lambda: show(window.url, state_dir / "window")
+    window.banner_opener = lambda: winsys.open_banner(window.url, state_dir / "window")
     state_dir.mkdir(parents=True, exist_ok=True)
     shutil.rmtree(state_dir / "browser", ignore_errors=True)  # Edge's data, from before the window was Electron
     marker = state_dir / "window.json"
@@ -329,6 +368,7 @@ def main(server, state_dir, background=False, show=None, after=None):
         window.show()
     try:
         while not app.quit.wait(1):
+            window.keep_banner()
             # Started at login it stays, as does a player's choice to keep it running.
             if window.closed() and not (background or app.settings["keep_running"]):
                 window.quit()

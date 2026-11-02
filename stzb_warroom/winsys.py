@@ -92,6 +92,15 @@ def open_window(url, profile):
     webbrowser.open(url)
 
 
+def open_banner(url, profile):
+    """Start the top-of-screen banners, in the window's process when it runs (Electron only: a
+    browser could not show them above a game)."""
+    command = window_command()
+    if command:
+        _OPENED[:] = [process for process in _OPENED if process.poll() is None]
+        _OPENED.append(subprocess.Popen([*command, url, f"--profile={profile}", "--banner-only"]))
+
+
 def close_windows():
     """Close the windows this program started (it is quitting, their page goes with it)."""
     while _OPENED:

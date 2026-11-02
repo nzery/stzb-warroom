@@ -39,7 +39,7 @@ stzb-warroom/
    下载的文件留在 `build\downloads`，下次构建核对通过就不再下载。然后：
    - 解压到 `window\`，删掉 Electron 自带的默认应用，语言包只留中文和英文；
    - `electron.exe` 改名为 `stzb-window.exe`，用 rcedit 换上程序图标、名称和版本号；
-   - 把 `electron/main.js`、`electron/package.json` 和图标复制到 `window\resources\app`。
+   - 把 `electron/main.js`、`electron/banner-preload.js`、`electron/package.json` 和图标复制到 `window\resources\app`。
 4. **写配置**：把 `-Server`（默认取环境变量 `ST_SERVER`，必填）和 `-Site`（默认取 `ST_SITE`，可选）写进 exe 旁边的
    `config.json`（UTF-8，无 BOM）。地址不进源码，换服务器时也可以直接改这个文件。
 5. **复制附带文件**：`使用说明.txt`，以及 `-Include` 指定的文件。

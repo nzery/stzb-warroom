@@ -244,11 +244,6 @@ setInterval(() => {
 function announce(notice) {
   if (notice.level !== 'alarm' || notice.hidden) return;
   if (store.get('sound', true)) beep();
-  if (store.get('desktop', false) && 'Notification' in window && Notification.permission === 'granted' && document.hidden) {
-    const who = roleOf(notice);
-    const shown = new Notification(`【${notice.tag || '通知'}】${who ? who + ' · ' : ''}${notice.title || ''}`, { body: notice.body || '', tag: `n${notice.seq}` });
-    if (typeof notice.expires === 'number') setTimeout(() => shown.close(), Math.max(0, notice.expires * 1000 - Date.now()));
-  }
 }
 
 // ---------------------------------------------------------------- rendering
@@ -1177,14 +1172,13 @@ $('clear-notices').addEventListener('click', () => {
 });
 $('opt-sound').checked = store.get('sound', true);
 $('opt-sound').addEventListener('change', (e) => { store.set('sound', e.target.checked); if (e.target.checked) beep(); });
-$('opt-desktop').checked = store.get('desktop', false) && 'Notification' in window && Notification.permission === 'granted';
-$('opt-desktop').addEventListener('change', async (e) => {
-  if (e.target.checked && 'Notification' in window && Notification.permission !== 'granted') {
-    e.target.checked = (await Notification.requestPermission()) === 'granted';
-    if (!e.target.checked) toast('没有得到弹窗权限', true);
-  }
+const showDesktop = (on) => { $('opt-desktop').checked = on; $('test-desktop').classList.toggle('hidden', !on); };
+showDesktop(store.get('desktop', false));
+$('opt-desktop').addEventListener('change', (e) => {
+  showDesktop(e.target.checked);
   store.set('desktop', e.target.checked);
 });
+$('test-desktop').addEventListener('click', () => act('banner_test').catch(() => {}));
 
 document.addEventListener('change', async (event) => {
   const input = event.target.closest('[data-pref]');
@@ -1224,6 +1218,10 @@ $('copy-diag').addEventListener('click', (e) => withBusy(e.currentTarget, '收�
 document.querySelectorAll('[data-icon]').forEach((node) => { node.innerHTML = icon(node.dataset.icon); });
 // Notices are what the window is for (2026-10-14 user): it opens on them; what needs doing
 // elsewhere (an account to fix, the capture stopped) is a banner above them with a way there.
+window.addEventListener('hashchange', () => {  // a top-of-screen banner was clicked
+  const page = location.hash.slice(1);
+  if (PAGES[page] && page !== S.page) show(page);
+});
 const first = location.hash.slice(1) || 'notices';
 show(PAGES[first] ? first : 'notices');
 refresh();

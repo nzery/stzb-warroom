@@ -491,6 +491,61 @@ class PageServerTests(unittest.TestCase):
     def cookie(self):
         return {"Cookie": f"{webui.COOKIE}={self.window.key}"}
 
+    def test_banners_show_what_the_phone_gets_as_the_server_worded_it(self):
+        # 2026-11-02 user: the desktop popup did not work, and was to match the phone's.
+        app = self.app
+        app.on_notice({"title": "列表用", "level": "warn", "body": "列表正文"})  # the phone does not get this one
+        self.assertEqual(app.banners_after(-1), {"on": False, "after": 0, "items": []})
+        app.set_ui("desktop", True)
+        first = app.banners_after(-1)
+        self.assertEqual((first["on"], first["items"]), (True, []))
+        app.on_notice({"title": "列表用", "level": "warn", "expires": time.time() + 60,
+                       "banner": {"title": "敌人一", "body": "敌人二"}})
+        value = app.banners_after(first["after"])
+        self.assertEqual([(b["title"], b["body"]) for b in value["items"]], [("敌人一", "敌人二")])
+        self.assertEqual(app.banners_after(value["after"])["items"], [])
+
+    def test_a_banner_arriving_wakes_the_waiting_request(self):
+        app = self.app
+        app.set_ui("desktop", True)
+        threading.Timer(0.05, app.on_notice, ({"title": "t", "level": "warn", "banner": {"title": "到了"}},)).start()
+        began = time.monotonic()
+        self.assertEqual(app.banners_after(0, 5)["items"][0]["title"], "到了")
+        self.assertLess(time.monotonic() - began, 4)
+
+    def test_a_test_banner_waits_for_the_window_that_is_still_starting(self):
+        app = self.app
+        app.set_ui("desktop", True)
+        app.on_notice({"title": "旧", "level": "warn", "banner": {"title": "旧"}})
+        app.banner_test()
+        self.assertEqual([b["title"] for b in app.banners_after(-1)["items"]], ["【测试】桌面弹窗"])
+
+    def test_the_banner_window_is_started_when_wanted_and_not_again(self):
+        started = []
+        self.window.banner_opener = lambda: started.append(1)
+        self.window.keep_banner()
+        self.assertEqual(started, [])  # not turned on
+        self.app.set_ui("desktop", True)
+        self.window.keep_banner()
+        self.window.keep_banner()
+        self.assertEqual(started, [1])  # still starting
+        self.window.banner_asked()
+        with unittest.mock.patch.object(webui, "BANNER_RETRY", -1):
+            self.window.keep_banner()
+            self.assertEqual(started, [1])  # it is asking
+            with unittest.mock.patch.object(webui, "BANNER_QUIET", -1):
+                self.window.keep_banner()
+                self.assertEqual(started, [1, 1])  # it stopped asking: started again
+        self.window.banner_asked(False)  # told off, it closes; turned on again it starts at once
+        self.window.keep_banner()
+        self.assertEqual(started, [1, 1, 1])
+
+    def test_the_banner_page_needs_the_key_too(self):
+        response = self.request("GET", "/banner")
+        self.assertEqual(response[0], 403)
+        response = self.request("GET", "/api/banners?after=-1")
+        self.assertEqual(response[0], 403)
+
     def test_a_closed_page_is_noticed_and_a_reload_is_not(self):
         with unittest.mock.patch.object(webui, "CLOSED_AFTER", -1):  # no wait (and no clock resolution)
             self.assertFalse(self.window.closed())  # no page yet: nothing to close

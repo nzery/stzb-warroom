@@ -103,6 +103,8 @@ class App:
         self.changed = threading.Condition(self.lock)
         self.version = 0  # bumped on every change the page should fetch
         self.notices = collections.deque(maxlen=500)
+        self.banners = collections.deque(maxlen=50)  # what the top-of-screen banners show, as the server worded it
+        self.banner_seq = 0
         self.logs = collections.deque(maxlen=1000)
         # Numbers the notices and log lines; the page keeps "cleared up to" across launches, so a
         # new launch numbers on from where any earlier one stopped: counting from 0 again hid every
@@ -623,7 +625,41 @@ class App:
         with self.lock:
             self.seq += 1
             self.notices.append(dict(notice, seq=self.seq, time=notice.get("time") or time.time()))
+            if isinstance(notice.get("banner"), dict):
+                self._add_banner(notice["banner"], notice.get("expires"))
         self.touch()
+
+    def _add_banner(self, banner, expires=None, test=False):
+        self.banner_seq += 1
+        self.banners.append({"seq": self.banner_seq, "title": str(banner.get("title") or ""),
+                             "body": str(banner.get("body") or ""), "expires": expires, "test": test,
+                             "added": time.monotonic()})
+
+    def banner_test(self):
+        """A banner the player asked to see, that goes nowhere else."""
+        with self.lock:
+            self._add_banner({"title": "【测试】桌面弹窗", "body": "通知会这样从屏幕顶部弹出，5 秒后自动消失。"}, test=True)
+        self.touch()
+
+    def banners_after(self, after, timeout=0):
+        """{"on", "after", "items"}: the banners after `after`, waiting up to `timeout` seconds for one.
+        The first ask (a negative `after`) gets no old ones, only a test just asked for: the window
+        takes seconds to start, and it may be why it started."""
+        deadline = time.monotonic() + timeout
+        while True:
+            version = self.version
+            with self.lock:
+                on = (self.settings.get("ui") or {}).get("desktop") is True
+                if after < 0:
+                    items = [b for b in self.banners if b["test"] and time.monotonic() - b["added"] < 30]
+                else:
+                    items = [b for b in self.banners if b["seq"] > after]
+                newest = self.banner_seq
+            left = deadline - time.monotonic()
+            if items or not on or after < 0 or left <= 0 or self.quit.is_set():
+                return {"on": on, "after": newest,
+                        "items": [{key: b[key] for key in ("seq", "title", "body", "expires")} for b in items]}
+            self.wait(version, left)
 
     def notify_ready(self, token):
         """Whether the token's notifications can be asked: once the account check found its role
