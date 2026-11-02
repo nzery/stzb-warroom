@@ -20,10 +20,7 @@ body { font: 14px/1.32 -apple-system, "PingFang SC", "Segoe UI", "Microsoft YaHe
 .banner img { flex: none; width: 38px; height: 38px; border-radius: 9px; margin-top: 1px; }
 .banner .text { flex: 1; min-width: 0; }
 .banner .head { display: flex; align-items: baseline; gap: 8px; }
-.banner b { flex: 1; min-width: 0; color: var(--title); font-weight: 600; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+.banner b { flex: 1; min-width: 0; color: var(--title); font-weight: 600; overflow-wrap: anywhere; }
 .banner time { flex: none; color: var(--when); font-size: 12px; }
-.banner p {
-  margin: 1px 0 0; color: var(--text); white-space: pre-line; overflow-wrap: anywhere;
-  display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 4; overflow: hidden;
-}
+.banner p { margin: 1px 0 0; color: var(--text); white-space: pre-line; overflow-wrap: anywhere; }  /* all of it: the server keeps it short */
 .banner p:empty { display: none; }

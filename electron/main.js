@@ -11,7 +11,7 @@ const { app, BrowserWindow, Menu, ipcMain, screen, shell } = require('electron')
 const path = require('path');
 
 const PAGE = /^http:\/\/127\.0\.0\.1:\d+\//;
-const BANNER_WIDTH = 440;  // with the room for the shadow; the page's css has the card's width
+const BANNER_WIDTH = 640;  // with the room for the shadow (2026-11-02 user: 440 was too narrow for the text)
 const args = process.argv.slice(1);
 let pageUrl = args.find((arg) => PAGE.test(arg));
 const profile = (args.find((arg) => arg.startsWith('--profile=')) || '').slice('--profile='.length);
