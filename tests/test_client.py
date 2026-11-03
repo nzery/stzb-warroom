@@ -17,6 +17,7 @@ from stzb_warroom import api, vault, winsys
 from stzb_warroom import capture as capturemod
 from stzb_warroom.capture import Capture, command_folder, find_dumpcap
 from stzb_warroom.frames import Splitter, body
+from stzb_warroom.pcap import tcp_segment
 from stzb_warroom.notify import Follower, follow_prompts, render
 from stzb_warroom.runner import lock
 from stzb_warroom.upload import Queue, Uploader, battle_reports
@@ -474,6 +475,98 @@ class FollowTests(unittest.TestCase):
         with unittest.mock.patch.object(capturemod, "default_interface") as look:
             capture.follow()
         look.assert_not_called()
+
+
+class DialUpTests(unittest.TestCase):
+    """A computer dialing its own broadband: Npcap cannot open that connection, the network card shows it in PPPoE."""
+
+    ROUTE = (r"\\Device\\NPF_{AAAA}", "100.64.0.7")
+    CARDS = [r"\\Device\\NPF_{BBBB}", r"\\Device\\NPF_{CCCC}"]
+
+    def capture(self, opens):
+        """`opens(interface, pppoe)` says whether dumpcap keeps running on that choice."""
+        capture = Capture(lambda *_: None, dumpcap="dumpcap")
+        capture.ran = []
+
+        def run(timeout=15, settle=0):
+            capture.ran.append((capture.interface, capture.pppoe))
+            if not opens(capture.interface, capture.pppoe):
+                raise RuntimeError("dumpcap stopped: Error opening adapter")
+        capture._run = run
+        return capture
+
+    def test_the_route_is_used_when_it_can_be_captured_on(self):
+        capture = self.capture(lambda *_: True)
+        with unittest.mock.patch.object(capturemod, "network_cards") as cards:
+            capture._open(self.ROUTE)
+        cards.assert_not_called()
+        self.assertEqual(capture.ran, [(self.ROUTE[0], False)])
+        self.assertEqual(capture.hosts, ["100.64.0.7"])
+
+    def test_a_dial_up_connection_is_read_on_every_network_card(self):
+        capture = self.capture(lambda _interface, pppoe: pppoe)
+        with unittest.mock.patch.object(capturemod, "network_cards", return_value=self.CARDS):
+            capture._open(self.ROUTE)
+        self.assertEqual(capture.interface, tuple(self.CARDS))
+        self.assertTrue(capture.pppoe)
+        self.assertEqual(capture.hosts, ["100.64.0.7"])  # the dial-up address, seen inside the PPPoE packets
+
+    def test_a_card_that_cannot_be_opened_does_not_stop_the_other(self):
+        capture = self.capture(lambda interface, pppoe: pppoe and interface == (self.CARDS[1],))
+        with unittest.mock.patch.object(capturemod, "network_cards", return_value=self.CARDS):
+            capture._open(self.ROUTE)
+        self.assertEqual(capture.interface, (self.CARDS[1],))
+
+    def test_nothing_to_capture_on_says_so_for_the_window(self):
+        capture = self.capture(lambda *_: False)
+        with unittest.mock.patch.object(capturemod, "network_cards", return_value=self.CARDS):
+            with self.assertRaisesRegex(RuntimeError, "cannot capture on the network adapter"):
+                capture._open(self.ROUTE)
+        with unittest.mock.patch.object(capturemod, "network_cards", return_value=[]):
+            with self.assertRaisesRegex(RuntimeError, "Error opening adapter"):
+                capture._open(self.ROUTE)
+
+    def test_a_network_change_back_to_a_working_dial_up_keeps_its_filter(self):
+        capture = self.capture(lambda interface, _pppoe: interface == (self.CARDS[0],))
+        capture.route, capture.hosts, capture.interface, capture.pppoe = self.ROUTE, ["100.64.0.7"], (self.CARDS[0],), True
+        capture.route_checked = time.monotonic() - capturemod.ROUTE_EVERY
+        capture.close = unittest.mock.Mock()
+        with unittest.mock.patch.object(capturemod, "default_interface", return_value=("tun0", "172.16.0.2")), \
+                unittest.mock.patch.object(capturemod, "network_cards", return_value=[]):
+            self.assertTrue(capture.follow())
+        self.assertEqual((capture.interface, capture.hosts, capture.pppoe), ((self.CARDS[0],), ["100.64.0.7"], True))
+
+    def test_the_filter_looks_inside_pppoe(self):
+        self.assertEqual(capturemod.capture_filter(8001, ["100.64.0.7"], pppoe=True),
+                         "pppoes and tcp port 8001 and (host 100.64.0.7)")
+        self.assertEqual(capturemod.capture_filter(8001, ["10.0.0.1"]), "tcp port 8001 and (host 10.0.0.1)")
+
+    def test_pppoe_packets_are_parsed_and_other_ppp_is_not(self):
+        tcp = struct.pack(">HHIIBBHHH", 50000, 8001, 7, 0, 5 << 4, 0x18, 1000, 0, 0) + b"data"
+        ip = struct.pack(">BBHHHBBH4s4s", 0x45, 0, 20 + len(tcp), 1, 0, 64, 6, 0,
+                         bytes([100, 64, 0, 7]), bytes([10, 0, 0, 9])) + tcp
+        session = b"\x11\x00\x00\x01" + struct.pack(">H", len(ip) + 2)
+        ethernet = b"\x00" * 12 + b"\x88\x64" + session
+        segment = tcp_segment(1, ethernet + b"\x00\x21" + ip + b"\x00" * 6)  # with Ethernet padding
+        self.assertEqual(segment[:5], ("100.64.0.7", 50000, "10.0.0.9", 8001, 7))
+        self.assertEqual(segment[6], b"data")
+        self.assertIsNone(tcp_segment(1, ethernet + b"\xc0\x21" + ip))  # link control, not IP
+        self.assertIsNone(tcp_segment(1, ethernet))
+
+    def test_only_real_network_cards_are_tried(self):
+        for device in (r"PCI\VEN_10EC&DEV_8168\01", r"USB\VID_0BDA\00"):
+            self.assertTrue(capturemod.is_hardware(device))
+        for device in (r"ROOT\NET\0000", r"SWD\MSRRAS\MS_PPPOEMINIPORT", r"BTH\MS_BTHPAN\7", "", None):
+            self.assertFalse(capturemod.is_hardware(device))
+
+    def test_dumpcap_lists_and_counts_are_read(self):
+        listing = "1. \\Device\\NPF_{BBBB} (以太网)\n2. \\Device\\NPF_Loopback (Adapter)\n".encode()
+        with unittest.mock.patch.object(capturemod.subprocess, "run", return_value=unittest.mock.Mock(stdout=listing)):
+            self.assertEqual(capturemod.listed_interfaces("dumpcap"), [r"\Device\NPF_{BBBB}", r"\Device\NPF_Loopback"])
+        self.assertEqual(capturemod.adapter_guid(r"\Device\NPF_{bbbb-1}"), "{BBBB-1}")
+        counted = unittest.mock.Mock(stderr=b"Capturing on 'x'\nFile: -\nPackets captured: 57\n")
+        with unittest.mock.patch.object(capturemod.subprocess, "run", return_value=counted):
+            self.assertEqual(capturemod.count_pppoe("dumpcap", "x"), 57)
 
 
 class LocalTests(unittest.TestCase):

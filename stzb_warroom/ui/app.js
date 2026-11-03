@@ -330,7 +330,7 @@ function renderBanners(d) {
   if (!d.tokens.length) parts.push(banner('warn', 'user', '还没有添加 Token，数据不会上传。', '<button class="btn primary" data-goto="accounts">添加账号</button>'));
   // On the overview the status card says it already.
   if (d.capture.state === 'error' && S.page !== 'overview' && !(invalid.length && invalid.length === d.tokens.length)) {
-    const needWireshark = (d.capture.error || '').includes('dumpcap');
+    const needWireshark = (d.capture.error || '').includes('dumpcap not found');
     parts.push(banner('error', 'alert', `<b>上报已停止</b>：${esc(d.capture.hint || d.capture.error)}`,
       needWireshark ? '<button class="btn danger" data-goto="settings">去设置</button>' : '<button class="btn danger" data-action="start">重试</button>'));
   }
@@ -377,7 +377,7 @@ function renderOverview(d) {
   $('hero-icon').innerHTML = icon(view.icon);
   $('hero-title').textContent = view.title;
   $('hero-desc').textContent = view.desc;
-  const actions = view.cls === 'err' && (d.capture.error || '').includes('dumpcap')
+  const actions = view.cls === 'err' && (d.capture.error || '').includes('dumpcap not found')
     ? '<button class="btn primary" data-action="open_installer">安装 Wireshark</button><button class="btn" data-goto="settings">手动选择 dumpcap</button>'
     : !d.tokens.length ? '<button class="btn primary" data-goto="accounts">添加账号</button>' : '';
   if ($('hero-actions').dataset.html !== actions) { $('hero-actions').innerHTML = actions; $('hero-actions').dataset.html = actions; }

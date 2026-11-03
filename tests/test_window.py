@@ -465,6 +465,14 @@ class AppTests(unittest.TestCase):
         self.assertEqual(capture["state"], "error")
         self.assertIn("Wireshark", capture["hint"])
 
+    def test_capture_failures_get_the_hint_that_fits(self):
+        adapter = "capture failed: capture stopped: dumpcap: Error opening adapter: 找不到网络接口。"
+        self.assertIn("VPN", appmod.hint(adapter))
+        self.assertIn("VPN", appmod.hint("cannot capture on the network adapter: dumpcap stopped"))
+        self.assertIn("重新安装", appmod.hint("dumpcap stopped: The NPF driver isn't running."))
+        self.assertIn("能上网", appmod.hint("no adapter found for local address 10.0.0.1; pass --interface"))
+        self.assertIn("Npcap", appmod.hint("dumpcap did not start capturing: "))
+
     def test_newer_releases_are_noticed(self):
         app = self.app()
         with unittest.mock.patch.object(appmod.updates, "site", lambda: None):

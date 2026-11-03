@@ -35,7 +35,7 @@ from urllib.parse import urlencode
 
 from . import __version__, chat, notify, relay, update as updates, vault, winsys
 from .api import client_tokens, invite_code, site
-from .capture import find_dumpcap
+from .capture import adapter_report, find_dumpcap
 from .runner import run_capture
 
 ACCOUNT_EVERY = 60  # seconds between two looks at the accounts' status
@@ -48,10 +48,17 @@ RELAYS_EVERY = 60  # seconds between two asks for the relays while none is known
 RELAYS_REFRESH = 600  # and once there are some (a token approved or moved since: more relays)
 UPDATE_EVERY = 6 * 3600
 BLIND_AFTER = 60  # seconds of the phone's game flowing with no packet captured before the window says so
+ADAPTER_HINT = ("抓不到当前网络的数据，重装 Wireshark 通常没用：先关掉 VPN 和加速器再点重试；还不行的话，"
+                "宽带拨号的电脑可以改用路由器或光猫拨号，或者把“诊断”页的诊断信息发给管理员。")
 HINTS = (  # what a player can do about a capture failure, from its text
     ("another capture process", "已经有一个程序在上报（可能是另一个窗口），先关掉它。"),
     ("401", "所有 Token 都无效：到“账号与推送”检查 Token。"),
     ("dumpcap not found", "没有找到 Wireshark：到“设置”里安装或手动选择 dumpcap.exe。"),
+    ("no adapter found", "没有找到正在上网的网卡：确认这台电脑能上网，再点重试。"),
+    ("NPF driver", "Npcap 没有运行：重新安装 Wireshark 并勾选 Npcap，装好后重启电脑再试。"),
+    ("wpcap", "Npcap 没有运行：重新安装 Wireshark 并勾选 Npcap，装好后重启电脑再试。"),
+    ("cannot capture on the network adapter", ADAPTER_HINT),
+    ("Error opening adapter", ADAPTER_HINT),
     ("dumpcap", "网络组件没能启动：确认装了 Wireshark 并勾选了 Npcap，装好后重启电脑再试。"),
 )
 
@@ -873,9 +880,11 @@ class App:
             reach = f"{type(exc).__name__}: {exc}"
         lines = [f"率土战局 {__version__}  {datetime.now():%Y-%m-%d %H:%M:%S}",
                  f"系统：{winsys.system()}  Python {platform.python_version()}",
-                 f"服务器：{self.server.origin}（{reach}）",
+                 # what a capture problem needs comes first: pasted in the group chat, only 500 characters arrive
+                 *adapter_report(snapshot["settings"]["dumpcap"]),
                  f"dumpcap：{snapshot['settings']['dumpcap'] or '没有找到'}；Npcap：{ {True: '已安装', False: '未安装', None: '-'}[winsys.npcap_installed()]}",
                  f"上报：{snapshot['capture']['state']} {snapshot['capture']['error'] or ''}".rstrip(),
+                 f"服务器：{self.server.origin}（{reach}）",
                  f"统计：已上传 {snapshot['stats']['uploaded']} 条，待上传 {snapshot['stats']['pending']}，"
                  f"连接 {snapshot['stats']['connections']}",
                  "手机经本机：" + ("开" if snapshot["phone"]["enabled"] else "关") + "".join(

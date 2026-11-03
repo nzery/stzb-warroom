@@ -5,6 +5,9 @@ adapter of the default route and keeps only connections whose local end is this 
 a phone routed through this computer shows each packet twice on that adapter (phone to
 server, then this computer's NATed leg), the game running here only once; keeping our own
 address captures each packet once in both cases.
+
+A computer dialing its own broadband (PPPoE) has a default route on a connection Npcap cannot
+open: its packets are read on the network card below it instead, still wrapped in PPPoE.
 """
 
 import collections
@@ -25,6 +28,10 @@ ROUTE_EVERY = 15  # seconds between two looks at which adapter the default route
 SETTLE = 2  # dumpcap says "Capturing on" even for an adapter it then fails on: seconds to see that
 UNINSTALL = r"SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall"
 APP_PATH = r"SOFTWARE\Microsoft\Windows\CurrentVersion\App Paths\Wireshark.exe"
+NETWORK = r"SYSTEM\CurrentControlSet\Control\Network\{4D36E972-E325-11CE-BFC1-08002BE10318}"
+NOT_HARDWARE = ("ROOT\\", "SWD\\", "BTH\\", "{")  # virtual adapters, dial-up and VPN connections, Bluetooth
+PROBE_SECONDS = 3
+PROBE_ADAPTERS = 3
 
 
 def command_folder(command):
@@ -144,8 +151,96 @@ def interface_addresses(interface):
     return [line.split()[3].split("/")[0] for line in lines if len(line.split()) > 3]
 
 
-def capture_filter(port, hosts=()):
-    return f"tcp port {port}" + (" and (" + " or ".join(f"host {h}" for h in hosts) + ")" if hosts else "")
+def adapter_names():
+    """Windows: {adapter GUID in capitals: (the name the player sees, its device id)}."""
+    import winreg
+
+    found = {}
+    with winreg.OpenKey(winreg.HKEY_LOCAL_MACHINE, NETWORK) as network:
+        for index in range(winreg.QueryInfoKey(network)[0]):
+            guid = winreg.EnumKey(network, index)
+            try:
+                with winreg.OpenKey(network, guid + r"\Connection") as key:
+                    found[guid.upper()] = (winreg.QueryValueEx(key, "Name")[0],
+                                           winreg.QueryValueEx(key, "PnPInstanceId")[0])
+            except OSError:  # not an adapter, or one without those values
+                continue
+    return found
+
+
+def is_hardware(device):
+    """Whether a device id belongs to a real network card (PCI, USB, ...)."""
+    return bool(device) and not device.upper().startswith(NOT_HARDWARE)
+
+
+def adapter_guid(interface):
+    match = re.search(r"\{[0-9A-Fa-f-]+\}", interface)
+    return match.group().upper() if match else None
+
+
+def listed_interfaces(dumpcap):
+    """The interfaces dumpcap can see right now; [] if it cannot say."""
+    try:
+        listing = subprocess.run([dumpcap, "-D"], capture_output=True, timeout=15,
+                                 creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
+    except (OSError, subprocess.SubprocessError):
+        return []
+    lines = listing.stdout.decode("utf-8", "replace").splitlines()
+    return [match.group(1) for match in (re.match(r"\d+\.\s+(\S+)", line) for line in lines) if match]
+
+
+def network_cards(dumpcap):
+    """dumpcap's interfaces that are real network cards, the only place PPPoE can be seen (Windows)."""
+    if os.name != "nt":
+        return []
+    names = adapter_names()
+    return [interface for interface in listed_interfaces(dumpcap)
+            if is_hardware(names.get(adapter_guid(interface), ("", ""))[1])]
+
+
+def capture_filter(port, hosts=(), pppoe=False):
+    """libpcap only looks inside a PPPoE session when told to."""
+    return (("pppoes and " if pppoe else "") + f"tcp port {port}"
+            + (" and (" + " or ".join(f"host {h}" for h in hosts) + ")" if hosts else ""))
+
+
+def count_pppoe(dumpcap, interface, seconds=PROBE_SECONDS):
+    """PPPoE packets seen on an adapter in `seconds`; None if it cannot be captured on."""
+    try:
+        probe = subprocess.run([dumpcap, "-i", interface, "-f", "pppoes", "-a", f"duration:{seconds}", "-w", "-"],
+                               stdout=subprocess.DEVNULL, stderr=subprocess.PIPE, timeout=seconds + 10,
+                               creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
+    except (OSError, subprocess.SubprocessError):
+        return None
+    counts = re.findall(r"Packets(?: captured)?: (\d+)", probe.stderr.decode("utf-8", "replace"))
+    return int(counts[-1]) if counts else None
+
+
+def adapter_report(dumpcap):
+    """Lines for the diagnostics: the adapter in use and, when it is no network card, what the cards see.
+
+    The group chat keeps 500 characters and is public: short, and no address.
+    """
+    try:
+        interface = default_interface()[0]
+    except (OSError, RuntimeError, ValueError, subprocess.SubprocessError):
+        return ["上网网卡：没有找到"]
+    if os.name != "nt":
+        return [f"上网网卡：{interface}"]
+    try:
+        names = adapter_names()
+    except OSError:
+        names = {}
+    name, device = names.get(adapter_guid(interface), ("未知", ""))
+    lines = [f"上网网卡：{name}（{chr(92).join(device.split(chr(92))[:2]) or '无设备号'}）"]
+    if dumpcap and not is_hardware(device):
+        seen = []
+        for card in network_cards(dumpcap)[:PROBE_ADAPTERS]:
+            count = count_pppoe(dumpcap, card)
+            seen.append(f"{names.get(adapter_guid(card), ('未知',))[0]} "
+                        + ("打不开" if count is None else f"{count} 个"))
+        lines.append(f"物理网卡 {PROBE_SECONDS} 秒内的拨号包：" + ("；".join(seen) or "没有物理网卡"))
+    return lines
 
 
 class Capture:
@@ -155,6 +250,7 @@ class Capture:
         self.on_packet, self.interface, self.all_hosts, self.dumpcap = on_packet, interface, all_hosts, dumpcap
         self.follows_route = interface is None  # an adapter asked for by name stays
         self.route, self.hosts = None, []
+        self.pppoe = False  # reading a dial-up connection on the network cards below it
         self.route_checked = time.monotonic()
         self.process = None
         self.error = None
@@ -171,19 +267,47 @@ class Capture:
             raise RuntimeError(f"dumpcap not found at {self.dumpcap}; install Wireshark or pass --dumpcap")
         print(f"dumpcap: {self.dumpcap}", flush=True)
         if self.follows_route:
-            self.route = default_interface()
-            self.interface, self.hosts = self.route[0], [self.route[1]]
+            try:
+                self.route = default_interface()
+            except OSError as exc:  # no network at all
+                raise RuntimeError(f"no adapter found for the default route: {exc}") from exc
+            self._open(self.route)
         else:
             self.hosts = interface_addresses(self.interface) if os.name != "nt" else []
-        self._run(timeout)
+            self._run(timeout)
+
+    def _open(self, route):
+        """Capture on the adapter of `route`, or on the network cards below it (dial-up); RuntimeError if neither."""
+        self.interface, self.hosts, self.pppoe = route[0], [route[1]], False
+        try:
+            self._run(settle=SETTLE)
+            return
+        except (OSError, RuntimeError) as exc:
+            failed = exc
+        print(f"cannot capture on {route[0]}: {failed}", flush=True)
+        cards = network_cards(self.dumpcap)
+        if not cards:
+            raise failed
+        self.pppoe = True
+        for choice in ([cards] if len(cards) > 1 else []) + [[card] for card in cards]:
+            self.interface = tuple(choice)
+            try:
+                self._run(settle=SETTLE)
+                print("dial-up connection: reading its packets on the network card", flush=True)
+                return
+            except (OSError, RuntimeError) as exc:
+                print(f"cannot capture on {', '.join(choice)}: {exc}", flush=True)
+        raise RuntimeError(f"cannot capture on the network adapter: {failed}") from failed
 
     def _run(self, timeout=15, settle=0):
         """Start dumpcap on self.interface and self.hosts; RuntimeError if it does not run for `settle` seconds."""
-        bpf = capture_filter(GAME_PORT, () if self.all_hosts else self.hosts)
-        print(f"capture interface: {self.interface} filter: {bpf}", flush=True)
+        bpf = capture_filter(GAME_PORT, () if self.all_hosts else self.hosts, self.pppoe)
+        interfaces = [self.interface] if isinstance(self.interface, str) else self.interface
+        print(f"capture interface: {', '.join(interfaces)} filter: {bpf}", flush=True)
         self.error = None
         self.stderr.clear()
-        self.process = subprocess.Popen([self.dumpcap, "-q", "-i", self.interface, "-f", bpf, "-w", "-"],
+        selected = [option for interface in interfaces for option in ("-i", interface, "-f", bpf)]
+        self.process = subprocess.Popen([self.dumpcap, "-q", *selected, "-w", "-"],
                                         stdout=subprocess.PIPE, stderr=subprocess.PIPE,
                                         creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
         ready = threading.Event()
@@ -207,7 +331,8 @@ class Capture:
         The game connections made from now on leave through it (2026-11-02: a computer moving
         between two networks kept relaying the phone's game with nothing captured for 20 minutes,
         the window still saying it was reporting). No route for now: stay until there is one.
-        An adapter dumpcap cannot capture on (some VPNs): back to the one that worked.
+        An adapter dumpcap cannot capture on (some VPNs) and no network card to read instead:
+        back to the one that worked.
         True when the route changed.
         """
         now = time.monotonic()
@@ -221,14 +346,12 @@ class Capture:
         if route == self.route:
             return False
         self.route = route  # tried once, whatever comes of it
-        working = self.interface, self.hosts
+        working = self.interface, self.hosts, self.pppoe
         self.close()
-        self.interface, self.hosts = route[0], [route[1]]
         try:
-            self._run(settle=SETTLE)
-        except (OSError, RuntimeError) as exc:
-            print(f"cannot capture on {route[0]}: {exc}", flush=True)
-            self.interface, self.hosts = working
+            self._open(route)
+        except (OSError, RuntimeError):
+            self.interface, self.hosts, self.pppoe = working
             self._run()
         return True
 

@@ -105,7 +105,11 @@ def tcp_segment(linktype, packet):
         offset, ethertype = 14, packet[12:14]
         while ethertype in (b"\x81\x00", b"\x88\xa8") and len(packet) >= offset + 4:
             ethertype, offset = packet[offset + 2:offset + 4], offset + 4
-        if ethertype not in (b"\x08\x00", b"\x86\xdd"):
+        if ethertype == b"\x88\x64":  # a PPPoE session (a computer dialing itself): 6 bytes + the PPP protocol
+            if packet[offset + 6:offset + 8] not in (b"\x00\x21", b"\x00\x57"):  # IPv4, IPv6
+                return None
+            offset += 8
+        elif ethertype not in (b"\x08\x00", b"\x86\xdd"):
             return None
     elif linktype == 0:  # BSD loopback (Npcap loopback adapter)
         offset = 4
