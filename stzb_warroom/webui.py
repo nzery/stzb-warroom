@@ -284,6 +284,7 @@ class Window(ThreadingHTTPServer):
             "check_update": app.check_update,
             "restart_for_update": lambda: self.restart_for_update(),
             "diagnostics": app.diagnostics,
+            "send_diagnostics": app.send_diagnostics,
             "open_installer": lambda: open_installer(),
         }
         if not isinstance(action, str) or action not in actions:

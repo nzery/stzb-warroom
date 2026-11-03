@@ -465,6 +465,38 @@ class AppTests(unittest.TestCase):
         self.assertEqual(capture["state"], "error")
         self.assertIn("Wireshark", capture["hint"])
 
+    def test_diagnostics_go_to_the_administrator_with_a_token_the_server_takes(self):
+        app = self.app(saved=BAD + "," + GOOD)
+        sent = []
+        real = self.server.json
+
+        def answer(path, token, body=None, timeout=45):
+            if path != "/v1/client/diagnostics":
+                return real(path, token, body, timeout=timeout)
+            if token == BAD:
+                raise HTTPError(path, 401, "unauthorized", {}, io.BytesIO(b"{}"))
+            sent.append(body["text"])
+            return {"id": 7}
+        self.server.json = answer
+        self.assertEqual(app.send_diagnostics(), {"id": 7})
+        self.assertIn("率土战局", sent[0])
+        for token in (GOOD, BAD):
+            self.assertNotIn(token, sent[0])
+
+    def test_diagnostics_that_cannot_be_sent_say_why(self):
+        with self.assertRaisesRegex(ValueError, "没有 Token"):
+            self.app().send_diagnostics()
+        app = self.app(saved=GOOD)
+        real = self.server.json
+
+        def refuse(path, token, body=None, timeout=45):
+            if path != "/v1/client/diagnostics":
+                return real(path, token, body, timeout=timeout)
+            raise HTTPError(path, 429, "busy", {}, io.BytesIO('{"error": "刚发过"}'.encode()))
+        self.server.json = refuse
+        with self.assertRaisesRegex(ValueError, "刚发过"):
+            app.send_diagnostics()
+
     def test_capture_failures_get_the_hint_that_fits(self):
         adapter = "capture failed: capture stopped: dumpcap: Error opening adapter: 找不到网络接口。"
         self.assertIn("VPN", appmod.hint(adapter))

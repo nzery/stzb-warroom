@@ -1211,6 +1211,10 @@ $('check-update').addEventListener('click', (e) => withBusy(e.currentTarget, '�
   const result = await act('check_update');
   toast(result.newer ? `有新版本 ${result.latest}` : `已经是最新版本（${S.data.app_version}）`);
 }).catch(() => {}));
+$('send-diag').addEventListener('click', (e) => withBusy(e.currentTarget, '发送中', async () => {
+  const sent = await act('send_diagnostics');
+  toast(`已发送给管理员（编号 ${sent.id}）`);
+}).catch(() => {}));
 $('copy-diag').addEventListener('click', (e) => withBusy(e.currentTarget, '收集中', async () => {
   const text = await act('diagnostics');
   try { await navigator.clipboard.writeText(text); toast('诊断信息已复制，粘贴发给管理员即可'); }

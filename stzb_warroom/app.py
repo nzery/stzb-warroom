@@ -44,6 +44,8 @@ PREFS = "/v1/client/notice-prefs"
 PERSONAL = "/v1/client/personal/"
 PERSONAL_PAGES = ("players",)
 PHONE = "/v1/client/phone"
+DIAGNOSTICS = "/v1/client/diagnostics"
+DIAGNOSTICS_MAX = 60000  # characters the server takes
 RELAYS_EVERY = 60  # seconds between two asks for the relays while none is known
 RELAYS_REFRESH = 600  # and once there are some (a token approved or moved since: more relays)
 UPDATE_EVERY = 6 * 3600
@@ -898,6 +900,39 @@ class App:
         lines.append("最近日志：")
         lines += [f"  {datetime.fromtimestamp(line['time']):%H:%M:%S} {line['text']}" for line in snapshot["logs"][-60:]]
         return "\n".join(lines)
+
+    def send_diagnostics(self):
+        """Send the diagnostics to the administrator -> {"id"}; ValueError says why not.
+
+        Any of the computer's tokens will do: a token the server refuses is no reason not to send.
+        """
+        with self.lock:
+            tokens = list(self.tokens)
+        if not tokens:
+            raise ValueError("还没有 Token，发不了：请复制诊断信息，粘贴发给管理员")
+        text = self.diagnostics()
+        if len(text) > DIAGNOSTICS_MAX:
+            text = text[:DIAGNOSTICS_MAX]
+        status = None
+        for token in tokens:
+            try:
+                value = self.server.json(DIAGNOSTICS, token, {"text": text}, timeout=30)
+            except HTTPError as exc:
+                status = exc.code
+                if exc.code == 401:
+                    continue
+                try:
+                    message = json.loads(exc.read() or b"{}").get("error")
+                except (OSError, ValueError):
+                    message = None
+                raise ValueError(message or f"发送失败（HTTP {exc.code}），请复制诊断信息，粘贴发给管理员")
+            except OSError as exc:
+                raise ValueError(f"连不上服务器：{exc}。请复制诊断信息，粘贴发给管理员")
+            if not isinstance(value, dict) or "id" not in value:
+                raise ValueError("服务器的回复不对，请复制诊断信息，粘贴发给管理员")
+            self.log(f"诊断信息已发送给管理员（编号 {value['id']}）")
+            return {"id": value["id"]}
+        raise ValueError(f"所有 Token 都无效（HTTP {status}）：请复制诊断信息，粘贴发给管理员")
 
     # background work ----------------------------------------------------------------
 
