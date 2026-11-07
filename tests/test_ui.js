@@ -172,7 +172,7 @@ async function main() {
     assert.ok(nodes.get('phone-box').innerHTML.includes('data-copy-text="vless://n"'));
     vm.runInContext(`S.phone.key = null; renderPhone(S.data);`, context);
     assert.equal(asked.length, 2, 'what was read is not asked again');
-    // a server before 1.18 answers a part with the whole page: all of it is taken
+    // a server from before 2026-11-07 answers a part with the whole page: all of it is taken
     vm.runInContext(`S.phone = {}; renderPhone(S.data);`, context);
     asked[2].resolve({ problem: null, guide: { iphone: [{ title: '扫规则', text: '', show: 'rules' }] },
       nodes: [{ link: 'vless://n', qr: '' }], rules: { link: 'r', qr: '' }, android: { sub: 's', qr: '' } });

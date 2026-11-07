@@ -785,7 +785,7 @@ function personalClick(event) {
 // it would put back the QR code the reset just revoked.
 let phoneCall = 0;
 
-// What an answer has: the steps, or one QR code (a server before 1.18's asked for a part gives the
+// What an answer has: the steps, or one QR code (a server from before 2026-11-07 asked for a part gives the
 // whole page: all of it is taken).
 function takePhone(view, data) {
   if (!data || typeof data !== 'object') return;
