@@ -258,7 +258,7 @@ class Window(ThreadingHTTPServer):
             raise ValueError("没有这个账号")
         actions = {
             "start": app.start,
-            "stop": app.stop,
+            "restart_capture": app.restart,  # a capture that saw nothing after a network change
             "quit": lambda: threading.Thread(target=self.quit, daemon=True).start(),
             "show": self.show,
             "closing": lambda: self.page_gone(str(body.get("page") or "")),

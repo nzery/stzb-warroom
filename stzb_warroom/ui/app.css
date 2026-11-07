@@ -132,12 +132,10 @@ nav { display: grid; gap: 4px; }
 .hero-text h2 { margin: 0 0 4px; font-size: 18px; font-weight: 600; }
 .hero-text p { margin: 0; color: var(--muted); line-height: 1.6; }
 .hero-actions { display: flex; gap: 8px; flex-wrap: wrap; }
-.metrics { display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px; margin-bottom: 16px; }
-.metric { padding: 16px 18px; border-radius: var(--radius); background: var(--panel); border: 1px solid var(--line); }
-.metric span { color: var(--muted); font-size: 12px; }
-.metric strong { display: block; margin: 6px 0 4px; font: 600 26px "Segoe UI", "Microsoft YaHei UI", sans-serif;
-  color: var(--text); font-variant-numeric: tabular-nums; }
-.metric small { color: var(--faint); font-size: 12px; }
+/* The upload counters, one small line at the top right of every page. */
+.top-stats { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 4px 14px; color: var(--faint); font-size: 12px; }
+.top-stats span { white-space: nowrap; cursor: default; }
+.top-stats b { margin-left: 2px; color: var(--text); font-weight: 600; font-variant-numeric: tabular-nums; }
 .columns { display: grid; grid-template-columns: 1fr 1.3fr; gap: 16px; }
 .card { background: var(--panel); border: 1px solid var(--line); border-radius: var(--radius); padding: 18px 20px;
   margin-bottom: 16px; }
@@ -293,7 +291,6 @@ input[type=text]:focus, input[type=password]:focus { border-color: var(--gold2);
   .brand { padding: 0 4px 20px; }
   .nav-item { justify-content: center; padding: 10px; }
   .nav-item .badge { position: absolute; top: 2px; right: 2px; }
-  .metrics { grid-template-columns: repeat(2, 1fr); }
   .columns { grid-template-columns: 1fr; }
   .columns .card { margin-bottom: 16px; }
   .page, .topbar { padding-left: 16px; padding-right: 16px; }

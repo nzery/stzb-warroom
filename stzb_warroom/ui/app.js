@@ -81,7 +81,7 @@ const ACCOUNT_STATES = {
 // approved by its first login, nobody approves it).
 const accountState = (a) => (a.state === 'pending' && a.pending
   ? [a.pending.label || '等待核验', 'warn'] : ACCOUNT_STATES[a.state] || ['', '']);
-const LOGIN_STEPS = '请在本程序点「开始上报」，再进入游戏；如果已经在游戏里，退出后重新登录一次';
+const LOGIN_STEPS = '先打开本程序，再进入游戏；如果已经在游戏里，退出后重新登录一次';
 
 const S = {
   data: null, tapped: null, nextFlip: Infinity, page: 'notices', filter: 'all', notices: [], logs: [], n: 0, l: 0,
@@ -277,13 +277,13 @@ function captureView(d) {
   const c = d.capture;
   if (!d.tokens.length) return { cls: 'idle', icon: 'user', title: '还没有添加账号', desc: '添加管理员发给你的 Token 后就能开始上报。', dot: '', side: '未开始' };
   switch (c.state) {
-    case 'running': if (d.phone?.blind) return { cls: 'wait', icon: 'alert', title: '手机的游戏数据没有抓到', desc: '手机正在经这台电脑玩游戏，但电脑没抓到数据，战报不会上传。点“暂停上报”再开始试试；开着 VPN 或代理的话先关掉。', dot: 'wait', side: '没抓到数据' };
-      if (c.lost) return { cls: 'wait', icon: 'alert', title: '换网络后没抓到游戏数据', desc: '电脑刚换了网络，之后没再抓到游戏数据，通知和战报都会中断。还在玩的话点“暂停上报”再开始；没在玩可以不管，这条提示过几分钟会消失。', dot: 'wait', side: '没抓到数据' };
+    case 'running': if (d.phone?.blind) return { cls: 'wait', icon: 'alert', title: '手机的游戏数据没有抓到', desc: '手机正在经这台电脑玩游戏，但电脑没抓到数据，战报不会上传。点“重新抓包”试试；开着 VPN 或代理的话先关掉。', dot: 'wait', side: '没抓到数据' };
+      if (c.lost) return { cls: 'wait', icon: 'alert', title: '换网络后没抓到游戏数据', desc: '电脑刚换了网络，之后没再抓到游戏数据，通知和战报都会中断。还在玩的话点“重新抓包”；没在玩可以不管，这条提示过几分钟会消失。', dot: 'wait', side: '没抓到数据' };
       return { cls: '', icon: 'wave', title: '正在上报', desc: `已运行 ${duration(Date.now() / 1000 - c.since)}。玩游戏时保持程序开着，可以最小化这个窗口。`, dot: 'run', side: '上报中' };
     case 'starting': return { cls: 'wait', icon: 'clock', title: '正在启动…', desc: '正在启动网络组件。', dot: 'wait', side: '启动中' };
     case 'stopping': return { cls: 'wait', icon: 'clock', title: '正在停止…', desc: '正在把没上传完的数据保存好。', dot: 'wait', side: '停止中' };
     case 'error': return { cls: 'err', icon: 'alert', title: '上报已停止', desc: c.hint || c.error || '', dot: 'err', side: '出错' };
-    default: return { cls: 'idle', icon: 'pause', title: '上报已暂停', desc: '点“开始上报”继续。暂停期间游戏数据不会上传。', dot: '', side: '已暂停' };
+    default: return { cls: 'idle', icon: 'pause', title: '上报没有运行', desc: '点“开始上报”启动。没有运行时游戏数据不会上传。', dot: '', side: '未运行' };
   }
 }
 
@@ -292,15 +292,12 @@ function renderChrome(d) {
   $('side-dot').className = 'dot ' + view.dot;
   $('side-state').textContent = view.side;
   $('side-detail').textContent = `版本 ${d.app_version}`;
-  const toggle = $('toggle');
-  const state = d.capture.state;
-  const running = state === 'running' || state === 'starting';
-  if (!S.busy.has('toggle')) {
-    toggle.disabled = !d.tokens.length || state === 'stopping' || state === 'starting';
-    toggle.className = 'btn ' + (running ? '' : 'primary');
-    toggle.innerHTML = state === 'starting' || state === 'stopping' ? `<span class="spin"></span>${state === 'starting' ? '启动中' : '停止中'}`
-      : running ? `${icon('pause').replace('<svg', '<svg width="14" height="14"')}暂停上报` : `${icon('play').replace('<svg', '<svg width="14" height="14"')}开始上报`;
-  }
+  const s = d.stats;
+  $('m-uploaded').textContent = s.uploaded.toLocaleString();
+  $('m-pending').textContent = s.pending == null ? '-' : s.pending.toLocaleString();
+  $('m-last').textContent = s.uploaded_at ? ago(s.uploaded_at) : '-';
+  $('m-last-at').title = s.uploaded_at ? '最近一次上传 ' + clock(s.uploaded_at) : (d.capture.state === 'running' ? '登录游戏后开始上传' : '还没有上传');
+  $('m-conn').textContent = s.connections;
   const unseen = S.notices.filter((n) => n.seq > S.seenNotices && !n.hidden).length;
   $('badge-notices').textContent = S.page === 'notices' || !unseen ? '' : unseen > 99 ? '99+' : unseen;
   const unread = S.chat.messages.filter((m) => !m.mine && m.seq > S.chat.seen).length;
@@ -379,15 +376,10 @@ function renderOverview(d) {
   $('hero-desc').textContent = view.desc;
   const actions = view.cls === 'err' && (d.capture.error || '').includes('dumpcap not found')
     ? '<button class="btn primary" data-action="open_installer">安装 Wireshark</button><button class="btn" data-goto="settings">手动选择 dumpcap</button>'
-    : !d.tokens.length ? '<button class="btn primary" data-goto="accounts">添加账号</button>' : '';
+    : !d.tokens.length ? '<button class="btn primary" data-goto="accounts">添加账号</button>'
+    : view.cls === 'wait' && d.capture.state === 'running' ? '<button class="btn primary" data-action="restart_capture">重新抓包</button>'
+    : view.cls === 'idle' ? '<button class="btn primary" data-action="start">开始上报</button>' : '';
   if ($('hero-actions').dataset.html !== actions) { $('hero-actions').innerHTML = actions; $('hero-actions').dataset.html = actions; }
-  const s = d.stats;
-  $('m-uploaded').textContent = s.uploaded.toLocaleString();
-  $('m-pending').textContent = s.pending == null ? '-' : s.pending.toLocaleString();
-  $('m-last').textContent = s.uploaded_at ? ago(s.uploaded_at) : '-';
-  $('m-last-at').textContent = s.uploaded_at ? clock(s.uploaded_at) : (d.capture.state === 'running' ? '登录游戏后开始上传' : '还没有上传');
-  $('m-conn').textContent = s.connections;
-
   $('ov-accounts').innerHTML = d.tokens.length ? d.tokens.map((a) => {
     const [label, cls] = accountState(a);
     const bark = a.bark ? (a.bark.bound ? '<span class="tag">Bark 已绑定</span>' : '<span class="tag warn">Bark 未绑定</span>') : '';
@@ -805,7 +797,7 @@ function renderPhone(d) {
   const nodes = S.phone.data?.nodes || [];
   const name = (host) => nodes.find((n) => n.host === host)?.name || host;
   $('phone-status').innerHTML = !p.enabled ? ''
-    : !p.running ? `<p class="muted">上报没有运行，现在不转发。点右上角“开始上报”后自动开始。</p>`
+    : !p.running ? `<p class="muted">上报没有运行，现在不转发；到“概览”看原因。</p>`
     : p.waiting ? `<p class="muted">正在向服务器要中转……账号审批通过后才有。</p>`
     : `<div class="phone-exits">${p.exits.map((e) => {
         const [label, cls] = EXIT_STATES[e.state] || [e.state, ''];
@@ -1152,12 +1144,6 @@ document.addEventListener('submit', async (event) => {
   }
 });
 
-$('toggle').addEventListener('click', async () => {
-  const running = ['running', 'starting'].includes(S.data?.capture.state);
-  S.busy.add('toggle');
-  try { await withBusy($('toggle'), running ? '停止中' : '启动中', () => act(running ? 'stop' : 'start')); }
-  catch { /* shown */ } finally { S.busy.delete('toggle'); render(); }
-});
 
 $('filters').addEventListener('click', (event) => {
   const chip = event.target.closest('[data-filter]');

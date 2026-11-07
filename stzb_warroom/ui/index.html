@@ -40,7 +40,12 @@
         <h1 id="page-title">概览</h1>
         <p id="page-sub" class="sub">上传数据，接收通知</p>
       </div>
-      <button id="toggle" class="btn primary" disabled>开始上报</button>
+      <div class="top-stats" id="top-stats">
+        <span title="本次运行上传的数据条数">已上传 <b id="m-uploaded">0</b></span>
+        <span title="网络断开时先存在本机，连上后补传">待上传 <b id="m-pending">-</b></span>
+        <span id="m-last-at" title="还没有上传">最近上传 <b id="m-last">-</b></span>
+        <span title="最近 5 分钟看到的游戏连接">连接 <b id="m-conn">0</b></span>
+      </div>
     </header>
     <div id="banners" class="banners"></div>
 
@@ -52,12 +57,6 @@
           <p id="hero-desc"></p>
         </div>
         <div class="hero-actions" id="hero-actions"></div>
-      </div>
-      <div class="metrics">
-        <div class="metric"><span>已上传</span><strong id="m-uploaded">0</strong><small>本次运行的数据条数</small></div>
-        <div class="metric"><span>待上传</span><strong id="m-pending">-</strong><small>网络断开时先存在本机</small></div>
-        <div class="metric"><span>最近上传</span><strong id="m-last">-</strong><small id="m-last-at">还没有上传</small></div>
-        <div class="metric"><span>连接</span><strong id="m-conn">0</strong><small>最近 5 分钟看到的</small></div>
       </div>
       <div class="columns">
         <div class="card">
