@@ -93,6 +93,8 @@ const S = {
   // The server's phone page for the chosen account: {data, error, loading, role, key}.
   phone: {},
   phoneOs: store.get('phoneOs', null),  // the phone page's iPhone / Android
+  phoneStep: store.get('phoneStep', {}),  // its step per phone
+  phoneSeen: null,  // what the relays saw of the phone: {role, status}
   // 群聊: the messages this page has (the newest when it opened, older ones as asked), the program's
   // cursor, whether older ones are kept, and the newest one read (the badge counts those after it);
   // each account's messages are apart, so all of it starts again when the chat's account changes.
@@ -803,6 +805,50 @@ function pushBlock(a, index, os) {
       <button class="btn primary small" type="submit">绑定</button></form>`;
 }
 
+// Which step of the phone's guide the player is on, per phone (kept, so the page opens where they were).
+function phoneStep(os) { return Number((S.phoneStep || {})[os]) || 0; }
+
+// How a step is confirmed (the server's `check`): the push binding there; the relays seeing the
+// phone (the connectivity test, a game connection) or refusing its other apps' connections.
+function phoneCheck(step, account, pipes) {
+  const line = (cls, text) => `<p class="phone-check ${cls}">${cls === 'ok' ? '✓ ' : cls === 'bad' ? '✗ ' : ''}${esc(text)}</p>`;
+  if (step.check === 'push') {
+    const bark = account.a.bark;
+    if (!bark || !bark.bound) return line('wait', '还没绑定。绑定后手机会收到一条测试通知。');
+    return bark.error ? line('bad', `已绑定，但上一条推送失败：${bark.error}`) : line('ok', '已绑定：敌袭等需要你下令的通知会推送到这台手机。');
+  }
+  if (step.check !== 'connect') return '';
+  const seen = S.phoneSeen && S.phoneSeen.role === account.a.role.id ? S.phoneSeen.status : undefined;
+  if (pipes) return line('ok', `手机已连上：正在经这台电脑转发 ${pipes} 条游戏连接。`);
+  if (seen === undefined) return line('wait', '正在检查手机连上了没有……');
+  if (seen === null) return '';  // the server cannot tell
+  if (seen.misrouted) return line('bad', '小火箭把其他应用的连接也交给了这个节点，规则没生效：回到上一步，在小火箭“配置”页点这份配置选“使用配置”；首页“全局路由”选“配置”，不要选“代理”。');
+  if (seen.game !== null && seen.game < 600) return line('ok', '手机已连上：游戏连接经这台电脑出去了。');
+  if (seen.checked !== null && seen.checked < 600) {
+    return seen.check_ok ? line('ok', '手机已连上：连通性测试通过，可以进游戏了。')
+      : line('bad', '手机连到了中转，但这台电脑没连上中转：看这个页面顶部的提示。');
+  }
+  return line('wait', '还没看到手机连上来。照上面做完后，这里每 10 秒自动检查一次。');
+}
+
+// While the connect step is shown, ask the server every 10 s what the relays saw of the phone.
+let phoneTimer = null;
+function watchPhone(on) {
+  if (!on) { clearTimeout(phoneTimer); phoneTimer = null; return; }
+  if (phoneTimer) return;
+  const tick = async () => {
+    const account = personalAccount();
+    if (S.page !== 'phone' || !account) { phoneTimer = null; return; }
+    try {
+      const reply = await act('phone_status', { index: account.index }, { quiet: true });
+      S.phoneSeen = { role: account.a.role.id, status: reply ? reply.status : null };
+    } catch { /* tried again next time */ }
+    renderPhone(S.data);
+    if (phoneTimer) phoneTimer = setTimeout(tick, 10000);
+  };
+  phoneTimer = setTimeout(tick, 0);
+}
+
 function renderPhone(d) {
   if (!d) return;
   const p = d.phone || { exits: [] };
@@ -813,8 +859,11 @@ function renderPhone(d) {
   const problems = phoneProblems(p).join('');
   if (S.phoneProblems !== problems) { S.phoneProblems = problems; $('phone-status').innerHTML = problems; }
   const pipes = p.exits.reduce((n, e) => n + (e.pipes || 0), 0);
+  const guide = os && view.data && view.data.guide ? view.data.guide[os] || [] : [];
+  const current = guide[Math.min(phoneStep(os), Math.max(guide.length - 1, 0))];
+  watchPhone(S.page === 'phone' && Boolean(account) && current?.check === 'connect');
   const key = JSON.stringify([view.data, view.error, view.loading, accounts.map(({ a }) => a.role.id), account?.a.role.id,
-    account?.a.bark, os, pipes]);
+    account?.a.bark, os, pipes, S.phoneStep, S.phoneSeen]);
   if (key === view.key) return;
   view.key = key;
   const box = $('phone-box');
@@ -837,10 +886,13 @@ function renderPhone(d) {
   else if (!data.guide) body = banner('warn', 'info', '服务器还没有分步说明，请稍后再试。');
   else if (!os) body = '<div class="card empty">先在上面选你的手机是 iPhone 还是安卓，下面会一步一步告诉你怎么做。</div>';
   else {
-    // The server's steps for this phone, in order; under a step what it says to show (server/phone_http.py `guide`).
+    // One of the server's steps at a time (server/phone_http.py `guide`): its text and check on the
+    // left, what it shows (a QR code, the push binding) on the right, 上一步 / 下一步 below.
+    const steps = data.guide[os] || [];
+    const at = Math.min(phoneStep(os), Math.max(steps.length - 1, 0));
+    const step = steps[at] || { title: '', text: '' };
     const node = data.nodes[0];
     const shown = {
-      exit: () => pipes ? `<p class="muted">正在转发 ${pipes} 条手机的游戏连接。</p>` : '',
       node: () => node ? `<figure class="phone-qr">${qr(node.qr, '节点的二维码')}<figcaption>① 节点<small>小火箭首页扫</small></figcaption></figure>
         <div class="row-actions">${copyButton(node.link, '复制节点链接')}</div>` : '',
       rules: () => data.rules ? `<figure class="phone-qr">${qr(data.rules.qr, '规则的二维码')}<figcaption>② 规则<small>小火箭“配置”页扫</small></figcaption></figure>
@@ -849,8 +901,15 @@ function renderPhone(d) {
         <div class="row-actions">${copyButton(data.android.sub, '复制订阅地址')}</div>` : '',
       push: () => pushBlock(account.a, account.index, os),
     };
-    body = `<ol class="phone-guide">${(data.guide[os] || []).map((step) => `<li class="card">
-      <h3>${esc(step.title)}</h3><p>${esc(step.text)}</p>${(shown[step.show] || (() => ''))()}</li>`).join('')}</ol>
+    const media = (shown[step.show] || (() => ''))();
+    const dots = steps.map((st, i) => `<button class="phone-dot${i === at ? ' active' : ''}${i < at ? ' done' : ''}" data-phone-step="${i}" title="${esc(st.title)}">${i + 1}</button>`).join('');
+    body = `<div class="card phone-step">
+      <div class="phone-step-head"><span class="muted">第 ${at + 1} / ${steps.length} 步</span><div class="phone-dots">${dots}</div></div>
+      <div class="phone-step-body${media ? '' : ' single'}">
+        <div class="phone-step-text"><h3>${esc(step.title)}</h3><p>${esc(step.text)}</p>${phoneCheck(step, account, pipes)}</div>
+        ${media ? `<div class="phone-step-media">${media}</div>` : ''}</div>
+      <div class="phone-step-nav"><button class="btn ghost" data-phone-step="${at - 1}"${at ? '' : ' disabled'}>上一步</button>
+        ${at < steps.length - 1 ? `<button class="btn primary" data-phone-step="${at + 1}">下一步</button>` : ''}</div></div>
     <div class="card"><div class="setting"><div><b>二维码外泄了？</b><p>拿到二维码或订阅地址的人能借你的电脑连游戏。重置后换新的，旧的 30 秒内失效，手机要重新扫码。</p></div>
       <button class="btn ghost small" data-phone-reset="1"${view.loading ? ' disabled' : ''}>重置</button></div></div>`;
   }
@@ -865,6 +924,13 @@ async function phoneClick(event) {
   if (copy) {
     try { await navigator.clipboard.writeText(copy.dataset.copyText); toast('已复制'); }
     catch { toast('复制失败', true); }
+    return true;
+  }
+  const stepButton = event.target.closest('[data-phone-step]');
+  if (stepButton && !stepButton.disabled) {
+    S.phoneStep = { ...(S.phoneStep || {}), [S.phoneOs]: Math.max(0, Number(stepButton.dataset.phoneStep)) };
+    store.set('phoneStep', S.phoneStep);
+    renderPhone(S.data);
     return true;
   }
   const phone = event.target.closest('[data-phone-os]');

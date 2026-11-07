@@ -525,12 +525,14 @@ class App:
 
     # the phone through this computer (relay.py) -----------------------------------
 
-    def phone(self, index, reset=False):
+    def phone(self, index, reset=False, status=False):
         """The server's phone page for the account (nodes with QR codes, the rule, the steps), as
-        it made it; `reset` asks for a new key first. Nothing of it is logged."""
+        it made it; `reset` asks for a new key first; `status` only what the relays saw of the
+        phone (the connect step's check). Nothing of it is logged."""
         token = self._token(index)
+        path = PHONE + ("/reset" if reset else "?only=status" if status else "")
         try:
-            with self.server.open(PHONE + ("/reset" if reset else ""), token, {} if reset else None,
+            with self.server.open(path, token, {} if reset else None,
                                   timeout=30, method="POST" if reset else "GET") as response:
                 value = json.load(response)
         except HTTPError as exc:

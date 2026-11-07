@@ -340,6 +340,8 @@ class AppTests(unittest.TestCase):
         self.assertEqual(self.server.calls[-1], ("POST", "/v1/client/phone/reset", {}))
         self.assertEqual(page["nodes"][0]["link"], "vless://k2@r")
         self.assertEqual(app.phone(1)["problem"], "还没审核通过")
+        app.phone(0, status=True)  # the connect step's check: what the relays saw, no page
+        self.assertEqual(self.server.calls[-1], ("GET", "/v1/client/phone?only=status", None))
         self.assertNotIn("k1", json.dumps(list(app.logs)) + app.diagnostics())
         with self.assertRaisesRegex(ValueError, "没有这个账号"):
             app.phone(5)
