@@ -357,6 +357,11 @@ input[type=text]:focus, input[type=password]:focus { border-color: var(--gold2);
 .phone-node { display: flex; flex-direction: column; align-items: center; gap: 10px; }
 .phone-node .phone-steps, .phone-node .setting { align-self: stretch; }
 .phone-node .qr { width: 200px; height: 200px; background: #fff; padding: 8px; border-radius: 6px; border: 1px solid var(--line); image-rendering: pixelated; }
+.phone-qrs { display: flex; flex-wrap: wrap; justify-content: center; gap: 12px; }
+.phone-qrs figure { margin: 0; text-align: center; }
+.phone-qrs .qr { width: 170px; height: 170px; }
+.phone-qrs figcaption { font-weight: 600; margin-top: 4px; }
+.phone-qrs figcaption small { display: block; font-weight: 400; opacity: .75; }
 .phone-steps { margin: 6px 0 12px; padding-left: 20px; line-height: 1.8; font-size: 13px; }
 
 
