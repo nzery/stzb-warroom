@@ -121,12 +121,6 @@ async function main() {
   assert.ok(both.includes('DST-PORT,8001') && both.includes('data-phone-reset'), both);
   assert.strictEqual((both.match(/<img class="qr"/g) || []).length, 2);
   // the switch off: nothing below it
-  // a server with Shadowrocket's rules: two QR codes (node, then rules), its steps, no rule to copy by hand
-  vm.runInContext(`S.phone.data.rules = { link: 'shadowrocket://config/add/https://api.example/v1/phone/sub?r=1',
-      qr: '<svg xmlns="http://www.w3.org/2000/svg"></svg>', steps: ['扫 ② 规则'] }; renderPhone(S.data);`, context);
-  const ruled = nodes.get('phone-box').innerHTML;
-  assert.ok(ruled.indexOf('① 节点') < ruled.indexOf('② 规则') && ruled.includes('扫 ② 规则'), ruled);
-  assert.ok(!ruled.includes('要加的规则') && !ruled.includes('<svg xmlns'), ruled);
   vm.runInContext(`S.data.settings = { phone_exit: false }; S.data.phone = { enabled: false, exits: [] }; renderPhone(S.data);`, context);
   assert.strictEqual(nodes.get('phone-box').innerHTML, '');
   assert.strictEqual(nodes.get('phone-status').innerHTML, '');

@@ -831,20 +831,12 @@ function renderPhone(d) {
     const node = data.nodes[0];
     const steps = (list) => `<ol class="phone-steps">${(list || []).map((s) => `<li>${esc(s)}</li>`).join('')}</ol>`;
     const qr = (svg, alt) => svg ? `<img class="qr" alt="${alt}" src="${svgImage(svg)}">` : '<div class="empty">服务器没给二维码，复制到手机上导入</div>';
-    // With the server's rules (a Shadowrocket config: only the game to the node, the rest direct),
-    // two QR codes, the node then the rules; an older server's page has the rule to add by hand.
-    const rules = data.rules;
-    const iphone = !node ? '' : rules ? `<div class="card phone-node">
-      <h3>iPhone · 小火箭</h3>
-      <div class="phone-qrs"><figure>${qr(node.qr, 'iPhone 节点的二维码')}<figcaption>① 节点</figcaption></figure>
-        <figure>${qr(rules.qr, 'iPhone 规则的二维码')}<figcaption>② 规则</figcaption></figure></div>
-      <div class="row-actions">${copyButton(node.link, '复制节点链接')}${copyButton(rules.link, '复制规则链接')}</div>
-      ${steps(rules.steps)}</div>` : `<div class="card phone-node">
+    const iphone = node ? `<div class="card phone-node">
       <h3>iPhone · 小火箭</h3>
       ${qr(node.qr, 'iPhone 的二维码')}
       <div class="row-actions">${copyButton(node.link, '复制链接')}</div>
       ${steps(data.steps)}
-      <div class="setting"><div><b>要加的规则</b><p><code>${esc(data.rule)}</code></p></div>${copyButton(data.rule, '复制规则')}</div></div>`;
+      <div class="setting"><div><b>要加的规则</b><p><code>${esc(data.rule)}</code></p></div>${copyButton(data.rule, '复制规则')}</div></div>` : '';
     const android = data.android ? `<div class="card phone-node">
       <h3>安卓 · v2rayNG</h3>
       ${qr(data.android.qr, '安卓的二维码')}
