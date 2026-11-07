@@ -21,7 +21,7 @@
       <div class="nav-sep"></div>
       <button class="nav-item" data-page="overview"><i data-icon="home"></i><span>概览</span></button>
       <button class="nav-item" data-page="players"><i data-icon="search"></i><span>查询</span></button>
-      <button class="nav-item" data-page="prefs"><i data-icon="sliders"></i><span>通知设置</span></button>
+      <button class="nav-item" data-page="prefs"><i data-icon="sliders"></i><span>提醒</span></button>
       <button class="nav-item" data-page="phone"><i data-icon="phone"></i><span>手机</span></button>
       <button class="nav-item" data-page="accounts"><i data-icon="user"></i><span>账号</span><b class="badge alert" id="badge-accounts"></b></button>
       <button class="nav-item" data-page="settings"><i data-icon="gear"></i><span>设置</span></button>
@@ -58,9 +58,10 @@
         </div>
         <div class="hero-actions" id="hero-actions"></div>
       </div>
+      <div class="ov-stats" id="ov-stats"></div>
       <div class="columns">
         <div class="card">
-          <div class="card-head"><h3>账号</h3><button class="link" data-goto="accounts">管理</button></div>
+          <div class="card-head"><h3>账号与手机</h3><button class="link" data-goto="accounts">管理账号</button></div>
           <div id="ov-accounts" class="mini-list"></div>
         </div>
         <div class="card">
@@ -111,8 +112,7 @@
     <section class="page" id="page-accounts">
       <div id="account-list" class="account-list"></div>
       <div class="card add-card">
-        <h3>添加账号</h3>
-        <p class="muted">粘贴同盟发的邀请码（stj_ 开头），或管理员发给你的 Token（sta_ 开头）。这台电脑上玩几个游戏账号，就添加几次，一次一个。Token 加密保存在本机。</p>
+        <div class="add-head"><h3>添加账号</h3><span class="muted">粘贴邀请码（stj_ 开头）或 Token（sta_ 开头），一次一个；这台电脑上玩几个号就加几次</span></div>
         <form id="add-form" class="inline-form">
           <input id="add-token" type="password" autocomplete="off" spellcheck="false" placeholder="stj_… 或 sta_…">
           <button class="btn primary" type="submit">添加</button>

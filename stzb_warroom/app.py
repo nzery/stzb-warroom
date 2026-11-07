@@ -44,6 +44,7 @@ PREFS = "/v1/client/notice-prefs"
 PERSONAL = "/v1/client/personal/"
 PERSONAL_PAGES = ("players",)
 PHONE = "/v1/client/phone"
+PHONE_PARTS = ("guide", "node", "rules", "sub")  # what the phone page asks for at a time
 DIAGNOSTICS = "/v1/client/diagnostics"
 DIAGNOSTICS_MAX = 60000  # characters the server takes
 RELAYS_EVERY = 60  # seconds between two asks for the relays while none is known
@@ -525,12 +526,15 @@ class App:
 
     # the phone through this computer (relay.py) -----------------------------------
 
-    def phone(self, index, reset=False, status=False):
+    def phone(self, index, reset=False, status=False, part=None):
         """The server's phone page for the account (nodes with QR codes, the rule, the steps), as
-        it made it; `reset` asks for a new key first; `status` only what the relays saw of the
-        phone (the connect step's check). Nothing of it is logged."""
+        it made it; `part` only some of it: "guide" the steps, "node" / "rules" / "sub" a step's
+        QR code (the page asks for what it shows); `reset` asks for a new key first (the whole
+        page); `status` only what the relays saw of the phone (the connect step's check).
+        Nothing of it is logged."""
         token = self._token(index)
-        path = PHONE + ("/reset" if reset else "?only=status" if status else "")
+        only = "status" if status else part if part in PHONE_PARTS else None
+        path = PHONE + ("/reset" if reset else f"?only={only}" if only else "")
         try:
             with self.server.open(path, token, {} if reset else None,
                                   timeout=30, method="POST" if reset else "GET") as response:

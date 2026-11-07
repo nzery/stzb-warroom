@@ -37,7 +37,7 @@ code { font-family: Consolas, "Cascadia Mono", monospace; color: var(--gold); }
 
 /* layout */
 .app { display: flex; height: 100vh; }
-.sidebar { width: 168px; flex: none; background: linear-gradient(180deg, #eef2f8, #e2e8f1); border-right: 1px solid #dde2ea;
+.sidebar { width: 132px; flex: none; background: linear-gradient(180deg, #eef2f8, #e2e8f1); border-right: 1px solid #dde2ea;
   display: flex; flex-direction: column; padding: 20px 8px 16px; }
 .brand { display: flex; align-items: center; gap: 10px; padding: 0 4px 26px; }
 .brand strong { display: block; font-size: 15px; font-weight: 600; }
@@ -115,7 +115,6 @@ nav { display: grid; gap: 4px; }
 .banner.warn { background: #fff6e6; border-color: #f7d9a6; color: #8a5600; }
 .banner.info { background: var(--soft); border-color: #b8dafb; color: #0b5fa8; }
 .banner .btn { padding: 5px 12px; font-size: 12px; }
-.banner .close { border: 0; background: none; color: inherit; opacity: .6; cursor: pointer; font-size: 18px; line-height: 1; }
 
 /* overview */
 .hero { display: flex; align-items: center; gap: 20px; padding: 22px 24px; border-radius: var(--radius); border: 1px solid var(--line);
@@ -206,17 +205,6 @@ nav { display: grid; gap: 4px; }
 .account-problem { margin: 0 20px 14px; padding: 10px 12px; border-radius: 4px; background: #fdeeed; border: 1px solid #f6c6c2;
   color: #b4322a; font-size: 13px; line-height: 1.6; }
 .account-problem.warn { background: #fff6e6; border-color: #f7d9a6; color: #8a5600; }
-.bark { display: flex; align-items: center; gap: 14px; padding: 14px 20px; border-top: 1px solid var(--line); background: var(--panel2); }
-.bark .label { flex: none; width: 92px; color: var(--muted); font-size: 13px; }
-.bark .label b { display: block; color: var(--text); font-weight: 600; }
-.bark .value { flex: 1; min-width: 0; }
-.bark .value small { display: block; color: var(--faint); font-size: 12px; margin-top: 2px; }
-.bark .value small.err { color: var(--red); }
-.ntfy-sub { display: flex; gap: 18px; align-items: flex-start; padding: 4px 20px 16px; background: var(--panel2); }
-.ntfy-sub > div { flex: 1; min-width: 0; }
-.ntfy-sub .qr { flex: none; width: 180px; height: 180px; background: #fff; padding: 8px; border-radius: 6px; border: 1px solid var(--line); image-rendering: pixelated; }
-.ntfy-sub code { word-break: break-all; }
-@media (max-width: 640px) { .ntfy-sub { flex-direction: column; align-items: center; } }
 .inline-form { display: flex; gap: 8px; flex: 1; min-width: 0; }
 input[type=text], input[type=password] { flex: 1; min-width: 0; padding: 8px 12px; border-radius: 4px;
   border: 1px solid var(--line2); background: var(--panel); outline: none; transition: border-color .15s, box-shadow .15s; }
@@ -296,7 +284,6 @@ input[type=text]:focus, input[type=password]:focus { border-color: var(--gold2);
   .page, .topbar { padding-left: 16px; padding-right: 16px; }
   .banners { padding: 0 16px; }
   .hero { flex-wrap: wrap; }
-  .bark { flex-wrap: wrap; }
 }
 
 /* a release's notes in the update banners */
@@ -306,7 +293,6 @@ input[type=text]:focus, input[type=password]:focus { border-color: var(--gold2);
   max-height: 260px; overflow-y: auto; }
 
 /* the server's pages (玩家信息) */
-.vsearch { width: min(520px, 100%); }
 .vcards.grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(420px, 1fr)); gap: 10px; }
 .vcards.grid .vcard { margin: 0; padding: 12px 14px; }
 .vcards.grid .vcard.wide { grid-column: 1 / -1; }
@@ -345,25 +331,6 @@ input[type=text]:focus, input[type=password]:focus { border-color: var(--gold2);
 .vtable td { padding: 7px 10px; border-top: 1px solid var(--line); vertical-align: top; font-variant-numeric: tabular-nums; }
 .vtable tbody tr:hover { background: var(--panel2); }
 .pager { display: flex; align-items: center; justify-content: center; gap: 14px; color: var(--muted); font-size: 13px; }
-
-/* the phone through this computer */
-.phone-exits { display: flex; flex-wrap: wrap; gap: 8px 20px; padding: 4px 0 2px; }
-.phone-exit { display: flex; align-items: center; gap: 8px; font-size: 13px; }
-.pill { font-size: 12px; padding: 1px 8px; border-radius: 10px; background: var(--panel2); color: var(--faint); }
-.pill.ok { background: #e5f6ea; color: var(--green); }
-.pill.warn { background: #fff6e6; color: var(--amber); }
-.pill.err { background: #fdeeed; color: var(--red); }
-.phone-nodes { display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 14px; margin-bottom: 14px; }
-.phone-node { display: flex; flex-direction: column; align-items: center; gap: 10px; }
-.phone-node .phone-steps, .phone-node .setting { align-self: stretch; }
-.phone-node .qr { width: 200px; height: 200px; background: #fff; padding: 8px; border-radius: 6px; border: 1px solid var(--line); image-rendering: pixelated; }
-.phone-qrs { display: flex; flex-wrap: wrap; justify-content: center; gap: 12px; }
-.phone-qrs figure { margin: 0; text-align: center; }
-.phone-qrs .qr { width: 170px; height: 170px; }
-.phone-qrs figcaption { font-weight: 600; margin-top: 4px; }
-.phone-qrs figcaption small { display: block; font-weight: 400; opacity: .75; }
-.phone-steps { margin: 6px 0 12px; padding-left: 20px; line-height: 1.8; font-size: 13px; }
-
 
 /* 群聊: laid out like WeChat's chat (2026-10-28 user), in the window's colours */
 .main:has(#page-chat.active) { display: flex; flex-direction: column; overflow: hidden; }
@@ -407,25 +374,132 @@ input[type=text]:focus, input[type=password]:focus { border-color: var(--gold2);
 .chat-send small { color: var(--faint); font-size: 12px; }
 .chat-send .btn { padding: 5px 16px; }
 .chat-send small.over { color: var(--red); }
-/* the phone page: one of the server's steps at a time */
-.phone-step-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 12px; }
-.phone-dots { display: flex; gap: 6px; }
-.phone-dot { width: 26px; height: 26px; border-radius: 50%; border: 1px solid var(--line); background: transparent; color: inherit; font-size: 12px; cursor: pointer; }
-.phone-dot.done { border-color: var(--blue, #1769e0); color: var(--blue, #1769e0); }
-.phone-dot.active { background: var(--blue, #1769e0); border-color: var(--blue, #1769e0); color: #fff; font-weight: 600; }
-.phone-step-body { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 20px; align-items: start; }
-.phone-step-body.single { grid-template-columns: 1fr; }
-.phone-step-text h3 { margin: 0 0 6px; }
-.phone-step-text p { margin: 0 0 10px; line-height: 1.8; font-size: 14px; }
-.phone-step-media { display: flex; flex-direction: column; align-items: center; gap: 8px; max-width: 360px; }
-.phone-step-media .inline-form input { width: 300px; }
+
+/* ===== the same in app.css and classic.css from here on: colours only through the variables ===== */
+
+/* A banner's close button says so (2026-11-07 user: the × alone was too small to be seen). */
+.banner .close { flex: none; gap: 4px; padding: 5px 10px; font-size: 12px; background: transparent; color: inherit;
+  border-color: currentColor; }
+.banner .close svg { width: 12px; height: 12px; }
+.banner .close:hover:not(:disabled) { background: color-mix(in srgb, currentColor 10%, transparent); border-color: currentColor; }
+.banner .close .left { font-variant-numeric: tabular-nums; }
+
+/* 概览: what the top bar's figures are, in words; the accounts with their push and the phone. */
+.ov-stats { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 12px; margin-bottom: 16px; }
+.ov-stat { padding: 12px 14px; border-radius: var(--radius); background: var(--panel); border: 1px solid var(--line); min-width: 0; }
+.ov-stat span { display: block; color: var(--muted); font-size: 12px; }
+.ov-stat b { display: block; margin: 4px 0 2px; font-size: 20px; font-weight: 600; font-variant-numeric: tabular-nums;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ov-stat small { display: block; color: var(--faint); font-size: 12px; line-height: 1.5; }
+.ov-stat.warn b { color: var(--amber); }
+.ov-account .main-text b { font-weight: 600; }
+.ov-account .sub-line { display: flex; align-items: center; gap: 8px; margin-top: 2px; font-size: 12px; }
+.push { color: var(--faint); overflow: hidden; text-overflow: ellipsis; }
+.push.ok { color: var(--green); }
+.push.warn { color: var(--amber); }
+.push.err { color: var(--red); }
+.ov-account .link { font-size: 12px; flex: none; }
+
+/* 账号: the name and its state, then what it is, then what can be done with it. */
+.account-head .who b { display: flex; align-items: center; gap: 10px; font-size: 16px; }
+.account-head .who b .state { font-weight: 400; }
+.account-head .who small { margin-top: 4px; }
+.account-actions { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; padding: 12px 20px; border-top: 1px solid var(--line); }
+.account-actions .hint { font-size: 12px; }
+.account-actions .danger-text { margin-left: auto; color: var(--red); }
+.add-head { display: flex; align-items: baseline; gap: 12px; flex-wrap: wrap; margin-bottom: 12px; }
+.add-head .muted { font-size: 12px; }
+
+/* 查询: the name box is wide enough for its hint. */
+.vtoolbar .vfilters { flex: 1; }
+.vsearch { width: min(520px, 100%); }
+.vsearch input { min-width: 280px; }
+
+/* 提醒: a setting a line, its help one line under its name, its switch or choices beside it. */
+.prefs-note { margin: 0 0 12px; }
+.pref-groups { display: grid; grid-template-columns: repeat(auto-fit, minmax(440px, 1fr)); gap: 0 16px; align-items: start; }
+.pref-group h3 { margin-bottom: 2px; }
+.pref { display: flex; align-items: center; justify-content: space-between; gap: 16px; padding: 10px 0; border-bottom: 1px solid var(--line); }
+.pref:last-child { border-bottom: 0; padding-bottom: 0; }
+.pref-text { min-width: 0; }
+.pref-text b { font-weight: 600; }
+.pref-text small { display: block; margin-top: 2px; color: var(--muted); font-size: 12px; line-height: 1.5; }
+.segmented { flex: none; display: inline-flex; border: 1px solid var(--line2); border-radius: 4px; overflow: hidden; }
+.segmented label { padding: 5px 12px; font-size: 13px; cursor: pointer; color: var(--muted); white-space: nowrap; }
+.segmented label + label { border-left: 1px solid var(--line2); }
+.segmented label:hover { color: var(--text); }
+.segmented label.active { background: var(--gold); color: var(--bg); }
+.segmented input { display: none; }
+
+/* 手机: the choosers on one line, the step filling the window, 上一步 / 下一步 at its bottom; no scrolling. */
+.main:has(#page-phone.active) { display: flex; flex-direction: column; overflow: hidden; }
+#page-phone.active { display: flex; flex-direction: column; flex: 1; min-height: 0; padding-top: 16px; padding-bottom: 16px; }
+#page-phone .banner { margin-bottom: 10px; }
+#phone-box { flex: 1; min-height: 0; display: flex; flex-direction: column; }
+.phone-bar { display: flex; align-items: center; gap: 10px 24px; flex-wrap: wrap; margin-bottom: 12px; }
+.phone-bar .vfilter > span { width: auto; }
+.phone-dots { display: flex; gap: 6px; margin-left: auto; }
+.phone-dot { width: 26px; height: 26px; border-radius: 50%; border: 1px solid var(--line2); background: transparent; color: var(--muted);
+  font-size: 12px; cursor: pointer; }
+.phone-dot.done { border-color: var(--gold); color: var(--gold); }
+.phone-dot.active { background: var(--gold); border-color: var(--gold); color: var(--bg); font-weight: 600; }
+.phone-step { flex: 1; min-height: 0; display: flex; flex-direction: column; margin-bottom: 0; padding: 20px 24px 16px; }
+.phone-step-body { flex: 1; min-height: 0; overflow-y: auto; display: flex; gap: 28px; align-items: flex-start; }
+.phone-step-media { flex: none; }
+.phone-step-media .qr { display: block; width: 212px; height: 212px; padding: 8px; border-radius: 6px; background: #fff;
+  border: 1px solid var(--line); image-rendering: pixelated; }
+.qr-none { width: 212px; height: 212px; display: grid; place-items: center; padding: 16px; text-align: center; border-radius: 6px;
+  border: 1px dashed var(--line2); color: var(--faint); font-size: 13px; }
+.spin.dark { border-color: var(--line2); border-top-color: var(--gold); width: 22px; height: 22px; }
+.phone-step-text { flex: 1; min-width: 0; }
+.phone-step-text h3 { display: flex; align-items: center; gap: 10px; margin: 0 0 10px; font-size: 17px; }
+.step-no { display: inline-grid; place-items: center; width: 24px; height: 24px; border-radius: 50%; background: var(--gold);
+  color: var(--bg); font-size: 13px; }
+.phone-step-text > p { margin: 0 0 12px; line-height: 1.8; }
+.phone-step-text .row-actions { margin-top: 10px; align-items: center; }
 .phone-check { font-weight: 600; }
 .phone-check.ok { color: var(--green); }
 .phone-check.bad { color: var(--red); }
-.phone-check.wait { opacity: .75; font-weight: 400; }
-.phone-step-nav { display: flex; justify-content: space-between; margin-top: 16px; }
-@media (max-width: 720px) { .phone-step-body { grid-template-columns: 1fr; } }
-.phone-qr { margin: 6px 0; display: inline-block; text-align: center; }
-.phone-qr .qr { width: 180px; height: 180px; background: #fff; padding: 8px; border-radius: 6px; image-rendering: pixelated; }
-.phone-qr figcaption { font-weight: 600; margin-top: 4px; }
-.phone-qr figcaption small { display: block; font-weight: 400; opacity: .75; }
+.phone-check.wait { color: var(--muted); font-weight: 400; }
+.phone-links { margin-top: 16px !important; color: var(--faint); font-size: 12px !important; line-height: 1.6 !important; }
+.phone-links .link { font-size: 12px; }
+.phone-links .sep { margin: 0 8px; }
+.phone-sub { font-size: 12px !important; color: var(--muted); line-height: 1.7 !important; }
+.phone-sub code { word-break: break-all; }
+.phone-sub .link { font-size: 12px; margin-right: 4px; }
+.phone-bark { max-width: 520px; margin-top: 4px; }
+.phone-step-nav { flex: none; display: flex; align-items: center; justify-content: space-between; padding-top: 14px; margin-top: 12px;
+  border-top: 1px solid var(--line); }
+.phone-step-nav .btn { min-width: 96px; }
+.invisible { visibility: hidden; }
+
+/* the sidebar, narrower (2026-11-07 user: more room on the right) */
+.nav-item { white-space: nowrap; }
+.nav-item.nav-main { gap: 8px; padding: 12px 8px; }
+.brand { padding-bottom: 20px; }
+
+/* the overview's status, compact: the figures and lists below it are what is read */
+.hero { padding: 14px 20px; gap: 16px; margin-bottom: 12px; }
+.hero-icon { width: 44px; height: 44px; }
+.hero-icon svg { width: 22px; height: 22px; }
+.hero-text h2 { font-size: 16px; margin-bottom: 2px; }
+.ov-stats { margin-bottom: 12px; }
+
+/* 提醒 in columns: a choice's buttons under its name */
+.pref-groups { grid-template-columns: repeat(auto-fit, minmax(380px, 1fr)); }
+.pref.choice { flex-direction: column; align-items: stretch; gap: 8px; }
+.pref.choice .segmented { align-self: flex-start; }
+
+/* many banners on 手机 scroll among themselves: the step keeps the window */
+.main:has(#page-phone.active) .banners { flex: none; max-height: 34%; overflow-y: auto; padding-bottom: 0; }
+.phone-step { min-height: 280px; }
+
+.brand strong { white-space: nowrap; }
+.phone-step-body { container-type: size; }
+@container (max-height: 236px) { .phone-step-media .qr, .qr-none { width: 160px; height: 160px; } }
+
+@media (max-width: 900px) {
+  .ov-stats { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .phone-step-media .qr, .qr-none { width: 172px; height: 172px; }
+  .vsearch input { min-width: 0; }
+}

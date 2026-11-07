@@ -274,7 +274,7 @@ class Window(ThreadingHTTPServer):
             "set_ui": lambda: app.set_ui(body.get("key"), body.get("value")),
             "set_notice_pref": lambda: app.set_notice_pref(body.get("key"), body.get("value")),
             "personal": lambda: app.personal(int(index), body.get("page"), body.get("query")),
-            "phone": lambda: app.phone(int(index), reset=body.get("reset") is True),
+            "phone": lambda: app.phone(int(index), reset=body.get("reset") is True, part=body.get("part")),
             "phone_status": lambda: app.phone(int(index), status=True),
             "chat_send": lambda: app.chat.send(body.get("text")),
             "chat_older": lambda: app.chat.older(body.get("before")),

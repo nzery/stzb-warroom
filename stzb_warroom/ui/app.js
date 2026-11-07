@@ -65,9 +65,9 @@ const PAGES = {
   notices: ['通知', '服务器发来的通知'],
   chat: ['群聊', '所有开着本程序的人都在这里；消息只存在各自电脑上，没开程序时的消息收不到'],
   players: ['查询', '按名字查询'],
-  prefs: ['通知设置', '要哪些通知、推送哪些到手机'],
-  phone: ['手机', '用手机玩游戏、收推送：照下面的步骤做'],
-  accounts: ['账号', 'Token 与角色；手机推送在“手机”页绑定'],
+  prefs: ['提醒设置', '要哪些通知、推送哪些到手机'],
+  phone: ['手机', '用手机玩游戏、收推送：一步一步照着做'],
+  accounts: ['账号', '这台电脑上报的游戏账号'],
   settings: ['设置', '启动方式、网络组件与数据'],
   diagnostics: ['诊断', '检查运行环境，查看运行日志'],
   about: ['关于', ''],
@@ -86,6 +86,7 @@ const LOGIN_STEPS = '先打开本程序，再进入游戏；如果已经在游�
 const S = {
   data: null, tapped: null, nextFlip: Infinity, page: 'notices', filter: 'all', notices: [], logs: [], n: 0, l: 0,
   hiddenBefore: store.get('hiddenBefore', 0), dismissed: new Set(store.get('dismissed', [])),
+  closeAt: {},  // banners closing by themselves: when (banner)
   seenNotices: store.get('seenNotices', 0), loaded: false, accountsKey: '', prefsKey: '', busy: new Set(),
   // The server's pages (玩家信息), as it gave them: {query, data, error, loading, key} each.
   personal: { players: { query: {} } },
@@ -182,6 +183,11 @@ function ago(seconds) {
   if (delta < 3600) return `${Math.floor(delta / 60)} 分钟前`;
   if (delta < 86400) return `${Math.floor(delta / 3600)} 小时前`;
   return `${Math.floor(delta / 86400)} 天前`;
+}
+// A count as it fits the top bar: 128,456 up to 99,999, then 12.8万 (2026-11-07 user: room for big ones).
+function count(n) {
+  if (n == null) return '-';
+  return n < 100000 ? n.toLocaleString() : `${(n / 10000).toFixed(n < 1000000 ? 1 : 0).replace(/\.0$/, '')}万`;
 }
 function clock(seconds, withDate = false) {
   const date = new Date(seconds * 1000);
@@ -296,8 +302,8 @@ function renderChrome(d) {
   $('side-state').textContent = view.side;
   $('side-detail').textContent = `版本 ${d.app_version}`;
   const s = d.stats;
-  $('m-uploaded').textContent = s.uploaded.toLocaleString();
-  $('m-pending').textContent = s.pending == null ? '-' : s.pending.toLocaleString();
+  $('m-uploaded').textContent = count(s.uploaded);
+  $('m-pending').textContent = count(s.pending);
   $('m-last').textContent = s.uploaded_at ? ago(s.uploaded_at) : '-';
   $('m-last-at').title = s.uploaded_at ? '最近一次上传 ' + clock(s.uploaded_at) : (d.capture.state === 'running' ? '登录游戏后开始上传' : '还没有上传');
   $('m-conn').textContent = s.connections;
@@ -310,9 +316,30 @@ function renderChrome(d) {
   document.title = d.capture.state === 'error' || problems ? '工作台 · 需要处理' : '工作台';
 }
 
-function banner(kind, iconName, text, actions = '', id = '') {
-  return `<div class="banner ${kind}"${id ? ` data-id="${esc(id)}"` : ''}><i>${icon(iconName)}</i><div class="text">${text}</div>${actions}${id ? '<button class="close" data-dismiss="1" title="关闭">×</button>' : ''}</div>`;
+// A banner with an id can be closed: a button that says so, the × alone was too small to be seen
+// (2026-11-07 user). `closes`: it closes by itself at S.closeAt[closes] (ms), counting down on the button.
+function banner(kind, iconName, text, actions = '', id = '', closes = '') {
+  const left = closes ? `<span class="left" data-closes="${esc(closes)}"></span>` : '';
+  return `<div class="banner ${kind}"${id ? ` data-id="${esc(id)}"` : ''}><i>${icon(iconName)}</i><div class="text">${text}</div>${actions}${id ? `<button class="btn close" data-dismiss="1">${icon('cross')}关闭${left}</button>` : ''}</div>`;
 }
+function tickBanners() {
+  for (const el of document.querySelectorAll('#banners [data-closes]')) {
+    const name = el.dataset.closes;
+    // Not while the mouse is on it: someone reading the notes.
+    if (el.closest('.banner').matches(':hover')) S.closeAt[name] = Math.max(S.closeAt[name], Date.now() + 5000);
+    const left = Math.ceil((S.closeAt[name] - Date.now()) / 1000);
+    if (left <= 0) { closeBanner(el.closest('.banner').dataset.id); return; }
+    el.textContent = `（${left} 秒）`;
+  }
+}
+function closeBanner(id) {
+  S.dismissed.add(id);
+  store.set('dismissed', [...S.dismissed].slice(-50));
+  render();
+}
+setInterval(tickBanners, 1000);
+// The notes of the version just updated to stay this long, then close by themselves (2026-11-07 user).
+const UPDATED_SHOWN = 30;
 
 function renderBanners(d) {
   const parts = [];
@@ -339,11 +366,13 @@ function renderBanners(d) {
   }
   if (d.update) parts.push(updateBanner(d.update));
   // The first start of a new version: what it brought, until the player closes it.
-  if (d.updated && !S.dismissed.has('updated-' + d.updated.version)) {
-    parts.push(banner('info', 'check', `<b>已更新到 ${esc(d.updated.version)}</b>${releaseNotes(d.updated.notes, true)}`, '', 'updated-' + d.updated.version));
+  const updatedId = d.updated ? 'updated-' + d.updated.version : '';
+  if (d.updated && !S.dismissed.has(updatedId)) {
+    S.closeAt.notes = S.closeAt.notes || Date.now() + UPDATED_SHOWN * 1000;
+    parts.push(banner('info', 'check', `<b>已更新到 ${esc(d.updated.version)}</b>${releaseNotes(d.updated.notes, true)}`, '', updatedId, 'notes'));
   }
   const html = parts.join('');
-  if ($('banners').dataset.html !== html) { $('banners').innerHTML = html; $('banners').dataset.html = html; }
+  if ($('banners').dataset.html !== html) { $('banners').innerHTML = html; $('banners').dataset.html = html; tickBanners(); }
 }
 
 const UPDATE_STATE = {
@@ -383,11 +412,35 @@ function renderOverview(d) {
     : view.cls === 'wait' && d.capture.state === 'running' ? '<button class="btn primary" data-action="restart_capture">重新抓包</button>'
     : view.cls === 'idle' ? '<button class="btn primary" data-action="start">开始上报</button>' : '';
   if ($('hero-actions').dataset.html !== actions) { $('hero-actions').innerHTML = actions; $('hero-actions').dataset.html = actions; }
-  $('ov-accounts').innerHTML = d.tokens.length ? d.tokens.map((a) => {
+  // What the top bar's figures are, said in words (2026-11-07 user: nobody finds the hover tips).
+  const st = d.stats, running = d.capture.state === 'running';
+  const tile = (label, value, note, cls = '') => `<div class="ov-stat${cls}"><span>${label}</span><b>${esc(value)}</b><small>${esc(note)}</small></div>`;
+  const stats = [
+    tile('已上传', st.uploaded.toLocaleString(), '这次打开程序后上传的数据条数'),
+    tile('待上传', st.pending == null ? '-' : st.pending.toLocaleString(), st.pending ? '网络断了先存在本机，连上后补传' : '没有积压，都传上去了', st.pending ? ' warn' : ''),
+    tile('最近上传', st.uploaded_at ? ago(st.uploaded_at) : '-', st.uploaded_at ? clock(st.uploaded_at) : running ? '登录游戏后开始上传' : '还没有上传'),
+    tile('游戏连接', String(st.connections), st.connections ? '最近 5 分钟看到的游戏连接' : '最近 5 分钟没看到：没在玩时正常'),
+  ].join('');
+  if ($('ov-stats').dataset.html !== stats) { $('ov-stats').innerHTML = stats; $('ov-stats').dataset.html = stats; }
+  // The accounts with their push binding, and the phone through this computer (2026-11-07 user:
+  // the push's state is here, not on 账号).
+  const phone = d.phone || { exits: [] };
+  const pipes = (phone.exits || []).reduce((n, e) => n + (e.pipes || 0), 0);
+  const exitProblem = (phone.exits || []).map((e) => EXIT_PROBLEMS[e.state]).find(Boolean);
+  const rows = d.tokens.map((a) => {
     const [label, cls] = accountState(a);
-    const bark = a.bark ? (a.bark.bound ? '<span class="tag">Bark 已绑定</span>' : '<span class="tag warn">Bark 未绑定</span>') : '';
-    return `<div class="mini"><span class="main-text">${esc(a.role ? roleName(a.role.label) : a.name || a.token)}</span>${bark}<span class="state ${cls}">${label}</span></div>`;
-  }).join('') : '<div class="empty">还没有账号</div>';
+    const b = a.state !== 'invalid' && a.bark;
+    const push = !b ? '' : !b.bound ? '<span class="push warn">手机推送未绑定</span><button class="link" data-goto="phone">去绑定</button>'
+      : b.error ? `<span class="push err" title="${esc(b.error)}">推送失败：${esc(b.error)}</span><button class="link" data-goto="phone">去看看</button>`
+      : `<span class="push ok">推送到${b.kind === 'ntfy' ? '安卓' : ' iPhone'}</span>`;
+    return `<div class="mini ov-account"><div class="main-text"><b>${esc(a.role ? roleName(a.role.label) : a.name || a.token)}</b>${push ? `<div class="sub-line">${push}</div>` : ''}</div><span class="state ${cls}">${label}</span></div>`;
+  });
+  if (d.tokens.length && phone.running && !phone.waiting) {
+    const [text, cls] = exitProblem ? [exitProblem, 'warn'] : pipes ? [`手机正在经这台电脑玩：${pipes} 条游戏连接`, 'ok'] : ['没有手机经这台电脑玩', ''];
+    rows.push(`<div class="mini ov-account"><div class="main-text"><b>手机</b><div class="sub-line"><span class="push ${cls}">${esc(text)}</span></div></div><button class="btn ghost small" data-goto="phone">设置</button></div>`);
+  }
+  const accounts = rows.join('') || '<div class="empty">还没有账号</div>';
+  if ($('ov-accounts').dataset.html !== accounts) { $('ov-accounts').innerHTML = accounts; $('ov-accounts').dataset.html = accounts; }
 
   const gone = withdrawnArmies();
   const recent = latestOfPlaces(S.notices.filter((n) => n.seq > S.hiddenBefore && !n.hidden && !withdrawnAll(n, gone)))
@@ -555,8 +608,6 @@ function renderAccounts(d) {
   const key = JSON.stringify(d.tokens);
   if (key === S.accountsKey) return;
   S.accountsKey = key;
-  const typed = {};
-  document.querySelectorAll('[data-bark-input]').forEach((input) => { typed[input.dataset.barkInput] = input.value; });
   $('account-list').innerHTML = d.tokens.map((a, index) => {
     const [label, cls] = accountState(a);
     const role = a.role ? a.role.label : '';
@@ -568,34 +619,19 @@ function renderAccounts(d) {
     else if (a.state === 'pending') problem = '<div class="account-problem warn">这个 Token 需要管理员审批，审批后才能看到这个账号的通知和推送。可以先联系管理员。</div>';
     else if (a.state === 'no_role') problem = '<div class="account-problem warn">还没收到这个账号的游戏登录。' + LOGIN_STEPS + '。</div>';
     else if (a.state === 'offline') problem = `<div class="account-problem warn">暂时连不上服务器（${esc(a.error || '')}），稍后会自动重试。</div>`;
-    // The server gives the link of the account's website once the account is set up.
-    const site = a.state !== 'invalid' && /^https:\/\//.test(a.site || '') ? `<div class="bark"><div class="label"><b>网站</b>网页</div>
-      <div class="value"><small>这个账号的网站。链接请只发给自己人，拿到链接的人都能看。</small></div>
-      <div class="row-actions"><a class="btn primary small" href="${esc(a.site)}" target="_blank" rel="noopener">打开</a>
-      <button class="btn ghost small" data-copy-site="${index}" type="button">复制链接</button></div></div>` : '';
-    // Push is bound on the phone page now (2026-11-07 user); here only whether it is.
-    const bark = a.state !== 'invalid' && a.bark ? `<div class="bark"><div class="label"><b>手机推送</b>${a.bark.bound ? (a.bark.kind === 'ntfy' ? 'ntfy' : 'Bark') : ''}</div>
-      <div class="value">${a.bark.bound ? `<span class="state ok">已绑定${a.bark.kind === 'ntfy' ? '安卓' : ' iPhone'}</span>${a.bark.error ? ` <small class="err">上一条推送失败：${esc(a.bark.error)}</small>` : ''}`
-        : '<small>还没绑定：到“手机”页选好手机，照最后一步绑定。</small>'}</div>
-      <div class="row-actions"><button class="btn ghost small" data-goto="phone">${a.bark.bound ? '管理' : '去绑定'}</button></div></div>` : '';
+    // The name and state first, what it is next, then what can be done with it (2026-11-07 user:
+    // the page was hard to read). Push is bound on 手机 and shown on 概览.
+    const site = a.state !== 'invalid' && /^https:\/\//.test(a.site || '')
+      ? `<a class="btn primary small" href="${esc(a.site)}" target="_blank" rel="noopener">打开网站</a>
+        <button class="btn ghost small" data-copy-site="${index}" type="button">复制网站链接</button><span class="muted hint">链接只发给自己人</span>` : '';
+    const facts = [role ? role.split(' · ').slice(1).join(' · ') : '还没有角色信息', a.name, `<span class="token-text">${esc(a.token)}</span>`]
+      .filter(Boolean).map((f, i, all) => (i === all.length - 1 ? f : esc(f))).join(' · ');
     return `<div class="card account ${a.state === 'invalid' ? 'invalid' : ''}">
       <div class="account-head"><span class="avatar">${esc(title.slice(0, 1))}</span>
-        <div class="who"><b>${esc(title)}</b><small>${esc(role || '还没有角色信息')} · ${a.name ? esc(a.name) + ' · ' : ''}<span class="token-text">${esc(a.token)}</span></small></div>
-        <span class="state ${cls}">${label}</span>
-        <button class="btn ghost small" data-action="remove_token" data-index="${index}" data-confirm="${a.state === 'ok' ? '这个 Token 已认领角色、正常上报。删除后这个账号的数据不再上传；再用邀请码重新加入，要等管理员确认或原 Token 停用一天后才换过来。确定删除？' : '删除这个 Token？删除后这个账号的数据不再上传。'}">删除</button></div>
-      ${problem}${site}${bark}</div>`;
+        <div class="who"><b>${esc(title)}<span class="state ${cls}">${label}</span></b><small>${facts}</small></div></div>
+      ${problem}
+      <div class="account-actions">${site}<button class="btn ghost small danger-text" data-action="remove_token" data-index="${index}" data-confirm="${a.state === 'ok' ? '这个 Token 已认领角色、正常上报。删除后这个账号的数据不再上传；再用邀请码重新加入，要等管理员确认或原 Token 停用一天后才换过来。确定删除？' : '删除这个 Token？删除后这个账号的数据不再上传。'}">删除账号</button></div></div>`;
   }).join('') || '<div class="card empty">还没有账号。在下面添加管理员发给你的 Token。</div>';
-  document.querySelectorAll('[data-bark-input]').forEach((input) => { input.value = typed[input.dataset.barkInput] || ''; });
-}
-
-// How an Android phone subscribes to its ntfy topic: the QR code, the server and topic to type in, the steps.
-function ntfyCard(n) {
-  const qr = n.qr ? `<img class="qr" alt="ntfy 订阅二维码" src="${svgImage(n.qr)}">` : '';
-  return `<div class="ntfy-sub">${qr}<div>
-    <div class="setting"><div><b>服务器</b><p><code>${esc(n.server)}</code></p></div>${copyButton(n.server, '复制')}</div>
-    <div class="setting"><div><b>主题</b><p><code>${esc(n.topic)}</code></p></div>${copyButton(n.topic, '复制')}</div>
-    <ol class="phone-steps">${(n.steps || []).map((s) => `<li>${esc(s)}</li>`).join('')}</ol>
-    ${n.note ? `<small class="muted">${esc(n.note)}</small>` : ''}</div></div>`;
 }
 
 // The notice settings: the page as the server gives it (texts and all), the same for every account.
@@ -609,20 +645,21 @@ function renderPrefs(d) {
     return;
   }
   const values = p.values || {};
+  // One line a setting: its name and one line of help, the switch or the choices beside it; a
+  // choice's help is the chosen option's (2026-11-07 user: short, on one screen, no scrolling).
   const item = (it) => {
-    const head = `<div><b>${esc(it.label)}</b><p>${esc(it.help)}</p></div>`;
     if (it.type === 'switch') {
-      return `<div class="setting">${head}<label class="switch"><input type="checkbox" data-pref="${esc(it.key)}"${values[it.key] ? ' checked' : ''}><span></span></label></div>`;
+      return `<div class="pref"><div class="pref-text"><b>${esc(it.label)}</b><small>${esc(it.help)}</small></div>
+        <label class="switch"><input type="checkbox" data-pref="${esc(it.key)}"${values[it.key] ? ' checked' : ''}><span></span></label></div>`;
     }
-    return `<div class="setting column">${head}<div class="options">${(it.options || []).map((o) => {
-      const on = o.value === values[it.key];
-      return `<label class="option${on ? ' active' : ''}"><input type="radio" name="pref-${esc(it.key)}" data-pref="${esc(it.key)}" value="${esc(o.value)}"${on ? ' checked' : ''}>
-        <span><b>${esc(o.label)}</b><small>${esc(o.help)}</small></span></label>`;
-    }).join('')}</div></div>`;
+    const chosen = (it.options || []).find((o) => o.value === values[it.key]);
+    return `<div class="pref choice"><div class="pref-text"><b>${esc(it.label)}</b><small>${esc(chosen ? chosen.help : it.help)}</small></div>
+      <div class="segmented">${(it.options || []).map((o) => `<label class="${o === chosen ? 'active' : ''}" title="${esc(o.help)}">
+        <input type="radio" name="pref-${esc(it.key)}" data-pref="${esc(it.key)}" value="${esc(o.value)}"${o === chosen ? ' checked' : ''}>${esc(o.label)}</label>`).join('')}</div></div>`;
   };
   $('prefs').innerHTML = (p.note ? `<p class="muted prefs-note">${esc(p.note)}</p>` : '')
     + (p.error ? banner('warn', 'info', esc(p.error)) : '')
-    + p.groups.map((g) => `<div class="card settings"><h3>${esc(g.title)}</h3>${g.items.map(item).join('')}</div>`).join('');
+    + `<div class="pref-groups">${p.groups.map((g) => `<div class="card pref-group"><h3>${esc(g.title)}</h3>${g.items.map(item).join('')}</div>`).join('')}</div>`;
 }
 
 // ---------------------------------------------------------------- the server's pages (玩家信息)
@@ -740,38 +777,56 @@ function personalClick(event) {
 }
 
 // ---------------------------------------------------------------- the phone through this computer
-// The server's page (texts, nodes and their QR codes) as it made it; the QR code is shown as an
-// image, so nothing the server sends runs here.
+// The server's steps (texts and checks) as it made them, one at a time; a step's QR code is shown
+// as an image, so nothing the server sends runs here. The page asks for the steps when it opens
+// and for a QR code when its step is shown (2026-11-07 user: the whole page at once was slow).
 
 // Only the latest call's answer is shown: a read that set out before a reset and comes back after
 // it would put back the QR code the reset just revoked.
 let phoneCall = 0;
 
-async function loadPhone(reset = false) {
+// What an answer has: the steps, or one QR code (a server before 1.18's asked for a part gives the
+// whole page: all of it is taken).
+function takePhone(view, data) {
+  if (!data || typeof data !== 'object') return;
+  if ('problem' in data) view.problem = data.problem;
+  if (data.guide) view.guide = data.guide;
+  view.parts = view.parts || {};
+  if (Array.isArray(data.nodes) && data.nodes.length) view.parts.node = data.nodes[0];
+  if (data.rules) view.parts.rules = data.rules;
+  if (data.android) view.parts.sub = data.android;
+}
+
+// `part`: 'guide' (the steps) or a step's QR code ('node', 'rules', 'sub'); `reset` a new key first
+// (the whole page comes back).
+async function loadPhone(part = 'guide', reset = false) {
   const account = personalAccount();
-  const view = S.phone;
   if (!account) { S.phone = {}; renderPhone(S.data); return; }
-  const call = ++phoneCall;
-  view.loading = true;
-  renderPhone(S.data);
   const role = account.a.role.id;
+  if (S.phone.role !== role) S.phone = { role };
+  const view = S.phone;
+  const call = ++phoneCall;
+  view.loading = part;
+  renderPhone(S.data);
   try {
-    const data = await act('phone', { index: account.index, reset }, { quiet: true });
-    if (call !== phoneCall || personalAccount()?.a.role.id !== role) return;
-    Object.assign(view, { data, error: null, role });
-    if (reset) toast('已换新节点：手机要重新扫码，旧的 30 秒内失效');
+    const data = await act('phone', reset ? { index: account.index, reset } : { index: account.index, part }, { quiet: true });
+    if (call !== phoneCall || S.phone !== view) return;
+    if (reset) view.parts = {};
+    takePhone(view, data);
+    view.error = null;
+    if (reset) toast('已换新的二维码：手机要删掉旧的、重新扫码，旧的 30 秒内失效');
   } catch (error) {
-    if (call === phoneCall) view.error = error.message || String(error);
+    if (call === phoneCall && S.phone === view) view.error = error.message || String(error);
   } finally {
-    if (call === phoneCall) {
-      view.loading = false;
+    if (call === phoneCall && S.phone === view) {
+      view.loading = null;
       renderPhone(S.data);
     }
   }
 }
 
 const svgImage = (svg) => `data:image/svg+xml;base64,${btoa(unescape(encodeURIComponent(svg)))}`;
-const copyButton = (text, label) => `<button class="btn ghost small" data-copy-text="${esc(text)}">${icon('copy').replace('<svg', '<svg width="14" height="14"')}${esc(label)}</button>`;
+const copyLink = (text, label) => `<button class="link" data-copy-text="${esc(text)}">${esc(label)}</button>`;
 
 // Problems of the exits, at the top of the page (nothing while all is well).
 const EXIT_PROBLEMS = {
@@ -786,25 +841,23 @@ function phoneProblems(p) {
   return p.exits.filter((e) => EXIT_PROBLEMS[e.state]).map((e) => banner('warn', 'info', esc(EXIT_PROBLEMS[e.state])));
 }
 
-// The push binding of one account (Bark on an iPhone, ntfy on Android), the same actions as before.
+// The push binding of one account (Bark on an iPhone, ntfy on Android), under the step's text.
 function pushBlock(a, index, os) {
   if (!a.bark) return '<p class="muted">这个账号暂时不能绑定推送。</p>';
   if (a.bark.bound) {
-    const ntfy = a.bark.kind === 'ntfy' ? a.bark.android : null;
     const phone = a.bark.kind === 'ntfy' ? '安卓手机' : 'iPhone';
-    return `<div class="bark"><div class="label"><b>已绑定</b>${a.bark.kind === 'ntfy' ? 'ntfy' : 'Bark'}</div>
-      <div class="value"><span class="state ok">已绑定</span> <span class="token-text">${esc(a.bark.address)}</span>
-      ${a.bark.error ? `<small class="err">上一条推送失败：${esc(a.bark.error)}</small>` : `<small>敌袭等需要你下令的通知会推送到这台${phone}。</small>`}</div>
+    const ntfy = a.bark.kind === 'ntfy' ? a.bark.android : null;
+    const sub = ntfy ? `<p class="phone-sub">ntfy 里扫左边的码订阅；不能扫码时手动添加：服务器 <code>${esc(ntfy.server)}</code> ${copyLink(ntfy.server, '复制')}，
+      主题 <code>${esc(ntfy.topic)}</code> ${copyLink(ntfy.topic, '复制')}</p>` : '';
+    return `${sub}<div class="row-actions"><span class="token-text">已绑定 ${esc(a.bark.address)}</span></div>
       <div class="row-actions"><button class="btn ghost small" data-action="bark_test" data-index="${index}">发测试推送</button>
-      <button class="btn ghost small" data-action="bark_unbind" data-index="${index}" data-confirm="解绑后这台${phone}不再收到推送，确定吗？">解绑</button></div></div>`
-      + (ntfy ? ntfyCard(ntfy) : '');
+      <button class="btn ghost small" data-action="bark_unbind" data-index="${index}" data-confirm="解绑后这台${phone}不再收到推送，确定吗？">解绑</button></div>`;
   }
   return os === 'android'
-    ? `<div class="row-actions"><button class="btn primary small" data-action="ntfy_bind" data-index="${index}">绑定安卓</button></div>`
-    : `<form class="inline-form" data-bark-form="${index}"><input type="text" data-bark-input="${index}" spellcheck="false" autocomplete="off" placeholder="粘贴 Bark 里的地址：https://api.day.app/…">
-      <button class="btn primary small" type="submit">绑定</button></form>`;
+    ? `<div class="row-actions"><button class="btn primary" data-action="ntfy_bind" data-index="${index}">绑定安卓</button></div>`
+    : `<form class="inline-form phone-bark" data-bark-form="${index}"><input type="text" data-bark-input="${index}" spellcheck="false" autocomplete="off" placeholder="粘贴 Bark 里的地址：https://api.day.app/…">
+      <button class="btn primary" type="submit">绑定</button></form>`;
 }
-
 // Which step of the phone's guide the player is on, per phone (kept, so the page opens where they were).
 function phoneStep(os) { return Number((S.phoneStep || {})[os]) || 0; }
 
@@ -849,6 +902,16 @@ function watchPhone(on) {
   phoneTimer = setTimeout(tick, 0);
 }
 
+// The QR codes a step shows (the server's `show`), their part of the page and what copying gives.
+const PHONE_QR = {
+  node: { alt: '节点的二维码', link: (q) => q.link, copy: '复制节点链接', keyed: true },
+  rules: { alt: '规则的二维码', link: (q) => q.link, copy: '复制规则地址' },  // the same for everyone: nothing to reset
+  sub: { alt: '订阅的二维码', link: (q) => q.sub, copy: '复制订阅地址', keyed: true },
+};
+
+// The page: the account / phone / step choosers on one line, then the step: its QR code on the
+// left (2026-11-07 user: easier on the eye), its text, check and what to do on the right, and
+// 上一步 / 下一步 at the card's bottom, where they stay. It fits the window without scrolling.
 function renderPhone(d) {
   if (!d) return;
   const p = d.phone || { exits: [] };
@@ -859,64 +922,62 @@ function renderPhone(d) {
   const problems = phoneProblems(p).join('');
   if (S.phoneProblems !== problems) { S.phoneProblems = problems; $('phone-status').innerHTML = problems; }
   const pipes = p.exits.reduce((n, e) => n + (e.pipes || 0), 0);
-  const guide = os && view.data && view.data.guide ? view.data.guide[os] || [] : [];
-  const current = guide[Math.min(phoneStep(os), Math.max(guide.length - 1, 0))];
-  watchPhone(S.page === 'phone' && Boolean(account) && current?.check === 'connect');
-  const key = JSON.stringify([view.data, view.error, view.loading, accounts.map(({ a }) => a.role.id), account?.a.role.id,
-    account?.a.bark, os, pipes, S.phoneStep, S.phoneSeen]);
+  const steps = os && view.guide ? view.guide[os] || [] : [];
+  const at = Math.min(phoneStep(os), Math.max(steps.length - 1, 0));
+  const step = steps[at];
+  watchPhone(S.page === 'phone' && Boolean(account) && step?.check === 'connect');
+  const qrPart = step && PHONE_QR[step.show] ? step.show : null;
+  const { key: _drawn, ...shown } = view;
+  const key = JSON.stringify([shown, accounts.map(({ a }) => a.role.id), account?.a.role.id, account?.a.bark, os, pipes, S.phoneStep, S.phoneSeen]);
   if (key === view.key) return;
-  view.key = key;
   const box = $('phone-box');
   if (!account) {
+    view.key = key;
     box.innerHTML = `<div class="card empty">${(d.tokens || []).length ? '还没有能用手机玩的账号：Token 审批通过（先在这台电脑上登录一次游戏）后就有。' : '先到“账号”添加账号。'}</div>`;
     return;
   }
-  if (!view.data && !view.error && !view.loading) { loadPhone(); return; }
+  if (view.role !== account.a.role.id || (!view.guide && view.problem === undefined && !view.error && !view.loading)) { loadPhone(); return; }
+  if (qrPart && !(view.parts || {})[qrPart] && !view.loading && !view.error && !view.problem) { loadPhone(qrPart); return; }
+  view.key = key;
   const typed = [...document.querySelectorAll('#phone-box [data-bark-input]')].map((input) => input.value)[0] || '';
-  const who = accounts.length > 1 ? `<div class="vfilter"><span>账号</span><div class="chips">${accounts.map(({ a }) =>
-    `<button class="chip${a.role.id === account.a.role.id ? ' active' : ''}" data-phone-role="${esc(a.role.id)}">${esc(roleName(a.role.label))}</button>`).join('')}</div></div>` : '';
-  const phones = `<div class="vfilter"><span>手机</span><div class="chips">${[['iphone', 'iPhone'], ['android', '安卓']].map(([id, label]) =>
-    `<button class="chip${os === id ? ' active' : ''}" data-phone-os="${id}">${label}</button>`).join('')}</div></div>`;
-  const data = view.data;
-  const qr = (svg, alt) => svg ? `<img class="qr" alt="${alt}" src="${svgImage(svg)}">` : '<div class="empty">服务器没给二维码，复制到手机上导入</div>';
+  const chips = (name, items) => `<div class="vfilter"><span>${name}</span><div class="chips">${items}</div></div>`;
+  const who = accounts.length > 1 ? chips('账号', accounts.map(({ a }) =>
+    `<button class="chip${a.role.id === account.a.role.id ? ' active' : ''}" data-phone-role="${esc(a.role.id)}">${esc(roleName(a.role.label))}</button>`).join('')) : '';
+  const phones = chips('手机', [['iphone', 'iPhone'], ['android', '安卓']].map(([id, label]) =>
+    `<button class="chip${os === id ? ' active' : ''}" data-phone-os="${id}">${label}</button>`).join(''));
+  const dots = steps.length ? `<div class="phone-dots">${steps.map((st, i) => `<button class="phone-dot${i === at ? ' active' : ''}${i < at ? ' done' : ''}" data-phone-step="${i}" title="${esc(st.title)}">${i + 1}</button>`).join('')}</div>` : '';
+  const bar = `<div class="phone-bar">${who}${phones}${dots}</div>`;
   let body;
-  if (view.error) body = banner('warn', 'info', esc(view.error));
-  else if (!data) body = '<div class="card empty">正在读取…</div>';
-  else if (data.problem) body = banner('warn', 'info', esc(data.problem));
-  else if (!data.guide) body = banner('warn', 'info', '服务器还没有分步说明，请稍后再试。');
-  else if (!os) body = '<div class="card empty">先在上面选你的手机是 iPhone 还是安卓，下面会一步一步告诉你怎么做。</div>';
+  if (view.error) body = banner('warn', 'info', `${esc(view.error)}`, '<button class="btn" data-phone-retry="1">重试</button>');
+  else if (view.problem) body = banner('warn', 'info', esc(view.problem));
+  else if (!view.guide) body = '<div class="card empty">正在读取…</div>';
+  else if (!os) body = '<div class="card empty">先在上面选你的手机是 iPhone 还是安卓，然后一步一步照着做。</div>';
+  else if (!step) body = banner('warn', 'info', '服务器还没有这种手机的步骤，请稍后再试。');
   else {
-    // One of the server's steps at a time (server/phone_http.py `guide`): its text and check on the
-    // left, what it shows (a QR code, the push binding) on the right, 上一步 / 下一步 below.
-    const steps = data.guide[os] || [];
-    const at = Math.min(phoneStep(os), Math.max(steps.length - 1, 0));
-    const step = steps[at] || { title: '', text: '' };
-    const node = data.nodes[0];
-    const shown = {
-      node: () => node ? `<figure class="phone-qr">${qr(node.qr, '节点的二维码')}<figcaption>① 节点<small>小火箭首页扫</small></figcaption></figure>
-        <div class="row-actions">${copyButton(node.link, '复制节点链接')}</div>` : '',
-      rules: () => data.rules ? `<figure class="phone-qr">${qr(data.rules.qr, '规则的二维码')}<figcaption>② 规则<small>小火箭“配置”页扫</small></figcaption></figure>
-        <div class="row-actions">${copyButton(data.rules.link, '复制规则地址')}</div>` : '',
-      sub: () => data.android ? `<figure class="phone-qr">${qr(data.android.qr, '订阅的二维码')}<figcaption>订阅<small>v2rayNG 里扫</small></figcaption></figure>
-        <div class="row-actions">${copyButton(data.android.sub, '复制订阅地址')}</div>` : '',
-      push: () => pushBlock(account.a, account.index, os),
-    };
-    const media = (shown[step.show] || (() => ''))();
-    const dots = steps.map((st, i) => `<button class="phone-dot${i === at ? ' active' : ''}${i < at ? ' done' : ''}" data-phone-step="${i}" title="${esc(st.title)}">${i + 1}</button>`).join('');
-    body = `<div class="card phone-step">
-      <div class="phone-step-head"><span class="muted">第 ${at + 1} / ${steps.length} 步</span><div class="phone-dots">${dots}</div></div>
-      <div class="phone-step-body${media ? '' : ' single'}">
-        <div class="phone-step-text"><h3>${esc(step.title)}</h3><p>${esc(step.text)}</p>${phoneCheck(step, account, pipes)}</div>
-        ${media ? `<div class="phone-step-media">${media}</div>` : ''}</div>
+    let media = '', extra = '';
+    if (qrPart) {
+      const part = view.parts[qrPart];
+      media = part && part.qr ? `<img class="qr" alt="${PHONE_QR[qrPart].alt}" src="${svgImage(part.qr)}">`
+        : part ? '<div class="qr-none">服务器没给二维码，复制下面的地址到手机上导入</div>' : '<div class="qr-none"><span class="spin dark"></span></div>';
+      extra = part ? `<p class="phone-links">${copyLink(PHONE_QR[qrPart].link(part), PHONE_QR[qrPart].copy)}（手机上扫不了码时用）${PHONE_QR[qrPart].keyed
+        ? '<span class="sep">·</span>二维码外泄了？<button class="link" data-phone-reset="1">换新的</button>' : ''}</p>` : '';
+    } else if (step.show === 'push') {
+      const ntfy = account.a.bark?.bound && account.a.bark.kind === 'ntfy' ? account.a.bark.android : null;
+      if (ntfy?.qr) media = `<img class="qr" alt="ntfy 订阅二维码" src="${svgImage(ntfy.qr)}">`;
+      extra = pushBlock(account.a, account.index, os);
+    }
+    body = `<div class="card phone-step${media ? '' : ' single'}">
+      <div class="phone-step-body">${media ? `<div class="phone-step-media">${media}</div>` : ''}
+        <div class="phone-step-text"><h3><span class="step-no">${at + 1}</span>${esc(step.title)}</h3><p>${esc(step.text)}</p>
+          ${phoneCheck(step, account, pipes)}${extra}</div></div>
       <div class="phone-step-nav"><button class="btn ghost" data-phone-step="${at - 1}"${at ? '' : ' disabled'}>上一步</button>
-        ${at < steps.length - 1 ? `<button class="btn primary" data-phone-step="${at + 1}">下一步</button>` : ''}</div></div>
-    <div class="card"><div class="setting"><div><b>二维码外泄了？</b><p>拿到二维码或订阅地址的人能借你的电脑连游戏。重置后换新的，旧的 30 秒内失效，手机要重新扫码。</p></div>
-      <button class="btn ghost small" data-phone-reset="1"${view.loading ? ' disabled' : ''}>重置</button></div></div>`;
+        <span class="muted">第 ${at + 1} / ${steps.length} 步</span>
+        <button class="btn primary${at < steps.length - 1 ? '' : ' invisible'}" data-phone-step="${at + 1}">下一步</button></div></div>`;
   }
-  const refresh = `<button class="btn ghost small" data-phone-refresh="1"${view.loading ? ' disabled' : ''}>${view.loading ? '<span class="spin"></span>读取中' : `${icon('refresh').replace('<svg', '<svg width="14" height="14"')}刷新`}</button>`;
-  box.innerHTML = `<div class="vtoolbar"><div class="vfilters">${who}${phones}</div>${refresh}</div>` + body;
+  box.innerHTML = bar + body;
   document.querySelectorAll('#phone-box [data-bark-input]').forEach((input) => { input.value = typed; });
 }
+
 
 async function phoneClick(event) {
   if (S.page !== 'phone') return false;
@@ -950,10 +1011,10 @@ async function phoneClick(event) {
     return true;
   }
   if (event.target.closest('[data-phone-reset]')) {
-    if (!S.phone.loading && confirm('换一个新节点？旧二维码 30 秒内失效，手机上要删掉旧节点、重新扫码。')) loadPhone(true);
+    if (!S.phone.loading && confirm('换新的二维码？旧的 30 秒内失效，手机上要删掉旧节点、重新扫码。')) loadPhone('guide', true);
     return true;
   }
-  if (event.target.closest('[data-phone-refresh]')) { loadPhone(); return true; }
+  if (event.target.closest('[data-phone-retry]')) { S.phone.error = null; renderPhone(S.data); return true; }
   return false;
 }
 
@@ -1131,7 +1192,8 @@ $('chat-text').addEventListener('input', chatCount);
 
 function show(page) {
   S.page = page;
-  if (page === 'phone') S.phone = {};  // read again each time it is opened (renderPhone asks)
+  // The steps are read again each time it is opened (renderPhone asks); the QR codes read are kept.
+  if (page === 'phone') S.phone = S.phone.role ? { role: S.phone.role, parts: S.phone.parts } : {};
   document.querySelectorAll('.nav-item').forEach((b) => b.classList.toggle('active', b.dataset.page === page));
   document.querySelectorAll('.page').forEach((p) => p.classList.toggle('active', p.id === 'page-' + page));
   $('page-title').textContent = PAGES[page][0];
@@ -1163,11 +1225,7 @@ document.addEventListener('click', async (event) => {
   if (personalClick(event)) return;
   if (await phoneClick(event)) return;
   const dismiss = event.target.closest('[data-dismiss]');
-  if (dismiss) {
-    S.dismissed.add(dismiss.closest('.banner').dataset.id);
-    store.set('dismissed', [...S.dismissed].slice(-50));
-    return render();
-  }
+  if (dismiss) return closeBanner(dismiss.closest('.banner').dataset.id);
   const copy = event.target.closest('[data-copy-site]');
   if (copy) {
     try { await navigator.clipboard.writeText(S.data.tokens[Number(copy.dataset.copySite)].site); toast('链接已复制'); }
