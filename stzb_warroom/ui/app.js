@@ -963,7 +963,6 @@ function avatar(name) {
 function renderChat(d) {
   const c = d.chat || { state: 'connecting' };
   const [stateText, stateClass] = (CHAT_STATES[c.state] || CHAT_STATES.connecting)(c);
-  $('chat-title').textContent = c.online != null && c.state === 'online' ? `群聊（${c.online}）` : '群聊';
   $('chat-state').textContent = stateText;
   $('chat-state').className = stateClass;
   // Which account speaks (2026-10-31 user: testing with another account without removing one).
