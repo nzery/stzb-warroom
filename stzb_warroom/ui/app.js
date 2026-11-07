@@ -66,8 +66,8 @@ const PAGES = {
   chat: ['群聊', '所有开着本程序的人都在这里；消息只存在各自电脑上，没开程序时的消息收不到'],
   players: ['查询', '按名字查询'],
   prefs: ['通知设置', '要哪些通知、推送哪些到手机'],
-  phone: ['手机连接', '手机的连接经这台电脑出去，照常上报'],
-  accounts: ['账号与推送', 'Token、角色与手机推送（iPhone 用 Bark，安卓用 ntfy）'],
+  phone: ['手机', '用手机玩游戏、收推送：照下面的步骤做'],
+  accounts: ['账号', 'Token 与角色；手机推送在“手机”页绑定'],
   settings: ['设置', '启动方式、网络组件与数据'],
   diagnostics: ['诊断', '检查运行环境，查看运行日志'],
   about: ['关于', ''],
@@ -92,6 +92,7 @@ const S = {
   personalRole: store.get('personalRole', null),
   // The server's phone page for the chosen account: {data, error, loading, role, key}.
   phone: {},
+  phoneOs: store.get('phoneOs', null),  // the phone page's iPhone / Android
   // 群聊: the messages this page has (the newest when it opened, older ones as asked), the program's
   // cursor, whether older ones are kept, and the newest one read (the badge counts those after it);
   // each account's messages are apart, so all of it starts again when the chat's account changes.
@@ -570,27 +571,11 @@ function renderAccounts(d) {
       <div class="value"><small>这个账号的网站。链接请只发给自己人，拿到链接的人都能看。</small></div>
       <div class="row-actions"><a class="btn primary small" href="${esc(a.site)}" target="_blank" rel="noopener">打开</a>
       <button class="btn ghost small" data-copy-site="${index}" type="button">复制链接</button></div></div>` : '';
-    let bark = '';
-    if (a.state !== 'invalid') {
-      // An Android phone (ntfy, kind "ntfy") comes with how to subscribe to it, as the server gives it.
-      const ntfy = a.bark && a.bark.bound && a.bark.kind === 'ntfy' ? a.bark.android : null;
-      if (a.bark && a.bark.bound) {
-        const phone = ntfy ? '安卓手机' : 'iPhone';
-        bark = `<div class="bark"><div class="label"><b>${ntfy ? '安卓推送' : 'iPhone 推送'}</b>${ntfy ? 'ntfy' : 'Bark'}</div>
-          <div class="value"><span class="state ok">已绑定</span> <span class="token-text">${esc(a.bark.address)}</span>
-          ${a.bark.error ? `<small class="err">上一条推送失败：${esc(a.bark.error)}</small>` : `<small>敌袭等需要你下令的通知会推送到这台${phone}。</small>`}</div>
-          <div class="row-actions"><button class="btn ghost small" data-action="bark_test" data-index="${index}">发测试推送</button>
-          <button class="btn ghost small" data-action="bark_unbind" data-index="${index}" data-confirm="解绑后这台${phone}不再收到推送，确定吗？">解绑</button></div></div>`;
-        if (ntfy) bark += ntfyCard(ntfy);
-      } else if (a.bark) {
-        bark = `<div class="bark"><div class="label"><b>iPhone 推送</b><button class="link" data-guide="1" type="button">怎么获取？</button></div>
-          <form class="inline-form" data-bark-form="${index}"><input type="text" data-bark-input="${index}" spellcheck="false" autocomplete="off" placeholder="粘贴 Bark 里的地址：https://api.day.app/…">
-          <button class="btn primary small" type="submit">绑定</button></form></div>
-          <div class="bark"><div class="label"><b>安卓推送</b>ntfy</div>
-          <div class="value"><small>安卓手机用 ntfy App 收推送，点“绑定安卓”后扫二维码订阅。</small></div>
-          <div class="row-actions"><button class="btn primary small" data-action="ntfy_bind" data-index="${index}">绑定安卓</button></div></div>`;
-      }
-    }
+    // Push is bound on the phone page now (2026-11-07 user); here only whether it is.
+    const bark = a.state !== 'invalid' && a.bark ? `<div class="bark"><div class="label"><b>手机推送</b>${a.bark.bound ? (a.bark.kind === 'ntfy' ? 'ntfy' : 'Bark') : ''}</div>
+      <div class="value">${a.bark.bound ? `<span class="state ok">已绑定${a.bark.kind === 'ntfy' ? '安卓' : ' iPhone'}</span>${a.bark.error ? ` <small class="err">上一条推送失败：${esc(a.bark.error)}</small>` : ''}`
+        : '<small>还没绑定：到“手机”页选好手机，照最后一步绑定。</small>'}</div>
+      <div class="row-actions"><button class="btn ghost small" data-goto="phone">${a.bark.bound ? '管理' : '去绑定'}</button></div></div>` : '';
     return `<div class="card account ${a.state === 'invalid' ? 'invalid' : ''}">
       <div class="account-head"><span class="avatar">${esc(title.slice(0, 1))}</span>
         <div class="who"><b>${esc(title)}</b><small>${esc(role || '还没有角色信息')} · ${a.name ? esc(a.name) + ' · ' : ''}<span class="token-text">${esc(a.token)}</span></small></div>
@@ -618,7 +603,7 @@ function renderPrefs(d) {
   if (key === S.prefsKey) return;
   S.prefsKey = key;
   if (!p.groups) {
-    $('prefs').innerHTML = `<div class="card empty">${esc(!d.tokens.length ? '先到“账号与推送”添加账号，再来设置通知。' : p.error || '正在读取通知设置…')}</div>`;
+    $('prefs').innerHTML = `<div class="card empty">${esc(!d.tokens.length ? '先到“账号”添加账号，再来设置通知。' : p.error || '正在读取通知设置…')}</div>`;
     return;
   }
   const values = p.values || {};
@@ -701,7 +686,7 @@ function renderPersonal(page) {
   if (!box || key === view.key) return;
   view.key = key;
   if (!account) {
-    box.innerHTML = `<div class="card empty">${(S.data?.tokens || []).length ? '还没有可以查看的账号：Token 审批通过、登录过一次游戏后就能看。' : '先到“账号与推送”添加账号。'}</div>`;
+    box.innerHTML = `<div class="card empty">${(S.data?.tokens || []).length ? '还没有可以查看的账号：Token 审批通过、登录过一次游戏后就能看。' : '先到“账号”添加账号。'}</div>`;
     return;
   }
   const d = view.data;
@@ -756,10 +741,6 @@ function personalClick(event) {
 // The server's page (texts, nodes and their QR codes) as it made it; the QR code is shown as an
 // image, so nothing the server sends runs here.
 
-const EXIT_STATES = { online: ['已连接', 'ok'], connecting: ['连接中', ''], refused: ['不接受这台电脑的账号', 'err'],
-  busy: ['另一台电脑正在用', 'warn'],
-  unreachable: ['连不上', 'warn'], stopped: ['已停止', ''] };
-
 // Only the latest call's answer is shown: a read that set out before a reset and comes back after
 // it would put back the QR code the reset just revoked.
 let phoneCall = 0;
@@ -790,74 +771,92 @@ async function loadPhone(reset = false) {
 const svgImage = (svg) => `data:image/svg+xml;base64,${btoa(unescape(encodeURIComponent(svg)))}`;
 const copyButton = (text, label) => `<button class="btn ghost small" data-copy-text="${esc(text)}">${icon('copy').replace('<svg', '<svg width="14" height="14"')}${esc(label)}</button>`;
 
+// Problems of the exits, at the top of the page (nothing while all is well).
+const EXIT_PROBLEMS = {
+  refused: '中转不接受这台电脑的账号：账号可能还没审批通过，或已被停用。',
+  busy: '另一台电脑正在用这个账号转发手机的游戏连接：手机会经那台电脑出去。要用这台，先关掉那台电脑上的本程序。',
+  unreachable: '连不上中转，正在重试；手机暂时连不上游戏。',
+};
+
+function phoneProblems(p) {
+  if (!p.running) return [banner('warn', 'info', '上报没有运行，手机现在连不上游戏；到“概览”看原因。')];
+  if (p.waiting) return [banner('info', 'info', '正在向服务器要中转……账号审批通过后才有。')];
+  return p.exits.filter((e) => EXIT_PROBLEMS[e.state]).map((e) => banner('warn', 'info', esc(EXIT_PROBLEMS[e.state])));
+}
+
+// The push binding of one account (Bark on an iPhone, ntfy on Android), the same actions as before.
+function pushBlock(a, index, os) {
+  if (!a.bark) return '<p class="muted">这个账号暂时不能绑定推送。</p>';
+  if (a.bark.bound) {
+    const ntfy = a.bark.kind === 'ntfy' ? a.bark.android : null;
+    const phone = a.bark.kind === 'ntfy' ? '安卓手机' : 'iPhone';
+    return `<div class="bark"><div class="label"><b>已绑定</b>${a.bark.kind === 'ntfy' ? 'ntfy' : 'Bark'}</div>
+      <div class="value"><span class="state ok">已绑定</span> <span class="token-text">${esc(a.bark.address)}</span>
+      ${a.bark.error ? `<small class="err">上一条推送失败：${esc(a.bark.error)}</small>` : `<small>敌袭等需要你下令的通知会推送到这台${phone}。</small>`}</div>
+      <div class="row-actions"><button class="btn ghost small" data-action="bark_test" data-index="${index}">发测试推送</button>
+      <button class="btn ghost small" data-action="bark_unbind" data-index="${index}" data-confirm="解绑后这台${phone}不再收到推送，确定吗？">解绑</button></div></div>`
+      + (ntfy ? ntfyCard(ntfy) : '');
+  }
+  return os === 'android'
+    ? `<div class="row-actions"><button class="btn primary small" data-action="ntfy_bind" data-index="${index}">绑定安卓</button></div>`
+    : `<form class="inline-form" data-bark-form="${index}"><input type="text" data-bark-input="${index}" spellcheck="false" autocomplete="off" placeholder="粘贴 Bark 里的地址：https://api.day.app/…">
+      <button class="btn primary small" type="submit">绑定</button></form>`;
+}
+
 function renderPhone(d) {
   if (!d) return;
-  const p = d.phone || { enabled: false, exits: [] };
-  $('set-phone').checked = d.settings.phone_exit;
-  const nodes = S.phone.data?.nodes || [];
-  const name = (host) => nodes.find((n) => n.host === host)?.name || host;
-  $('phone-status').innerHTML = !p.enabled ? ''
-    : !p.running ? `<p class="muted">上报没有运行，现在不转发；到“概览”看原因。</p>`
-    : p.waiting ? `<p class="muted">正在向服务器要中转……账号审批通过后才有。</p>`
-    : `<div class="phone-exits">${p.exits.map((e) => {
-        const [label, cls] = EXIT_STATES[e.state] || [e.state, ''];
-        return `<div class="phone-exit"><b>${esc(name(e.relay))}</b><span class="pill ${cls}">${esc(label)}</span>`
-          + (e.pipes ? `<span class="muted">正在转发 ${e.pipes} 条游戏连接</span>` : '') + '</div>';
-      }).join('')}</div>`;
+  const p = d.phone || { exits: [] };
   const view = S.phone;
   const accounts = personalAccounts();
   const account = personalAccount();
-  const on = Boolean(d.settings.phone_exit);
-  const key = JSON.stringify([on, view.data, view.error, view.loading, accounts.map(({ a }) => a.role.id), account?.a.role.id]);
+  const os = S.phoneOs;
+  const problems = phoneProblems(p).join('');
+  if (S.phoneProblems !== problems) { S.phoneProblems = problems; $('phone-status').innerHTML = problems; }
+  const pipes = p.exits.reduce((n, e) => n + (e.pipes || 0), 0);
+  const key = JSON.stringify([view.data, view.error, view.loading, accounts.map(({ a }) => a.role.id), account?.a.role.id,
+    account?.a.bark, os, pipes]);
   if (key === view.key) return;
   view.key = key;
   const box = $('phone-box');
-  if (!on) { box.innerHTML = ''; return; }  // off: nothing below the switch
   if (!account) {
-    box.innerHTML = `<div class="card empty">${(d.tokens || []).length ? '还没有能用手机玩的账号：Token 审批通过（先在这台电脑上登录一次游戏）后就有。' : '先到“账号与推送”添加账号。'}</div>`;
+    box.innerHTML = `<div class="card empty">${(d.tokens || []).length ? '还没有能用手机玩的账号：Token 审批通过（先在这台电脑上登录一次游戏）后就有。' : '先到“账号”添加账号。'}</div>`;
     return;
   }
   if (!view.data && !view.error && !view.loading) { loadPhone(); return; }
+  const typed = [...document.querySelectorAll('#phone-box [data-bark-input]')].map((input) => input.value)[0] || '';
   const who = accounts.length > 1 ? `<div class="vfilter"><span>账号</span><div class="chips">${accounts.map(({ a }) =>
     `<button class="chip${a.role.id === account.a.role.id ? ' active' : ''}" data-phone-role="${esc(a.role.id)}">${esc(roleName(a.role.label))}</button>`).join('')}</div></div>` : '';
+  const phones = `<div class="vfilter"><span>手机</span><div class="chips">${[['iphone', 'iPhone'], ['android', '安卓']].map(([id, label]) =>
+    `<button class="chip${os === id ? ' active' : ''}" data-phone-os="${id}">${label}</button>`).join('')}</div></div>`;
   const data = view.data;
+  const qr = (svg, alt) => svg ? `<img class="qr" alt="${alt}" src="${svgImage(svg)}">` : '<div class="empty">服务器没给二维码，复制到手机上导入</div>';
   let body;
   if (view.error) body = banner('warn', 'info', esc(view.error));
   else if (!data) body = '<div class="card empty">正在读取…</div>';
   else if (data.problem) body = banner('warn', 'info', esc(data.problem));
+  else if (!data.guide) body = banner('warn', 'info', '服务器还没有分步说明，请稍后再试。');
+  else if (!os) body = '<div class="card empty">先在上面选你的手机是 iPhone 还是安卓，下面会一步一步告诉你怎么做。</div>';
   else {
-    // iPhone (a Shadowrocket node and its rule) and Android (a v2rayNG subscription) side by side,
-    // as the server gives them; a server without the Android part shows the iPhone alone.
+    // The server's steps for this phone, in order; under a step what it says to show (server/phone_http.py `guide`).
     const node = data.nodes[0];
-    const steps = (list) => `<ol class="phone-steps">${(list || []).map((s) => `<li>${esc(s)}</li>`).join('')}</ol>`;
-    const qr = (svg, alt) => svg ? `<img class="qr" alt="${alt}" src="${svgImage(svg)}">` : '<div class="empty">服务器没给二维码，复制到手机上导入</div>';
-    // With the server's rules (a Shadowrocket config: only the game to the node, the rest direct),
-    // two QR codes: the node, scanned on Shadowrocket's home tab, then the rules, on its config tab
-    // (scanned on the home tab they become a subscription); an older server's page has the rule to add by hand.
-    const rules = data.rules;
-    const iphone = !node ? '' : rules ? `<div class="card phone-node">
-      <h3>iPhone · 小火箭</h3>
-      <div class="phone-qrs"><figure>${qr(node.qr, 'iPhone 节点的二维码')}<figcaption>① 节点<small>小火箭首页扫</small></figcaption></figure>
-        <figure>${qr(rules.qr, 'iPhone 规则的二维码')}<figcaption>② 规则<small>小火箭“配置”页扫</small></figcaption></figure></div>
-      <div class="row-actions">${copyButton(node.link, '复制节点链接')}${copyButton(rules.link, '复制规则地址')}</div>
-      ${steps(rules.steps)}</div>` : `<div class="card phone-node">
-      <h3>iPhone · 小火箭</h3>
-      ${qr(node.qr, 'iPhone 的二维码')}
-      <div class="row-actions">${copyButton(node.link, '复制链接')}</div>
-      ${steps(data.steps)}
-      <div class="setting"><div><b>要加的规则</b><p><code>${esc(data.rule)}</code></p></div>${copyButton(data.rule, '复制规则')}</div></div>`;
-    const android = data.android ? `<div class="card phone-node">
-      <h3>安卓 · v2rayNG</h3>
-      ${qr(data.android.qr, '安卓的二维码')}
-      <div class="row-actions">${copyButton(data.android.sub, '复制订阅地址')}</div>
-      ${steps(data.android.steps)}</div>` : '';
-    body = `<p class="muted prefs-note">${esc(data.note || '')}</p>
-    <div class="phone-nodes">${iphone}${android}</div>
+    const shown = {
+      exit: () => pipes ? `<p class="muted">正在转发 ${pipes} 条手机的游戏连接。</p>` : '',
+      node: () => node ? `<figure class="phone-qr">${qr(node.qr, '节点的二维码')}<figcaption>① 节点<small>小火箭首页扫</small></figcaption></figure>
+        <div class="row-actions">${copyButton(node.link, '复制节点链接')}</div>` : '',
+      rules: () => data.rules ? `<figure class="phone-qr">${qr(data.rules.qr, '规则的二维码')}<figcaption>② 规则<small>小火箭“配置”页扫</small></figcaption></figure>
+        <div class="row-actions">${copyButton(data.rules.link, '复制规则地址')}</div>` : '',
+      sub: () => data.android ? `<figure class="phone-qr">${qr(data.android.qr, '订阅的二维码')}<figcaption>订阅<small>v2rayNG 里扫</small></figcaption></figure>
+        <div class="row-actions">${copyButton(data.android.sub, '复制订阅地址')}</div>` : '',
+      push: () => pushBlock(account.a, account.index, os),
+    };
+    body = `<ol class="phone-guide">${(data.guide[os] || []).map((step) => `<li class="card">
+      <h3>${esc(step.title)}</h3><p>${esc(step.text)}</p>${(shown[step.show] || (() => ''))()}</li>`).join('')}</ol>
     <div class="card"><div class="setting"><div><b>二维码外泄了？</b><p>拿到二维码或订阅地址的人能借你的电脑连游戏。重置后换新的，旧的 30 秒内失效，手机要重新扫码。</p></div>
       <button class="btn ghost small" data-phone-reset="1"${view.loading ? ' disabled' : ''}>重置</button></div></div>`;
   }
   const refresh = `<button class="btn ghost small" data-phone-refresh="1"${view.loading ? ' disabled' : ''}>${view.loading ? '<span class="spin"></span>读取中' : `${icon('refresh').replace('<svg', '<svg width="14" height="14"')}刷新`}</button>`;
-  box.innerHTML = `<div class="vtoolbar"><div class="vfilters">${who}</div>${refresh}</div>` + body;
+  box.innerHTML = `<div class="vtoolbar"><div class="vfilters">${who}${phones}</div>${refresh}</div>` + body;
+  document.querySelectorAll('#phone-box [data-bark-input]').forEach((input) => { input.value = typed; });
 }
 
 async function phoneClick(event) {
@@ -866,6 +865,13 @@ async function phoneClick(event) {
   if (copy) {
     try { await navigator.clipboard.writeText(copy.dataset.copyText); toast('已复制'); }
     catch { toast('复制失败', true); }
+    return true;
+  }
+  const phone = event.target.closest('[data-phone-os]');
+  if (phone) {
+    S.phoneOs = phone.dataset.phoneOs;
+    store.set('phoneOs', S.phoneOs);
+    renderPhone(S.data);
     return true;
   }
   const role = event.target.closest('[data-phone-role]');
@@ -1090,11 +1096,6 @@ document.addEventListener('click', async (event) => {
   }
   if (personalClick(event)) return;
   if (await phoneClick(event)) return;
-  if (event.target.closest('[data-guide]')) {
-    const guide = document.querySelector('.guide');
-    guide.open = true;
-    return guide.scrollIntoView({ behavior: 'smooth', block: 'center' });
-  }
   const dismiss = event.target.closest('[data-dismiss]');
   if (dismiss) {
     S.dismissed.add(dismiss.closest('.banner').dataset.id);
@@ -1193,7 +1194,6 @@ document.addEventListener('change', async (event) => {
 $('set-theme').addEventListener('change', (e) => { store.set('theme', e.target.value); setTheme(e.target.value); });
 $('set-autostart').addEventListener('change', (e) => act('set_setting', { name: 'autostart', value: e.target.checked }).catch(() => {}));
 $('set-keep').addEventListener('change', (e) => act('set_setting', { name: 'keep_running', value: e.target.checked }).catch(() => {}));
-$('set-phone').addEventListener('change', (e) => act('set_setting', { name: 'phone_exit', value: e.target.checked }).catch(() => {}));
 $('pick-dumpcap').addEventListener('click', (e) => withBusy(e.currentTarget, '等待选择', async () => {
   const path = await act('pick_dumpcap');
   if (path) { toast('已选择 ' + path); if (S.data && S.data.capture.state !== 'running') act('start', {}, { quiet: true }).catch(() => {}); }

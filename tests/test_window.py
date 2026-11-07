@@ -371,10 +371,14 @@ class AppTests(unittest.TestCase):
             self.assertEqual(app.snapshot()["capture"]["lost"], lost)
         app.session = None
 
-    def test_the_phone_exit_is_off_until_asked_and_follows_the_capture(self):
+    def test_the_phone_exit_is_always_on_and_follows_the_capture(self):
+        """No switch since 2026-11-07: the exits run with the capture, a saved "off" is not kept."""
+        (self.folder / "settings.json").write_text('{"phone_exit": false}', encoding="utf-8")
         app = self.app(saved=GOOD)
-        self.assertFalse(app.snapshot()["settings"]["phone_exit"])
-        self.assertFalse(app.snapshot()["phone"]["enabled"])
+        self.assertTrue(app.snapshot()["settings"]["phone_exit"])
+        self.assertTrue(app.snapshot()["phone"]["enabled"])
+        with self.assertRaises(ValueError):
+            app.set_setting("phone_exit", False)
 
         class FakeExit:
             def __init__(self, origin):
@@ -393,7 +397,7 @@ class AppTests(unittest.TestCase):
         with unittest.mock.patch.object(appmod.relay, "relays_of", return_value=["https://r.example"]), \
                 unittest.mock.patch.object(appmod.relay, "start", side_effect=start):
             app.session = session
-            app.set_setting("phone_exit", True)
+            app._start_exits(session)
             for _ in range(100):
                 if session["exits"]:
                     break
@@ -401,10 +405,9 @@ class AppTests(unittest.TestCase):
             status = app.snapshot()["phone"]
             self.assertEqual(status["exits"], [{"relay": "r.example", "state": "online", "since": 1.0, "pipes": 2}])
             self.assertIn("r.example", app.diagnostics())
-            app.set_setting("phone_exit", False)
+            app._stop_exits(session)  # the capture stopping
             self.assertTrue(made[0].closed)
             self.assertEqual(session["exits"], [])
-        self.assertFalse(App(self.server, self.folder).settings["phone_exit"])  # saved off again
         session["stop"].set()
 
     def test_a_relay_named_later_gets_its_exit(self):
@@ -425,13 +428,13 @@ class AppTests(unittest.TestCase):
                     FakeExit(o) for o in origins]), \
                 unittest.mock.patch.object(appmod, "RELAYS_REFRESH", 0.01):
             app.session = session
-            app.set_setting("phone_exit", True)
+            app._start_exits(session)
             for _ in range(200):
                 if len(session["exits"]) == 2:
                     break
                 time.sleep(0.01)
             self.assertEqual([e.origin for e in session["exits"]], ["https://a.example", "https://b.example"])
-            app.set_setting("phone_exit", False)
+            app._stop_exits(session)
         session["stop"].set()
 
     def test_the_exits_say_a_failing_relay_once_in_a_while(self):

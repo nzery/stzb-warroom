@@ -96,41 +96,38 @@ async function main() {
   answer(3, 'resolve', { cards: [], empty: '乙' });
   await new Promise(setImmediate);
   assert.equal(vm.runInContext('S.personal.players.loading', context), false);
-  // the phone page: the server's QR code only as an image (nothing it sends runs), its texts escaped
-  vm.runInContext(`S.page = 'phone'; S.data.settings = { phone_exit: true };
+  // the phone page: pick the phone, then the server's steps in order; QR codes only as images, texts escaped
+  vm.runInContext(`S.page = 'phone'; S.phoneOs = null;
     S.data.phone = { enabled: true, running: true, waiting: false, exits: [{ relay: 'relay.example', state: 'online', since: 1, pipes: 1 }] };
-    S.phone = { role: 7, data: { problem: null, note: '<说明>', steps: ['扫码'], rule: 'DST-PORT,8001,率土战局-主节点',
-      nodes: [{ name: '率土战局-主节点', host: 'relay.example', link: 'vless://k@relay.example:443?type=ws#x',
-        qr: '<svg xmlns="http://www.w3.org/2000/svg"><script>alert(1)</script></svg>' }] } };
+    S.phone = { role: 7, data: { problem: null, note: '', steps: ['扫码'], rule: 'DST-PORT,8001,率土战局',
+      nodes: [{ name: '率土战局', host: 'relay.example', link: 'vless://k@relay.example:443?type=ws#x',
+        qr: '<svg xmlns="http://www.w3.org/2000/svg"><script>alert(1)</script></svg>' }],
+      rules: { link: 'https://api.example/v1/phone/r.conf', qr: '<svg xmlns="http://www.w3.org/2000/svg"></svg>', steps: [] },
+      android: { sub: 'https://api.example/v1/phone/sub?k=<x>', qr: '<svg xmlns="http://www.w3.org/2000/svg"></svg>', steps: [] },
+      guide: { iphone: [{ title: '<开>', text: '开着', show: 'exit' }, { title: '扫节点', text: '首页', show: 'node' },
+                        { title: '扫规则', text: '配置页', show: 'rules' }, { title: '收通知', text: 'Bark', show: 'push' }],
+               android: [{ title: '扫订阅', text: 'v2rayNG', show: 'sub' }, { title: '收通知', text: 'ntfy', show: 'push' }] } } };
     renderPhone(S.data);`, context);
-  const phone = nodes.get('phone-box').innerHTML;
-  assert.ok(phone.includes('<img class="qr"') && phone.includes('src="data:image/svg+xml;base64,'), phone);
-  assert.ok(!phone.includes('<svg xmlns') && !phone.includes('<script>'), 'the server\'s SVG is never inlined');
-  assert.ok(phone.includes('&lt;说明&gt;') && phone.includes('data-copy-text="vless://k@relay.example:443?type=ws#x"'));
-  assert.ok(phone.includes('data-phone-reset') && phone.includes('DST-PORT,8001,率土战局-主节点'));
-  const exits = nodes.get('phone-status').innerHTML;
-  assert.ok(exits.includes('率土战局-主节点') && exits.includes('已连接') && exits.includes('1 条'), exits);
-  assert.ok(!phone.includes('安卓'), 'a server without the Android part shows the iPhone alone');
-  assert.ok(phone.includes('<h3>iPhone · 小火箭</h3>'), phone);
-  // both phones side by side: each QR code under its name, no choice to make
-  vm.runInContext(`S.phone.data.android = { sub: 'https://api.example/v1/phone/sub?k=<x>', steps: ['装 v2rayNG'],
-      qr: '<svg xmlns="http://www.w3.org/2000/svg"></svg>' }; S.phone.key = null; renderPhone(S.data);`, context);
-  const both = nodes.get('phone-box').innerHTML;
-  assert.ok(both.indexOf('<h3>iPhone · 小火箭</h3>') < both.indexOf('<h3>安卓 · v2rayNG</h3>') && !both.includes('data-phone-os'), both);
-  assert.ok(both.includes('data-copy-text="https://api.example/v1/phone/sub?k=&lt;x&gt;"') && both.includes('装 v2rayNG'), both);
-  assert.ok(both.includes('DST-PORT,8001') && both.includes('data-phone-reset'), both);
-  assert.strictEqual((both.match(/<img class="qr"/g) || []).length, 2);
-  // the switch off: nothing below it
-  // a server with Shadowrocket's rules: two QR codes (node, then rules), its steps, no rule to copy by hand
-  vm.runInContext(`S.phone.data.rules = { link: 'shadowrocket://config/add/https://api.example/v1/phone/sub?r=1',
-      qr: '<svg xmlns="http://www.w3.org/2000/svg"></svg>', steps: ['扫 ② 规则'] }; renderPhone(S.data);`, context);
-  const ruled = nodes.get('phone-box').innerHTML;
-  assert.ok(ruled.indexOf('① 节点') < ruled.indexOf('② 规则') && ruled.includes('扫 ② 规则'), ruled);
-  assert.ok(!ruled.includes('要加的规则') && !ruled.includes('<svg xmlns'), ruled);
-  vm.runInContext(`S.data.settings = { phone_exit: false }; S.data.phone = { enabled: false, exits: [] }; renderPhone(S.data);`, context);
-  assert.strictEqual(nodes.get('phone-box').innerHTML, '');
-  assert.strictEqual(nodes.get('phone-status').innerHTML, '');
-  vm.runInContext(`S.data.settings = { phone_exit: true }; S.phone.key = null;`, context);
+  let phone = nodes.get('phone-box').innerHTML;
+  assert.ok(phone.includes('data-phone-os="iphone"') && phone.includes('data-phone-os="android"') && !phone.includes('<img'), phone);
+  assert.strictEqual(nodes.get('phone-status').innerHTML, '', 'nothing at the top while all is well');
+  vm.runInContext(`S.phoneOs = 'iphone'; renderPhone(S.data);`, context);
+  phone = nodes.get('phone-box').innerHTML;
+  assert.ok(phone.includes('&lt;开&gt;') && phone.indexOf('① 节点') < phone.indexOf('② 规则') && phone.includes('正在转发 1 条'), phone);
+  assert.ok(phone.includes('src="data:image/svg+xml;base64,') && !phone.includes('<svg xmlns') && !phone.includes('<script>'), 'the server\'s SVG is never inlined');
+  assert.ok(phone.includes('data-copy-text="vless://k@relay.example:443?type=ws#x"') && phone.includes('data-phone-reset'));
+  assert.strictEqual((phone.match(/<img class="qr"/g) || []).length, 2);
+  assert.ok(!phone.includes('订阅<small>'), 'the iPhone\'s steps only');
+  vm.runInContext(`S.phoneOs = 'android'; renderPhone(S.data);`, context);
+  phone = nodes.get('phone-box').innerHTML;
+  assert.ok(phone.includes('data-copy-text="https://api.example/v1/phone/sub?k=&lt;x&gt;"') && !phone.includes('① 节点'), phone);
+  assert.strictEqual((phone.match(/<img class="qr"/g) || []).length, 1);
+  // a problem of the exits shows at the top
+  vm.runInContext(`S.data.phone.exits[0].state = 'busy'; renderPhone(S.data);`, context);
+  assert.ok(nodes.get('phone-status').innerHTML.includes('另一台电脑正在用'));
+  vm.runInContext(`S.data.phone = { running: false, waiting: false, exits: [] }; renderPhone(S.data);`, context);
+  assert.ok(nodes.get('phone-status').innerHTML.includes('上报没有运行'));
+  vm.runInContext(`S.data.phone = { running: true, waiting: false, exits: [] }; S.phone.key = null;`, context);
   vm.runInContext(`S.phone = { role: 7, data: { problem: '还没审核通过', nodes: [], relays: [] } }; renderPhone(S.data);`, context);
   assert.ok(nodes.get('phone-box').innerHTML.includes('还没审核通过'));
   // a read that set out before a reset and comes back after it does not put back the revoked QR code

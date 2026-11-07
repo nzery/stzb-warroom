@@ -405,3 +405,13 @@ input[type=text]:focus, input[type=password]:focus { border-color: var(--gold2);
 .chat-send { display: flex; align-items: center; justify-content: flex-end; gap: 12px; }
 .chat-send small { color: var(--faint); font-size: 12px; }
 .chat-send small.over { color: var(--red); }
+/* the phone page's steps (the server's guide) */
+.phone-guide { list-style: none; counter-reset: step; margin: 0 0 14px; padding: 0; display: flex; flex-direction: column; gap: 12px; }
+.phone-guide > li { counter-increment: step; position: relative; padding-left: 52px; }
+.phone-guide > li::before { content: counter(step); position: absolute; left: 16px; top: 16px; width: 24px; height: 24px; border-radius: 50%; background: var(--gold); color: var(--bg); font-weight: 600; font-size: 13px; line-height: 24px; text-align: center; }
+.phone-guide h3 { margin: 0 0 4px; }
+.phone-guide p { margin: 0 0 8px; line-height: 1.7; font-size: 13px; }
+.phone-qr { margin: 6px 0; display: inline-block; text-align: center; }
+.phone-qr .qr { width: 180px; height: 180px; background: #fff; padding: 8px; border-radius: 6px; image-rendering: pixelated; }
+.phone-qr figcaption { font-weight: 600; margin-top: 4px; }
+.phone-qr figcaption small { display: block; font-weight: 400; opacity: .75; }

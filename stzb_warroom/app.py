@@ -54,7 +54,7 @@ ADAPTER_HINT = ("抓不到当前网络的数据，重装 Wireshark 通常没用�
                 "宽带拨号的电脑可以改用路由器或光猫拨号，或者把“诊断”页的诊断信息发给管理员。")
 HINTS = (  # what a player can do about a capture failure, from its text
     ("another capture process", "已经有一个程序在上报（可能是另一个窗口），先关掉它。"),
-    ("401", "所有 Token 都无效：到“账号与推送”检查 Token。"),
+    ("401", "所有 Token 都无效：到“账号”检查 Token。"),
     ("dumpcap not found", "没有找到 Wireshark：到“设置”里安装或手动选择 dumpcap.exe。"),
     ("no adapter found", "没有找到正在上网的网卡：确认这台电脑能上网，再点重试。"),
     ("NPF driver", "Npcap 没有运行：重新安装 Wireshark 并勾选 Npcap，装好后重启电脑再试。"),
@@ -202,23 +202,20 @@ class App:
             value = json.loads(self.settings_path.read_text(encoding="utf-8"))
         except (OSError, ValueError):
             value = {}
-        # phone_exit: the phone may play through this computer (relay.py); off until the player says.
-        return {"keep_running": True, "phone_exit": False, **(value if isinstance(value, dict) else {})}
+        # phone_exit: the phone may play through this computer (relay.py). Always on since 2026-11-07
+        # (the user: no switch, the phone page's steps are all a player needs); a saved "off" from
+        # the switch is not kept.
+        settings = {"keep_running": True, **(value if isinstance(value, dict) else {})}
+        settings["phone_exit"] = True
+        return settings
 
     def set_setting(self, name, value):
         if name == "autostart":
             winsys.set_autostart(bool(value))
-        elif name in ("keep_running", "phone_exit"):
+        elif name == "keep_running":
             with self.lock:
                 self.settings[name] = bool(value)
                 self._write_settings()
-                session = self.session
-            if name == "phone_exit" and session is not None:
-                if value:
-                    self._start_exits(session)
-                else:
-                    self._stop_exits(session)
-                    self.log("已关闭手机经本机连接游戏")
         else:
             raise ValueError(f"unknown setting {name}")
         self.touch()
@@ -744,7 +741,7 @@ class App:
             if self.session is not None:
                 return
             if not self.tokens:
-                raise ValueError("先到“账号与推送”添加 Token")
+                raise ValueError("先到“账号”添加 Token")
             dumpcap, places = self.find_dumpcap()
             if dumpcap is None:
                 self.log("没有找到 dumpcap，找过：" + "；".join(places), "error")
