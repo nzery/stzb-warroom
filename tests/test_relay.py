@@ -420,7 +420,9 @@ class RelaysTests(unittest.TestCase):
 
         for tokens in (["a", "public", "private"], ["private", "b", "public"]):
             self.assertEqual(sorted(relay.relays_of(Server(), tokens)), ["https://backup.example", "https://relay.example"])
-        self.assertEqual(relay.relays_of(Server(), ["a", "b"]), [])
+        self.assertEqual(relay.relays_of(Server(), ["b"]), [])  # answered: not approved
+        with self.assertRaises(ConnectionError):  # "a" got no answer: not known to be unapproved
+            relay.relays_of(Server(), ["a", "b"])
         server = Server()
         relay.relays_of(server, ["public"])
         self.assertEqual(server.paths, ["/v1/client/phone?only=relays"])  # no QR codes made for this

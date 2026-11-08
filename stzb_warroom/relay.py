@@ -644,8 +644,10 @@ def start(origins, tokens, log=None):
 def relays_of(server, tokens):
     """The relays any of the tokens may use, as the server names them (GET /v1/client/phone?only=relays,
     asked for each token: the public domain's and a private one's differ), in the order given;
-    [] when none has (not approved yet). A server without ?only=relays gets the whole page asked."""
-    found = []
+    [] when every token was answered and none has any (not approved yet). ConnectionError when there
+    are none but a token got no answer: nothing is known about that one, it may well be approved.
+    A server without ?only=relays gets the whole page asked."""
+    found, failed = [], None
     for token in tokens:
         try:
             try:
@@ -654,17 +656,23 @@ def relays_of(server, tokens):
                 if exc.code != 404:
                     raise
                 page = server.json("/v1/client/phone", token, timeout=20)
-        except (OSError, ValueError):
+        except (OSError, ValueError) as exc:
+            failed = exc
             continue
         relays = page.get("relays") if isinstance(page, dict) else None
         if isinstance(relays, list):
             found += [r for r in relays if isinstance(r, str) and r.startswith("https://")]
+    if failed is not None and not found:
+        raise ConnectionError(str(failed))
     return list(dict.fromkeys(found))[:4]
 
 
 def run(server, tokens, stop, log=None, origins=None):
     """The `relay` command: keep the exits open until `stop` is set."""
-    origins = origins or relays_of(server, tokens)
+    try:
+        origins = origins or relays_of(server, tokens)
+    except ConnectionError as exc:
+        raise SystemExit(f"连不上服务器：{exc}")
     if not origins:
         raise SystemExit("服务器没有给出中转：Token 要先审批通过")
     exits = start(origins, tokens, log=log)

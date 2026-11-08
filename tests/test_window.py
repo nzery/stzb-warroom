@@ -444,6 +444,55 @@ class AppTests(unittest.TestCase):
             app._stop_exits(session)
         session["stop"].set()
 
+    def ask_relays_once(self, app, session, relays_of):
+        """Run the exits' loop until it has asked once and logged what it logs for that."""
+        asked = threading.Event()
+
+        def ask(*args):
+            try:
+                return relays_of(*args)
+            finally:
+                asked.set()
+
+        with unittest.mock.patch.object(appmod.relay, "relays_of", side_effect=ask):
+            app.session = session
+            app._start_exits(session)
+            threads = [t for t in threading.enumerate() if t.name == "relays"]
+            self.assertTrue(asked.wait(5))
+            for _ in range(200):
+                if session["stop"].is_set() or any("手机经本机" in line["text"] for line in app.logs):
+                    break
+                time.sleep(0.01)
+            session["stop"].set()
+            for thread in threads:
+                thread.join(5)
+        return [line["text"] for line in app.logs if "手机经本机" in line["text"]]
+
+    def test_the_exits_tell_no_answer_from_not_approved(self):
+        def no_answer(*_):
+            raise ConnectionError("timed out")
+
+        app = self.app(saved=GOOD)
+        texts = self.ask_relays_once(app, {"stop": threading.Event(), "tokens": [GOOD], "exits": []}, no_answer)
+        self.assertEqual(len(texts), 1)
+        self.assertIn("连不上服务器（timed out）", texts[0])
+        self.assertNotIn("审批", texts[0])
+
+        app = self.app(saved=GOOD)
+        texts = self.ask_relays_once(app, {"stop": threading.Event(), "tokens": [GOOD], "exits": []}, lambda *_: [])
+        self.assertEqual(len(texts), 1)
+        self.assertIn("审批", texts[0])
+
+    def test_a_stopped_session_says_nothing_of_its_late_answer(self):
+        app = self.app(saved=GOOD)
+        session = {"stop": threading.Event(), "tokens": [GOOD], "exits": []}
+
+        def stopped_meanwhile(*_):
+            session["stop"].set()  # the capture restarted while this one waited for its answer
+            return []
+
+        self.assertEqual(self.ask_relays_once(app, session, stopped_meanwhile), [])
+
     def test_the_exits_say_a_failing_relay_once_in_a_while(self):
         app = self.app()
         for _ in range(3):

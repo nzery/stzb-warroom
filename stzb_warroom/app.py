@@ -572,20 +572,27 @@ class App:
         a token may use since (approved, moved to another domain): an exit is added for it."""
         mine = session["exits_run"] = object()  # an older run (the exit turned off and on) ends
 
+        def live():
+            return not session["stop"].is_set() and self.settings["phone_exit"] and session["exits_run"] is mine
+
         def run():
-            while not session["stop"].is_set() and self.settings["phone_exit"] and session["exits_run"] is mine:
-                origins = relay.relays_of(self.server, session["tokens"])
+            while live():
+                problem = "服务器还没给中转（账号要先审批通过）"
+                try:
+                    origins = relay.relays_of(self.server, session["tokens"])
+                except ConnectionError as exc:
+                    origins, problem = [], f"暂时连不上服务器（{exc}）"
                 with self.lock:
                     exits = session.get("exits") or []
                     known = {e.origin for e in exits}
                     new = [o for o in origins if o.rstrip("/") not in known]
-                    if new and not session["stop"].is_set() and self.settings["phone_exit"] \
-                            and session["exits_run"] is mine:
+                    if new and live():
                         session["exits"] = exits + relay.start(new, session["tokens"], log=self._exit_log)
                         if not exits:
                             self.log("手机经本机连接游戏：已开启")
-                if not origins and not exits:
-                    self.log("手机经本机连接游戏：服务器还没给中转（账号要先审批通过），稍后再试", "warn")
+                # Asking takes up to 20 s a token: this run may have been replaced meanwhile.
+                if not origins and not exits and live():
+                    self.log(f"手机经本机连接游戏：{problem}，稍后再试", "warn")
                 self.touch()
                 session["stop"].wait(RELAYS_REFRESH if session.get("exits") else RELAYS_EVERY)
             self.touch()
