@@ -85,7 +85,9 @@ class Handler(BaseHTTPRequestHandler):
             key = parse_qs(url.query).get("k", [""])[0]
             if key and hmac.compare_digest(key.encode(), self.server.key.encode()):
                 cookie = f"{COOKIE}={self.server.key}; Path=/; HttpOnly; SameSite=Strict"
-                return self.send(303, b"", headers=(("Location", url.path), ("Set-Cookie", cookie)))
+                # The notices' small window keeps its mode (main.js).
+                location = url.path + ("?mini=1" if parse_qs(url.query).get("mini") == ["1"] else "")
+                return self.send(303, b"", headers=(("Location", location), ("Set-Cookie", cookie)))
             if not self.key_ok():
                 return self.send(403, "请双击 stzb-warroom.exe 打开窗口。", "text/plain; charset=utf-8")
             return self.static("index.html" if url.path == "/" else "banner.html")

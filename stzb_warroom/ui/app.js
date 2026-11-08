@@ -28,6 +28,10 @@ const ICONS = {
 };
 const icon = (name) => `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">${ICONS[name] || ''}</svg>`;
 const $ = (id) => document.getElementById(id);
+// The notices alone, in the small window kept above the game (electron/main.js): the main window
+// still rings, counts what was seen and keeps the settings.
+const MINI = /[?&]mini=1(&|$)/.test(location.search || '');
+if (MINI) document.body?.classList.add('mini');
 const esc = (value) => String(value ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 // The page's own settings (the sound, banners closed, the list cleared, …) are kept by the program:
 // the page's storage starts empty at each start, the program listening on another port.
@@ -251,6 +255,7 @@ setInterval(() => {
   if (S.notices.length !== before) render();
 }, 15000);
 function announce(notice) {
+  if (MINI) return;
   if (notice.level !== 'alarm' || notice.hidden) return;
   if (store.get('sound', true)) beep();
 }
@@ -313,7 +318,7 @@ function renderChrome(d) {
   $('badge-chat').textContent = S.page === 'chat' || !unread ? '' : unread > 99 ? '99+' : unread;
   const problems = d.tokens.filter((a) => a.state === 'invalid' || a.state === 'problem').length;
   $('badge-accounts').textContent = problems || '';
-  document.title = d.capture.state === 'error' || problems ? '工作台 · 需要处理' : '工作台';
+  document.title = MINI ? '通知 · 置顶' : d.capture.state === 'error' || problems ? '工作台 · 需要处理' : '工作台';
 }
 
 // A banner with an id can be closed: a button that says so, the × alone was too small to be seen
@@ -601,7 +606,7 @@ function renderNotices() {
     $('notice-list').innerHTML = html; $('notice-list').dataset.html = html; colWidths($('notice-list'));
   }
   tickCountdowns();
-  if (S.notices.length) { S.seenNotices = S.notices[S.notices.length - 1].seq; store.set('seenNotices', S.seenNotices); }
+  if (S.notices.length && !MINI) { S.seenNotices = S.notices[S.notices.length - 1].seq; store.set('seenNotices', S.seenNotices); }
 }
 
 function renderAccounts(d) {
@@ -1193,6 +1198,7 @@ $('chat-text').addEventListener('input', chatCount);
 // ---------------------------------------------------------------- navigation and actions
 
 function show(page) {
+  if (MINI) page = 'notices';
   S.page = page;
   // The steps are read again each time it is opened (renderPhone asks); the QR codes read are kept.
   if (page === 'phone') S.phone = S.phone.role ? { role: S.phone.role, parts: S.phone.parts } : {};
@@ -1200,7 +1206,7 @@ function show(page) {
   document.querySelectorAll('.page').forEach((p) => p.classList.toggle('active', p.id === 'page-' + page));
   $('page-title').textContent = PAGES[page][0];
   $('page-sub').textContent = PAGES[page][1];
-  history.replaceState(null, '', '#' + page);
+  if (!MINI) history.replaceState(null, '', '#' + page);
   render();
   if (page === 'diagnostics') $('log').scrollTop = $('log').scrollHeight;
   if (page === 'chat') { S.chat.bottom = true; S.chat.key = ''; render(); $('chat-text').focus(); }
@@ -1302,6 +1308,8 @@ $('opt-desktop').addEventListener('change', (e) => {
   store.set('desktop', e.target.checked);
 });
 $('test-desktop').addEventListener('click', () => act('banner_test').catch(() => {}));
+$('open-mini').classList.toggle('hidden', MINI || !window.warroomWindow);  // only in the program's own window
+$('open-mini').addEventListener('click', () => window.warroomWindow?.openMini());
 
 document.addEventListener('change', async (event) => {
   const input = event.target.closest('[data-pref]');

@@ -1,0 +1,13 @@
+/* The notices alone, in the small window kept above the game (electron/main.js, ?mini=1): the list
+   and its filter, packed tighter; the colours stay those of the theme chosen (app.css / classic.css). */
+body.mini .sidebar, body.mini .topbar, body.mini #banners, body.mini .toolbar-right { display: none; }
+body.mini .page { padding: 8px 8px 12px; }
+body.mini .page.active { animation: none; }
+body.mini .toolbar { margin-bottom: 8px; }
+body.mini .chip { padding: 3px 10px; font-size: 12px; }
+body.mini .notice-list { gap: 6px; }
+body.mini .notice { grid-template-columns: 48px 1fr auto; gap: 2px 8px; padding: 8px 10px; }
+body.mini .notice > .tag { font-size: 12px; }
+body.mini .notice .body { line-height: 1.5; }
+body.mini .notice .body.view .vtable { margin: 4px 0; }
+body.mini .notice .body.view .vtable td, body.mini .notice .body.view .vtable th { padding: 3px 6px; }

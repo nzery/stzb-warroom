@@ -664,7 +664,12 @@ class PageServerTests(unittest.TestCase):
         status, headers, _ = self.request("GET", "/?k=" + self.window.key)
         self.assertEqual(status, 303)
         self.assertIn("HttpOnly", headers["Set-Cookie"])
+        self.assertEqual(headers["Location"], "/")
+        # the notices' small window stays small after the program moved
+        status, headers, _ = self.request("GET", f"/?k={self.window.key}&mini=1")
+        self.assertEqual((status, headers["Location"]), (303, "/?mini=1"))
         self.assertEqual(self.request("GET", "/", self.cookie())[0], 200)
+        self.assertEqual(self.request("GET", "/?mini=1", self.cookie())[0], 200)
         status, _, data = self.request("GET", "/api/state", self.cookie())
         self.assertEqual(status, 200)
         self.assertEqual(json.loads(data)["tokens"][0]["token"], "sta_…aaaa")

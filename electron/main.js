@@ -8,6 +8,7 @@
 // it is closed, and a notice is wanted most while playing.
 
 const { app, BrowserWindow, Menu, ipcMain, screen, shell } = require('electron');
+const fs = require('fs');
 const path = require('path');
 
 const PAGE = /^http:\/\/127\.0\.0\.1:\d+\//;
@@ -22,6 +23,7 @@ const icon = process.platform === 'win32' ? path.join(__dirname, 'icon.ico') : u
 
 let window = null;
 let banner = null;
+let mini = null;
 
 function openOutside(url) {
   if (/^https?:\/\//.test(url)) shell.openExternal(url);
@@ -31,7 +33,10 @@ function create() {
   window = new BrowserWindow({
     width: 1052, height: 662, minWidth: 720, minHeight: 520, title: '工作台', icon,  // an office chat app's size (2026-10-29 user)
     show: false, autoHideMenuBar: true,
-    webPreferences: { contextIsolation: true, sandbox: true, nodeIntegration: false, spellcheck: false },
+    webPreferences: {
+      contextIsolation: true, sandbox: true, nodeIntegration: false, spellcheck: false,
+      preload: path.join(__dirname, 'window-preload.js'),
+    },
   });
   window.once('ready-to-show', () => window.show());
   window.webContents.setWindowOpenHandler(({ url }) => { openOutside(url); return { action: 'deny' }; });
@@ -70,6 +75,71 @@ function createBanner() {
   banner.loadURL(bannerUrl());
 }
 
+// The notices alone in a small window kept above the game, to read while playing without going
+// back and forth (2026-11-08 player: with a dozen armies coming the list did not fit). It is moved
+// and sized like any window, and comes back where it was left.
+const MINI_MIN = { width: 320, height: 200 };
+const miniFile = () => path.join(app.getPath('userData'), 'mini-window.json');
+
+function miniUrl() {
+  const url = new URL(pageUrl);
+  url.pathname = '/';
+  url.hash = '';
+  url.searchParams.set('mini', '1');
+  return url.href;
+}
+
+function miniBounds() {
+  const fallback = { width: 420, height: 560 };
+  try {
+    const saved = JSON.parse(fs.readFileSync(miniFile(), 'utf8'));
+    const bounds = { x: saved.x, y: saved.y, width: Math.max(MINI_MIN.width, saved.width), height: Math.max(MINI_MIN.height, saved.height) };
+    if (![bounds.x, bounds.y, bounds.width, bounds.height].every(Number.isFinite)) return fallback;
+    // Still on a screen (one may have been unplugged since): else where windows open.
+    const { workArea } = screen.getDisplayMatching(bounds);
+    const seen = Math.min(bounds.x + bounds.width, workArea.x + workArea.width) - Math.max(bounds.x, workArea.x) >= 80
+      && bounds.y >= workArea.y - 8 && bounds.y < workArea.y + workArea.height - 40;
+    return seen ? bounds : fallback;
+  } catch { return fallback; }
+}
+
+function keepMiniOnTop() {
+  if (mini && !mini.isMinimized()) mini.setAlwaysOnTop(true, 'screen-saver');  // a game gone fullscreen may have taken the top
+}
+
+function openMini() {
+  if (mini) {
+    if (mini.isMinimized()) mini.restore();
+    keepMiniOnTop();
+    return mini.show();
+  }
+  mini = new BrowserWindow({
+    ...miniBounds(), minWidth: MINI_MIN.width, minHeight: MINI_MIN.height, title: '通知 · 置顶', icon,
+    show: false, autoHideMenuBar: true, minimizable: true, maximizable: false, fullscreenable: false, alwaysOnTop: true,
+    webPreferences: { contextIsolation: true, sandbox: true, nodeIntegration: false, spellcheck: false, backgroundThrottling: false },
+  });
+  keepMiniOnTop();
+  mini.once('ready-to-show', () => mini.showInactive());  // the game keeps the keyboard
+  mini.webContents.setWindowOpenHandler(({ url }) => { openOutside(url); return { action: 'deny' }; });
+  mini.webContents.on('will-navigate', (event, url) => {
+    if (new URL(url).origin !== origin) { event.preventDefault(); openOutside(url); }
+  });
+  mini.on('blur', keepMiniOnTop);
+  const timer = setInterval(keepMiniOnTop, 3000);
+  let saving = null;
+  const save = () => {
+    clearTimeout(saving);
+    saving = setTimeout(() => {
+      if (!mini || mini.isMinimized()) return;
+      try { fs.writeFileSync(miniFile(), JSON.stringify(mini.getBounds())); } catch { /* kept where it was */ }
+    }, 500);
+  };
+  mini.on('moved', save);
+  mini.on('resized', save);
+  mini.on('closed', () => { clearInterval(timer); clearTimeout(saving); mini = null; });
+  mini.loadURL(miniUrl());
+}
+
 function fromBanner(event) {
   return banner && event.sender === banner.webContents;
 }
@@ -95,6 +165,7 @@ if (pageUrl && !app.requestSingleInstanceLock()) {
       origin = new URL(url).origin;
       pageUrl = url;
       if (banner) banner.loadURL(bannerUrl());
+      if (mini) mini.loadURL(miniUrl());
     }
     if (argv.includes('--banner-only')) return createBanner();
     if (!window) return create();
@@ -115,6 +186,7 @@ if (pageUrl && !app.requestSingleInstanceLock()) {
     banner.setAlwaysOnTop(true, 'screen-saver');  // a game that went fullscreen since may have taken the top
     banner.showInactive();
   });
+  ipcMain.on('mini-open', (event) => { if (window && event.sender === window.webContents) openMini(); });
   ipcMain.on('banner-hide', (event) => { if (fromBanner(event)) banner.hide(); });
   ipcMain.on('banner-open', (event) => { if (fromBanner(event)) showWindow(); });
   ipcMain.on('banner-quit', (event) => {
