@@ -482,7 +482,9 @@ function noticeTable(t, gone) {
   const share = given ? t.widths : widths;
   const total = share.reduce((a, b) => a + b, 0);
   // The page's CSP (style-src 'self') drops a style attribute: colWidths sets them from data-w.
-  const cols = share.map((w) => `<col data-w="${(w * 100 / total).toFixed(1)}">`).join('');
+  // The small window lets each column take what it holds (mini.css caps the long ones): the
+  // server's shares are for the main window's width (2026-11-08 user: a small window, all of a row).
+  const cols = MINI ? '' : `<colgroup>${share.map((w) => `<col data-w="${(w * 100 / total).toFixed(1)}">`).join('')}</colgroup>`;
   const cd = t.countdown && Array.isArray(t.countdown.at) ? t.countdown : null;
   const cellOf = (c, i, r) => {
     const at = cd && i === cd.col ? cd.at[r] : null;
@@ -491,7 +493,7 @@ function noticeTable(t, gone) {
     }
     return `<td title="${esc(c)}"${i === t.key ? ' class="key"' : ''}>${esc(c)}</td>`;
   };
-  return `<div class="vtable"><table class="fit"><colgroup>${cols}</colgroup><thead><tr>${t.columns.map((h) => `<th>${esc(h)}</th>`).join('')}</tr></thead>
+  return `<div class="vtable"><table class="${MINI ? 'auto' : 'fit'}">${cols}<thead><tr>${t.columns.map((h) => `<th>${esc(h)}</th>`).join('')}</tr></thead>
     <tbody>${kept.map(([row, r]) => `<tr>${row.map((c, i) => cellOf(c, i, r)).join('')}</tr>`).join('')}</tbody></table></div>`;
 }
 // The columns' widths noticeTable gives as data-w, set through the DOM, which the CSP allows.

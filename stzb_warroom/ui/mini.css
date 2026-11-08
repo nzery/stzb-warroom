@@ -1,13 +1,20 @@
 /* The notices alone, in the small window kept above the game (electron/main.js, ?mini=1): the list
-   and its filter, packed tighter; the colours stay those of the theme chosen (app.css / classic.css). */
-body.mini .sidebar, body.mini .topbar, body.mini #banners, body.mini .toolbar-right { display: none; }
+   alone (no filter: as much of it as fits), packed tighter; the colours stay those of the theme chosen (app.css / classic.css). */
+body.mini .sidebar, body.mini .topbar, body.mini #banners, body.mini .toolbar { display: none; }
 body.mini .page { padding: 8px 8px 12px; }
 body.mini .page.active { animation: none; }
-body.mini .toolbar { margin-bottom: 8px; }
-body.mini .chip { padding: 3px 10px; font-size: 12px; }
 body.mini .notice-list { gap: 6px; }
 body.mini .notice { grid-template-columns: 48px 1fr auto; gap: 2px 8px; padding: 8px 10px; }
 body.mini .notice > .tag { font-size: 12px; }
-body.mini .notice .body { line-height: 1.5; }
-body.mini .notice .body.view .vtable { margin: 4px 0; }
-body.mini .notice .body.view .vtable td, body.mini .notice .body.view .vtable th { padding: 3px 6px; }
+/* Smaller type, for a whole row to fit in a small window (2026-11-08 user). */
+body.mini .notice .title { font-size: 13px; line-height: 20px; }
+body.mini .notice .when { line-height: 20px; }
+body.mini .notice .body { font-size: 12px; line-height: 1.45; }
+body.mini .notice .body.view .vtable { margin: 3px 0; }
+body.mini .notice .body.view .vtable td, body.mini .notice .body.view .vtable th { padding: 2px 4px; }
+body.mini .notice .body.view .vtable td.key { font-size: 12px; }
+/* Each column as wide as what it holds; only a rare long cell ends in … (all of it on hover). */
+body.mini .notice .body.view .vtable table.auto { table-layout: auto; width: 100%; }
+body.mini .notice .body.view .vtable td { max-width: 7.5em; }
+body.mini .notice .body.view .vtable td.key { max-width: 16em; }
+body.mini .notice .body.view .vtable td:last-child { max-width: 9.5em; }  /* '1.7万 11-08 13:04' */

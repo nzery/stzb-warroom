@@ -77,9 +77,11 @@ function createBanner() {
 
 // The notices alone in a small window kept above the game, to read while playing without going
 // back and forth (2026-11-08 player: with a dozen armies coming the list did not fit). It is moved
-// and sized like any window, and comes back where it was left.
-const MINI_MIN = { width: 320, height: 200 };
-const miniFile = () => path.join(app.getPath('userData'), 'mini-window.json');
+// and sized like any window, and comes back where it was left. Its size is of what it shows (a
+// notice's whole row of a raid of real armies, measured 2026-11-08), not of its frame.
+const MINI_SIZE = { width: 660, height: 600 };
+const MINI_MIN = { width: 360, height: 200 };
+const miniFile = () => path.join(app.getPath('userData'), 'notices-window.json');
 
 function miniUrl() {
   const url = new URL(pageUrl);
@@ -90,7 +92,7 @@ function miniUrl() {
 }
 
 function miniBounds() {
-  const fallback = { width: 420, height: 560 };
+  const fallback = { ...MINI_SIZE };
   try {
     const saved = JSON.parse(fs.readFileSync(miniFile(), 'utf8'));
     const bounds = { x: saved.x, y: saved.y, width: Math.max(MINI_MIN.width, saved.width), height: Math.max(MINI_MIN.height, saved.height) };
@@ -114,7 +116,7 @@ function openMini() {
     return mini.show();
   }
   mini = new BrowserWindow({
-    ...miniBounds(), minWidth: MINI_MIN.width, minHeight: MINI_MIN.height, title: '通知 · 置顶', icon,
+    ...miniBounds(), useContentSize: true, minWidth: MINI_MIN.width, minHeight: MINI_MIN.height, title: '通知 · 置顶', icon,
     show: false, autoHideMenuBar: true, minimizable: true, maximizable: false, fullscreenable: false, alwaysOnTop: true,
     webPreferences: { contextIsolation: true, sandbox: true, nodeIntegration: false, spellcheck: false, backgroundThrottling: false },
   });
@@ -131,7 +133,8 @@ function openMini() {
     clearTimeout(saving);
     saving = setTimeout(() => {
       if (!mini || mini.isMinimized()) return;
-      try { fs.writeFileSync(miniFile(), JSON.stringify(mini.getBounds())); } catch { /* kept where it was */ }
+      const [x, y] = mini.getPosition(), [width, height] = mini.getContentSize();
+      try { fs.writeFileSync(miniFile(), JSON.stringify({ x, y, width, height })); } catch { /* kept where it was */ }
     }, 500);
   };
   mini.on('moved', save);
