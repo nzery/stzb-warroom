@@ -62,7 +62,10 @@ class ChatTests(unittest.TestCase):
         self.assertIsNone(message_of({"name": "甲", "text": "a", "time": True}))
         self.assertIsNone(message_of("text"))
         self.assertEqual(message_of({"name": "甲\x1b", "text": "<b>a‮</b>", "time": 5, "extra": 1}),
-                         {"id": None, "name": "甲", "text": "<b>a</b>", "time": 5.0, "mine": False})
+                         {"id": None, "name": "甲", "text": "<b>a</b>", "time": 5.0, "mine": False, "official": False})
+        # the administrator's, marked by the server: kept marked; anything but true is not
+        self.assertTrue(message_of({"name": "率土战局", "text": "a", "time": 1, "official": True})["official"])
+        self.assertFalse(message_of({"name": "率土战局", "text": "a", "time": 1, "official": "true"})["official"])
         for bad in (0, -1, "3", 2.0, True):
             self.assertIsNone(message_of({"id": bad, "name": "甲", "text": "a", "time": 1})["id"])
 

@@ -1095,7 +1095,8 @@ function chatClock(seconds) {
   if (date.toDateString() === now.toDateString()) return time;
   return `${date.getFullYear() !== now.getFullYear() ? date.getFullYear() + '年' : ''}${date.getMonth() + 1}月${date.getDate()}日 ${time}`;
 }
-function avatar(name) {
+function avatar(name, official) {
+  if (official) return '<span class="av official" title="率土战局官方">率</span>';
   const text = String(name);
   const shown = text.includes('的') ? text.split('的').pop()[0] : text[0];
   let hash = 0;
@@ -1134,7 +1135,7 @@ function renderChat(d) {
   for (const m of messages) {
     if (m.time - previous > 300) parts.push(`<div class="chat-time">${esc(chatClock(m.time))}</div>`);
     previous = m.time;
-    parts.push(`<div class="msg${m.mine ? ' mine' : ''}">${avatar(m.name)}<div class="col">${m.mine ? '' : `<span class="who">${esc(m.name)}</span>`}<div class="bubble">${esc(m.text)}</div></div></div>`);
+    parts.push(`<div class="msg${m.mine ? ' mine' : ''}${m.official ? ' official' : ''}">${avatar(m.name, m.official)}<div class="col">${m.mine ? '' : `<span class="who">${esc(m.name)}${m.official ? '<b class="tag-official">官方</b>' : ''}</span>`}<div class="bubble">${esc(m.text)}</div></div></div>`);
   }
   if (!messages.length) parts.push('<div class="empty">还没有消息。打个招呼吧</div>');
   list.innerHTML = parts.join('');

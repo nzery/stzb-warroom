@@ -356,6 +356,9 @@ input[type=text]:focus, input[type=password]:focus { border-color: var(--gold2);
 .msg .av.c3 { background: #3d2a26; color: #f2b8ad; }
 .msg .av.c4 { background: #2f2a40; color: #cdbdf0; }
 .msg .av.c5 { background: #24392f; color: #9fdcae; }
+.msg .av.official { background: linear-gradient(135deg, #e8c46a, #a87420); color: #2a1c06; font-weight: 700; box-shadow: 0 0 0 2px #1b1a17, 0 0 0 4px #c9a24a; }
+.msg .tag-official { margin-left: 6px; padding: 0 5px; border-radius: 3px; background: #c9a24a; color: #1b1a17; font-size: 11px; font-weight: 600; }
+.msg.official:not(.mine) .bubble { box-shadow: inset 0 0 0 1px #c9a24a; }
 .msg .col { display: flex; flex-direction: column; align-items: flex-start; min-width: 0; max-width: min(62%, 560px); }
 .msg.mine .col { align-items: flex-end; }
 .msg .who { margin: 0 0 4px 2px; color: var(--faint); font-size: 12px; }
