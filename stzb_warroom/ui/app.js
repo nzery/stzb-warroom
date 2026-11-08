@@ -104,6 +104,7 @@ const S = {
   // cursor, whether older ones are kept, and the newest one read (the badge counts those after it);
   // each account's messages are apart, so all of it starts again when the chat's account changes.
   chat: { account: '', messages: [], c: 0, more: false, loading: false, seen: 0, key: '', bottom: true },
+  openRows: new Set(),  // the notice rows opened to their lineups (noticeTable)
 };
 const PERSONAL = new Set(['players']);
 
@@ -473,7 +474,10 @@ function rowsLeft(t, gone = new Set()) {
 }
 const MINI_LEAVES_OUT = new Set(['来源', '最近兵力']);
 const textWidth = (value) => [...String(value)].reduce((n, ch) => n + (ch.charCodeAt(0) > 0xff ? 2 : 1), 0);
-function noticeTable(t, gone) {
+// A row with `details` (the server's lines of the army's lineup, a hero a line) opens under itself
+// when clicked, and again closes (2026-11-08 players: the whole lineup by hand, the table one line
+// an army); which are open (S.openRows, `key` the notice's and table's) stays across redraws.
+function noticeTable(t, gone, key = '') {
   const kept = rowsLeft(t, gone);
   const rows = kept.map(([row]) => row);
   if (!rows.length) return '';
@@ -497,7 +501,14 @@ function noticeTable(t, gone) {
   // The small window leaves out 来源 and 最近兵力, to be narrower (2026-11-08 user).
   const shown = (i) => !MINI || !MINI_LEAVES_OUT.has(t.columns[i]);
   return `<div class="vtable"><table class="${MINI ? 'auto' : 'fit'}">${cols}<thead><tr>${t.columns.map((h, i) => (shown(i) ? `<th>${esc(h)}</th>` : '')).join('')}</tr></thead>
-    <tbody>${kept.map(([row, r]) => `<tr>${row.map((c, i) => (shown(i) ? cellOf(c, i, r) : '')).join('')}</tr>`).join('')}</tbody></table></div>`;
+    <tbody>${kept.map(([row, r]) => {
+      const cells = row.map((c, i) => (shown(i) ? cellOf(c, i, r) : '')).join('');
+      const detail = Array.isArray(t.details) && Array.isArray(t.details[r]) && t.details[r].length ? t.details[r] : null;
+      if (!detail || !key) return `<tr>${cells}</tr>`;
+      const id = `${key}:${r}`, open = S.openRows.has(id);
+      return `<tr class="has-detail${open ? ' open' : ''}" data-detail="${esc(id)}" title="点一下${open ? '收起' : '看阵容和战法'}">${cells}</tr>`
+        + (open ? `<tr class="detail"><td colspan="${t.columns.filter((h, i) => shown(i)).length}">${detail.map((l) => `<div>${esc(l)}</div>`).join('')}</td></tr>` : '');
+    }).join('')}</tbody></table></div>`;
 }
 // The columns' widths noticeTable gives as data-w, set through the DOM, which the CSP allows.
 function colWidths(root) {
@@ -522,7 +533,7 @@ function noticeBody(n, gone) {
   let lines = [];
   for (const b of v.blocks) {
     if (!b.table) { lines.push(text(b.text)); continue; }
-    const table = noticeTable(b.table, gone);
+    const table = noticeTable(b.table, gone, `${n.seq}:${v.blocks.indexOf(b)}`);
     if (table || !(b.table.rows || []).length) parts.push(...lines, table);
     lines = [];
   }
@@ -1229,6 +1240,13 @@ document.addEventListener('click', async (event) => {
   const goto = event.target.closest('[data-goto]');
   if (goto) return show(goto.dataset.goto);
   if (event.target.closest('[data-chat-older]')) return chatOlder();
+  const army = event.target.closest('tr[data-detail]');
+  if (army) {
+    const id = army.dataset.detail;
+    if (!S.openRows.delete(id)) S.openRows.add(id);
+    if (S.openRows.size > 200) S.openRows.delete(S.openRows.values().next().value);
+    return renderNotices();
+  }
   const chatUse = event.target.closest('[data-chat-use]');
   if (chatUse) {
     if (chatUse.classList.contains('active')) return;

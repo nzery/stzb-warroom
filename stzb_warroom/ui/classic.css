@@ -186,6 +186,13 @@ nav { display: grid; gap: 4px; }
 .notice .body.view .vtable td.cd { color: var(--amber); font-weight: 600; }
 .notice .body.view .vtable td.cd.soon { color: var(--red); }
 .notice .body.view .vtable td.key { color: var(--gold); font-weight: 700; font-size: 14px; }
+/* A row that opens to its army's lineup when clicked: ▸ before the lineup, ▾ when open. */
+.notice .body.view .vtable tr.has-detail { cursor: pointer; }
+.notice .body.view .vtable tr.has-detail:hover td { background: var(--hover); }
+.notice .body.view .vtable tr.has-detail td.key::before { content: '▸ '; color: var(--faint); font-weight: 400; }
+.notice .body.view .vtable tr.has-detail.open td.key::before { content: '▾ '; }
+.notice .body.view .vtable tr.detail td { white-space: normal; max-width: none; padding: 4px 10px 6px 22px; color: var(--text);
+  background: var(--panel2); line-height: 1.6; }
 .notice .who { color: var(--gold); font-weight: 400; margin-right: 6px; }
 
 /* accounts */
