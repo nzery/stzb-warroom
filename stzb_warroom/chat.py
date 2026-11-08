@@ -50,9 +50,12 @@ def message_of(data, mine=False):
     if name is None or text is None or isinstance(stamp, bool) or not isinstance(stamp, (int, float)):
         return None
     message_id = data.get("id")
-    # `official`: the administrator, named for the service (server 2026-11-08), shown apart.
+    # `official`: the administrator, named for the service; `level` 1-3: how much the sender plays, the
+    # avatar standing out more the higher (server 2026-11-08); anything else is the plain avatar.
+    level = data.get("level")
     return {"id": message_id if type(message_id) is int and message_id > 0 else None,
-            "name": name, "text": text, "time": float(stamp), "mine": bool(mine), "official": data.get("official") is True}
+            "name": name, "text": text, "time": float(stamp), "mine": bool(mine), "official": data.get("official") is True,
+            "level": level if type(level) is int and 1 <= level <= 3 else 0}
 
 
 def server_error(exc):
@@ -150,7 +153,7 @@ class Chat:
 
     @staticmethod
     def _line(message):
-        return json.dumps({key: message.get(key) for key in ("seq", "id", "name", "text", "time", "mine", "official")}, ensure_ascii=False) + "\n"
+        return json.dumps({key: message.get(key) for key in ("seq", "id", "name", "text", "time", "mine", "official", "level")}, ensure_ascii=False) + "\n"
 
     def _keep(self, message, streamed=False):
         with self.lock:
