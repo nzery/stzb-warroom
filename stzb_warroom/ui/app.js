@@ -471,6 +471,7 @@ function rowsLeft(t, gone = new Set()) {
   return ((t && t.rows) || []).map((row, r) => [row, r])
     .filter(([, r]) => !(typeof at[r] === 'number' && at[r] <= nowSec()) && !gone.has(armies[r]));
 }
+const MINI_LEAVES_OUT = new Set(['来源', '最近兵力']);
 const textWidth = (value) => [...String(value)].reduce((n, ch) => n + (ch.charCodeAt(0) > 0xff ? 2 : 1), 0);
 function noticeTable(t, gone) {
   const kept = rowsLeft(t, gone);
@@ -493,8 +494,10 @@ function noticeTable(t, gone) {
     }
     return `<td title="${esc(c)}"${i === t.key ? ' class="key"' : ''}>${esc(c)}</td>`;
   };
-  return `<div class="vtable"><table class="${MINI ? 'auto' : 'fit'}">${cols}<thead><tr>${t.columns.map((h) => `<th>${esc(h)}</th>`).join('')}</tr></thead>
-    <tbody>${kept.map(([row, r]) => `<tr>${row.map((c, i) => cellOf(c, i, r)).join('')}</tr>`).join('')}</tbody></table></div>`;
+  // The small window leaves out 来源 and 最近兵力, to be narrower (2026-11-08 user).
+  const shown = (i) => !MINI || !MINI_LEAVES_OUT.has(t.columns[i]);
+  return `<div class="vtable"><table class="${MINI ? 'auto' : 'fit'}">${cols}<thead><tr>${t.columns.map((h, i) => (shown(i) ? `<th>${esc(h)}</th>` : '')).join('')}</tr></thead>
+    <tbody>${kept.map(([row, r]) => `<tr>${row.map((c, i) => (shown(i) ? cellOf(c, i, r) : '')).join('')}</tr>`).join('')}</tbody></table></div>`;
 }
 // The columns' widths noticeTable gives as data-w, set through the DOM, which the CSP allows.
 function colWidths(root) {

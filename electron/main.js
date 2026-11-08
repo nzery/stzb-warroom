@@ -79,7 +79,7 @@ function createBanner() {
 // back and forth (2026-11-08 player: with a dozen armies coming the list did not fit). It is moved
 // and sized like any window, and comes back where it was left. Its size is of what it shows (a
 // notice's whole row of a raid of real armies, measured 2026-11-08), not of its frame.
-const MINI_SIZE = { width: 660, height: 600 };
+const MINI_SIZE = { width: 480, height: 600 };  // 到达、阵容、玩家、推荐 (app.js leaves out 来源 and 最近兵力)
 const MINI_MIN = { width: 360, height: 200 };
 const miniFile = () => path.join(app.getPath('userData'), 'notices-window.json');
 
