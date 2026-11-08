@@ -1130,6 +1130,10 @@ function renderChat(d) {
   const [stateText, stateClass] = (CHAT_STATES[c.state] || CHAT_STATES.connecting)(c);
   $('chat-state').textContent = stateText;
   $('chat-state').className = stateClass;
+  // One's own name in the bar above the messages, always in sight (2026-11-08 players did not know
+  // theirs: it was a line above the oldest message, scrolled away as the chat opens at the newest).
+  const me = c.name ? `我在群里叫 <strong>${esc(c.name)}</strong>` : '';
+  if ($('chat-me').innerHTML !== me) $('chat-me').innerHTML = me;
   // Which account speaks (2026-10-31 user: testing with another account without removing one).
   const choices = (c.choices || []).filter((index) => d.tokens[index]);
   const whoKey = JSON.stringify([choices, c.using, choices.map((index) => d.tokens[index].role?.label || d.tokens[index].name || '')]);
@@ -1152,12 +1156,11 @@ function renderChat(d) {
   const atBottom = S.chat.bottom || list.scrollHeight - list.scrollTop - list.clientHeight < 80;
   const parts = [];
   if (S.chat.more) parts.push(`<button class="link chat-more" data-chat-older="1">${S.chat.loading ? '加载中…' : '查看更早的消息'}</button>`);
-  if (c.name) parts.push(`<div class="chat-tip">你在群聊里叫「${esc(c.name)}」，所有在线的人都看得到你发的消息</div>`);
   let previous = 0;
   for (const m of messages) {
     if (m.time - previous > 300) parts.push(`<div class="chat-time">${esc(chatClock(m.time))}</div>`);
     previous = m.time;
-    parts.push(`<div class="msg${m.mine ? ' mine' : ''}${m.official ? ' official' : ''}">${avatar(m.name, m.official, m.level)}<div class="col">${m.mine ? '' : `<span class="who">${esc(m.name)}${m.official ? '<b class="tag-official">官方</b>' : ''}</span>`}<div class="bubble">${esc(m.text)}</div></div></div>`);
+    parts.push(`<div class="msg${m.mine ? ' mine' : ''}${m.official ? ' official' : ''}">${avatar(m.name, m.official, m.level)}<div class="col"><span class="who">${esc(m.name)}${m.official ? '<b class="tag-official">官方</b>' : ''}</span><div class="bubble">${esc(m.text)}</div></div></div>`);
   }
   if (!messages.length) parts.push('<div class="empty">还没有消息。打个招呼吧</div>');
   list.innerHTML = parts.join('');

@@ -348,6 +348,8 @@ input[type=text]:focus, input[type=password]:focus { border-color: var(--gold2);
 .chat-head b { font-size: 15px; font-weight: 600; }
 .chat-head small { color: var(--faint); font-size: 12px; }
 .chat-head small.err { color: var(--red); }
+.chat-me { font-size: 13px; color: var(--muted); }
+.chat-me strong { color: var(--gold); font-weight: 600; }
 .chat-list { flex: 1; min-height: 0; overflow-y: auto; padding: 8px 20px 16px; background: #121e1c; }
 .chat-more { display: block; margin: 8px auto 4px; }
 .chat-tip { margin: 12px auto; width: fit-content; max-width: 80%; padding: 3px 10px; border-radius: 5px;
@@ -371,6 +373,7 @@ input[type=text]:focus, input[type=password]:focus { border-color: var(--gold2);
 .msg .av.lv3 { box-shadow: 0 0 0 2px #121e1c, 0 0 0 5px #a07ae8, 0 0 14px 5px rgba(160, 122, 232, .6); font-weight: 700; }
 .msg .col { display: flex; flex-direction: column; align-items: flex-start; min-width: 0; max-width: min(62%, 560px); }
 .msg.mine .col { align-items: flex-end; }
+.msg.mine .who { margin: 0 2px 5px 0; }  /* one's own name too (2026-11-08) */
 .msg .who { margin: 0 0 4px 2px; color: var(--faint); font-size: 12px; }
 .bubble { position: relative; padding: 8px 12px; border-radius: 6px; background: var(--panel2); border: 1px solid var(--line2);
   white-space: pre-wrap; word-break: break-word; overflow-wrap: anywhere; line-height: 1.6; user-select: text; }
