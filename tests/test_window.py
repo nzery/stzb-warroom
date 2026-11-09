@@ -534,15 +534,29 @@ class AppTests(unittest.TestCase):
         self.assertEqual(capture["state"], "error")
         self.assertIn("Wireshark", capture["hint"])
 
-    def test_the_install_button_downloads_wireshark_from_the_website(self):
+    def test_the_install_button_opens_the_link_the_website_gives(self):
+        asked = []
+
+        def site_says(body):
+            def opener(request, timeout=None):
+                asked.append(request.full_url)
+                if body is None:
+                    raise OSError("unreachable")
+                return io.BytesIO(body)
+            return opener
+
+        fallback = "https://site.example/download/Wireshark-x64.exe"
+        cases = ((b'{"url": "https://mirror.example/w.exe"}', "https://mirror.example/w.exe"),
+                 (b'{"url": "file:///c:/evil.exe"}', fallback), (b"not json", fallback), (None, fallback))
         with unittest.mock.patch.object(winsys, "WINDOWS", False), unittest.mock.patch("webbrowser.open") as opened:
             with unittest.mock.patch.dict("os.environ", {"ST_SITE": "https://site.example/"}):
-                self.assertEqual(webui.open_installer(), "download")
-            opened.assert_called_once_with("https://site.example/download/Wireshark-x64.exe")
-            opened.reset_mock()
-            with unittest.mock.patch.dict("os.environ", {"ST_SITE": ""}), unittest.mock.patch("stzb_warroom.api.packaged", return_value={}):
-                webui.open_installer()
-            opened.assert_called_once_with("https://www.wireshark.org/download.html")
+                for body, expected in cases:
+                    self.assertEqual(webui.open_installer(site_says(body)), "download")
+                    opened.assert_called_with(expected)
+            self.assertEqual(set(asked), {"https://site.example/download/wireshark.json"})
+            with unittest.mock.patch.dict("os.environ", {"ST_SITE": ""}), unittest.mock.patch("stzb_warroom.update.site", return_value=None):
+                webui.open_installer(site_says(None))
+            opened.assert_called_with("https://www.wireshark.org/download.html")
 
     def test_diagnostics_go_to_the_administrator_with_a_token_the_server_takes(self):
         app = self.app(saved=BAD + "," + GOOD)

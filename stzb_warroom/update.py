@@ -49,6 +49,21 @@ def get(opener, url, timeout):
     return opener(Request(url, headers={"User-Agent": agent}), timeout=timeout)
 
 
+def wireshark_url(opener):
+    """Where to download Wireshark: the website names it, so it can change without a new client."""
+    origin = (site() or "").rstrip("/")
+    if not origin:
+        return "https://www.wireshark.org/download.html"
+    try:
+        with get(opener, origin + "/download/wireshark.json", 8) as response:
+            url = json.load(response)["url"]
+        if isinstance(url, str) and url.startswith("https://"):
+            return url
+    except (OSError, ValueError, KeyError, TypeError):
+        pass
+    return origin + "/download/Wireshark-x64.exe"
+
+
 def folder():
     """Where updates of the code go; the launcher looks in the same place."""
     return state_dir() / "app"

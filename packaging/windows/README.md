@@ -94,7 +94,7 @@ runtime 指纹：构建用的 Python 和 PyInstaller 版本、PyInstaller 打进
 4. PATH；
 5. `%ProgramFiles%`、`%ProgramFiles(x86)%` 下的 `Wireshark` 文件夹。
 
-都找不到时窗口会提示，并提供“安装 Wireshark”（包里有安装程序就运行它，没有就从网站 `/download/Wireshark-x64.exe` 下载官方原版，构建时没配置网站才打开官网下载页）和“手动选择 dumpcap”。
+都找不到时窗口会提示，并提供“安装 Wireshark”（包里有安装程序就运行它，没有就打开网站 `/download/wireshark.json` 给的链接，取不到时用 `/download/Wireshark-x64.exe`，构建时没配置网站才打开官网下载页）和“手动选择 dumpcap”。
 
 ### 哪些能放进包里
 

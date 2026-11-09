@@ -290,7 +290,7 @@ class Window(ThreadingHTTPServer):
             "restart_for_update": lambda: self.restart_for_update(),
             "diagnostics": app.diagnostics,
             "send_diagnostics": app.send_diagnostics,
-            "open_installer": lambda: open_installer(),
+            "open_installer": lambda: open_installer(app.opener),
         }
         if not isinstance(action, str) or action not in actions:
             raise ValueError("unknown action")
@@ -305,17 +305,16 @@ class Window(ThreadingHTTPServer):
         self.shutdown()
 
 
-def open_installer():
-    """Run a Wireshark installer shipped next to the exe, else download it from the website (Wireshark's own page without one)."""
+def open_installer(opener):
+    """Run a Wireshark installer shipped next to the exe, else open the download link the website gives."""
     installer = next(iter(sorted(winsys.frozen_folder().glob("Wireshark-*.exe"), reverse=True)), None)
     if installer is not None and winsys.WINDOWS:
         import os
         os.startfile(installer)
         return "installer"
     import webbrowser
-    from .api import site
-    address = site()
-    webbrowser.open(f"{address.rstrip('/')}/download/Wireshark-x64.exe" if address else "https://www.wireshark.org/download.html")
+    from .update import wireshark_url
+    webbrowser.open(wireshark_url(opener))
     return "download"
 
 
