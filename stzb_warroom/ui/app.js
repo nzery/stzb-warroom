@@ -1100,6 +1100,9 @@ function takeChat(chat) {
     S.chat.messages.push(...fresh);
     S.chat.c = fresh[fresh.length - 1].seq;
   }
+  // Read past the newest this account has: not its own (the "one for all" of before v1.13.2, on a
+  // new account), and no message would count as unread until the numbers caught up with it.
+  if (S.chat.seen > S.chat.c) { S.chat.seen = S.chat.c; store.set(chatSeenKey(), S.chat.c); }
   if (first) S.chat.more = chat.oldest != null && S.chat.messages.length > 0 && chat.oldest < S.chat.messages[0].seq;
   if (S.chat.messages.length > CHAT_KEEP) { S.chat.messages.splice(0, S.chat.messages.length - CHAT_KEEP); S.chat.more = true; }
 }

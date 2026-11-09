@@ -2,6 +2,8 @@
 
 import io
 import json
+import shutil
+import subprocess
 import tempfile
 import threading
 import time
@@ -824,6 +826,26 @@ class PageServerTests(unittest.TestCase):
         last = view["messages"][-2]["seq"]
         view = json.loads(self.request("GET", f"/api/state?c={last}", self.cookie())[2])["chat"]
         self.assertEqual([m["text"] for m in view["messages"]], ["39"])
+
+    @unittest.skipUnless(shutil.which("node"), "needs node to run the page's code")
+    def test_the_chat_badge_of_a_new_account_ignores_the_old_shared_read_position(self):
+        source = (Path(webui.UI) / "app.js").read_text(encoding="utf-8")
+        code = source[source.index("const CHAT_KEEP"):source.index("const CHAT_STATES")]
+        unread = next(line for line in source.splitlines() if "const unread = S.chat.messages" in line)
+        script = """
+        const saved = {chatSeen: 300}, schedule = () => {};
+        const store = {get: (k, f) => k in saved ? saved[k] : f, set: (k, v) => { saved[k] = v; }};
+        const S = {chat: {account: '', messages: [], c: 0, more: false, seen: 0}};
+        """ + code + """
+        const count = (seqs) => {
+          takeChat({account: 'k', oldest: 1, messages: seqs.map((seq) => ({seq, mine: false}))});
+          """ + unread + """
+          return unread;
+        };
+        console.log(JSON.stringify([count([1, 2]), count([3]), saved['chatSeen:k']]));
+        """
+        output = subprocess.run(["node"], input=script, capture_output=True, text=True, encoding="utf-8", check=True).stdout
+        self.assertEqual(json.loads(output), [0, 1, 2])  # what it has is read; each new one counts
 
     def test_the_chat_uses_an_approved_role_first_else_whichever_the_server_lets_chat(self):
         tokens = ["sta_" + c * 43 for c in "abc"]
