@@ -1237,7 +1237,7 @@ function show(page) {
 
 const MESSAGES = {
   bark_test: '已发送测试推送，看看手机有没有收到', ntfy_bind: '已生成安卓订阅，用手机扫二维码', bark_unbind: '已解绑手机推送', remove_token: '已删除 Token',
-  open_installer: '正在打开 Wireshark 安装程序或下载页',
+  open_installer: '正在打开 Wireshark 安装程序，或在浏览器里下载',
 };
 
 document.addEventListener('click', async (event) => {

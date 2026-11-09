@@ -94,14 +94,14 @@ runtime 指纹：构建用的 Python 和 PyInstaller 版本、PyInstaller 打进
 4. PATH；
 5. `%ProgramFiles%`、`%ProgramFiles(x86)%` 下的 `Wireshark` 文件夹。
 
-都找不到时窗口会提示，并提供“安装 Wireshark”（包里有安装程序就运行它，没有就打开官网下载页）和“手动选择 dumpcap”。
+都找不到时窗口会提示，并提供“安装 Wireshark”（包里有安装程序就运行它，没有就从网站 `/download/Wireshark-x64.exe` 下载官方原版，构建时没配置网站才打开官网下载页）和“手动选择 dumpcap”。
 
 ### 哪些能放进包里
 
 - **Npcap 不能放。** 它的免费版不允许再分发（“The free version of Npcap may be used (but not externally redistributed)”），
   分发要买 OEM 授权。
 - **Wireshark 安装程序可以选择放。** Wireshark 是 GPL，但它的安装程序里也带着 Npcap，属于灰色地带。默认不放，
-  由窗口引导去官网下载；要放的话用 `-Include` 放官方原版安装程序，不要改动它。
+  由窗口引导去下载；要放的话用 `-Include` 放官方原版安装程序，不要改动它。
 - Npcap 免费版只经由 Wireshark 使用时不限装机数量，本程序就是通过 Wireshark 的 dumpcap 用它。
 
 ## 三、构建方法 A：GitHub Actions（推荐，不需要 Windows 电脑）

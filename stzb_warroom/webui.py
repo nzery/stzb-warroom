@@ -306,14 +306,16 @@ class Window(ThreadingHTTPServer):
 
 
 def open_installer():
-    """Run a Wireshark installer shipped next to the exe, else open Wireshark's download page."""
+    """Run a Wireshark installer shipped next to the exe, else download it from the website (Wireshark's own page without one)."""
     installer = next(iter(sorted(winsys.frozen_folder().glob("Wireshark-*.exe"), reverse=True)), None)
     if installer is not None and winsys.WINDOWS:
         import os
         os.startfile(installer)
         return "installer"
     import webbrowser
-    webbrowser.open("https://www.wireshark.org/download.html")
+    from .api import site
+    address = site()
+    webbrowser.open(f"{address.rstrip('/')}/download/Wireshark-x64.exe" if address else "https://www.wireshark.org/download.html")
     return "download"
 
 

@@ -534,6 +534,16 @@ class AppTests(unittest.TestCase):
         self.assertEqual(capture["state"], "error")
         self.assertIn("Wireshark", capture["hint"])
 
+    def test_the_install_button_downloads_wireshark_from_the_website(self):
+        with unittest.mock.patch.object(winsys, "WINDOWS", False), unittest.mock.patch("webbrowser.open") as opened:
+            with unittest.mock.patch.dict("os.environ", {"ST_SITE": "https://site.example/"}):
+                self.assertEqual(webui.open_installer(), "download")
+            opened.assert_called_once_with("https://site.example/download/Wireshark-x64.exe")
+            opened.reset_mock()
+            with unittest.mock.patch.dict("os.environ", {"ST_SITE": ""}), unittest.mock.patch("stzb_warroom.api.packaged", return_value={}):
+                webui.open_installer()
+            opened.assert_called_once_with("https://www.wireshark.org/download.html")
+
     def test_diagnostics_go_to_the_administrator_with_a_token_the_server_takes(self):
         app = self.app(saved=BAD + "," + GOOD)
         sent = []

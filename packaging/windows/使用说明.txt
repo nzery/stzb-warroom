@@ -14,7 +14,7 @@
 --------------
 
 1. 安装 Wireshark（只装一次）
-   - 打开 https://www.wireshark.org/download/win64/Wireshark-latest-x64.exe 下载安装程序。
+   - 打开 https://stzb.nzery.dev/download/Wireshark-x64.exe 下载安装程序。
    - 安装时保持勾选 Npcap，Npcap 安装界面也一路“下一步”。装完重启一次电脑。
 
 2. 从 https://stzb.nzery.dev 下载 stzb-warroom-windows.zip，
