@@ -17,7 +17,7 @@ def state_dir():
 
 
 def lock(path):
-    """One capture process per queue; the OS releases the lock if it dies."""
+    """One process per lock file (the capture's, the window's); the OS releases it if the process dies."""
     path.parent.mkdir(parents=True, exist_ok=True)
     handle = path.open("a+b")
     try:
@@ -29,7 +29,7 @@ def lock(path):
             fcntl.flock(handle.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
     except OSError:
         handle.close()
-        raise RuntimeError(f"another capture process is using {path.parent}")
+        raise RuntimeError(f"another process is using {path.parent}")
     return handle
 
 

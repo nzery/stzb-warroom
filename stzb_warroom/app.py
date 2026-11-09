@@ -286,9 +286,21 @@ class App:
         except OSError as exc:
             self.log(f"Token 没能保存：{exc}", "error")
 
+    def _merge_saved(self):
+        """Take in what is saved now, so adding a token never overwrites one this program has not
+        seen (2026-11-09: a second program's save lost the player's first token). Under self.lock."""
+        if not vault.AVAILABLE:
+            return
+        try:
+            self.tokens = list(dict.fromkeys(self.tokens + client_tokens(vault.load(self.vault_path))))
+        except SystemExit:  # nothing saved
+            pass
+
     def add_token(self, text):
         """Add the pasted tokens, or join with a pasted invitation code (the server gives a token).
         Returns what the server said about the joining, if any."""
+        with self.lock:
+            self._merge_saved()
         code = invite_code(text)
         joined = None
         if code:

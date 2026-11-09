@@ -30,6 +30,7 @@ from urllib.request import ProxyHandler, Request, build_opener
 
 from . import winsys
 from .app import App
+from .runner import lock
 
 UI = Path(__file__).resolve().parent / "ui"
 TITLE = "工作台"  # the page's <title>, which names the window; plain so it passes for office software (2026-10-29 user)
@@ -39,6 +40,7 @@ BANNER_QUIET = 30  # seconds without a banner request before its window is taken
 BANNER_RETRY = 60  # seconds between tries to start the banner window
 CLOSED_AFTER = 3  # seconds without any page open before the program ends (a reload comes back sooner)
 KEEP_ALIVE = 2  # seconds between writes to a quiet events stream, which find a page that is gone
+FIRST_STARTING = 20  # seconds a second start waits for the first one's window to be up
 COOKIE = "stzb_key"
 
 
@@ -342,18 +344,50 @@ def ask_to_show(state_dir):
         return False
 
 
+def show_running(state_dir, show, wait=0):
+    """Bring up the window of the program already running, which may still be starting (`wait`
+    seconds): False when no window answered."""
+    deadline = time.monotonic() + wait
+    while True:
+        url = running_window(state_dir)
+        if url:
+            if not ask_to_show(state_dir):
+                show(url, state_dir / "window")
+            return True
+        if time.monotonic() >= deadline:
+            return False
+        time.sleep(0.5)
+
+
 def main(server, state_dir, background=False, show=None, after=None):
-    """Run the window until it is closed (or quit). `show(url, profile)` opens the page.
+    """Run the window until it is closed (or quit), one program per state folder: a second start
+    only brings up the first one's window. `show(url, profile)` opens the page.
     `after`: the process this one restarts (for an update), which must be gone first."""
     show = show or winsys.open_window
     state_dir = Path(state_dir)
     if after:
         winsys.wait_exit(after, timeout=30)
-    url = running_window(state_dir)
-    if url:
-        if not background and not ask_to_show(state_dir):
-            show(url, state_dir / "window")
+    # window.json alone let two run: it is written seconds after the start (a double click, or a
+    # click during the start at login) and a busy first one can miss the ping. Two programs would
+    # also overwrite each other's saved tokens.
+    try:
+        held = lock(state_dir / "window.lock")
+    except RuntimeError:
+        if not background:
+            show_running(state_dir, show, FIRST_STARTING)
         return
+    try:
+        if running_window(state_dir):  # a version from before this lock, still running after an update
+            if not background:
+                show_running(state_dir, show)
+            return
+        run(server, state_dir, background, show)
+    finally:
+        held.close()
+
+
+def run(server, state_dir, background, show):
+    """The program itself, once it is the only one."""
     winsys.sharp()
     app = App(server, state_dir)
     window = Window(app)

@@ -13,6 +13,7 @@ from urllib.error import HTTPError
 
 from stzb_warroom import app as appmod, chat, vault, webui, winsys
 from stzb_warroom.app import App
+from stzb_warroom.runner import lock
 
 GOOD, BAD, NEW, TAKEN = "sta_" + "a" * 43, "sta_" + "b" * 43, "sta_" + "c" * 43, "sta_" + "d" * 43
 ROLE = {"id": 7, "label": "甲 · 某盟 · 服务器 1"}
@@ -117,6 +118,13 @@ class AppTests(unittest.TestCase):
         again = self.app(env=BAD)
         self.assertEqual(again.tokens, [GOOD])
         self.assertNotIn(GOOD.encode(), (self.folder / "tokens.bin").read_bytes())
+
+    def test_adding_a_token_keeps_those_saved_since_this_program_started(self):
+        other = "sta_" + "b" * 43
+        app = self.app()
+        vault.save(self.folder / "tokens.bin", other)  # another program, from before the window lock
+        app.add_token(GOOD)
+        self.assertEqual(self.app().tokens, [other, GOOD])
 
     def test_notifications_wait_for_an_approved_role(self):
         app = self.app(saved=GOOD)
@@ -706,6 +714,52 @@ class PageServerTests(unittest.TestCase):
         self.window.opener = lambda: shown.append("first")
         webui.main(None, folder.name, show=lambda url, profile: shown.append("second"))
         self.assertEqual(shown, ["first"])
+
+    def held_start(self, **kwargs):
+        """webui.main in a folder whose window.lock another program holds -> (folder, what opened).
+        The program itself must never start."""
+        folder = tempfile.TemporaryDirectory()
+        self.addCleanup(folder.cleanup)
+        held = lock(Path(folder.name) / "window.lock")
+        self.addCleanup(held.close)
+        shown = []
+        with unittest.mock.patch.object(webui, "run", side_effect=AssertionError("started a second program")):
+            webui.main(None, folder.name, show=lambda url, profile: shown.append(url), **kwargs)
+        return Path(folder.name), shown
+
+    def test_a_second_start_waits_for_the_first_ones_window(self):
+        marker = json.dumps({"url": self.window.url, "key": self.window.key})
+        folder = tempfile.TemporaryDirectory()
+        self.addCleanup(folder.cleanup)
+        timer = threading.Timer(0.2, (Path(folder.name) / "window.json").write_text, [marker])
+        timer.start()
+        self.addCleanup(timer.join)
+        held = lock(Path(folder.name) / "window.lock")
+        self.addCleanup(held.close)
+        opened = []
+        self.window.opener = lambda: opened.append("first")
+        with unittest.mock.patch.object(webui, "run", side_effect=AssertionError("started a second program")):
+            webui.main(None, folder.name, show=lambda url, profile: opened.append("second"))
+        self.assertEqual(opened, ["first"])
+
+    def test_no_second_program_while_the_first_has_no_window_yet(self):
+        with unittest.mock.patch.object(webui, "FIRST_STARTING", 0):
+            self.assertEqual(self.held_start()[1], [])
+            self.assertEqual(self.held_start(background=True)[1], [])  # started at login: nothing to show
+
+    def test_the_program_holds_the_lock_while_it_runs_and_frees_it(self):
+        folder = tempfile.TemporaryDirectory()
+        self.addCleanup(folder.cleanup)
+        path = Path(folder.name) / "window.lock"
+
+        def run(*_args):
+            with self.assertRaises(RuntimeError):
+                lock(path)
+
+        with unittest.mock.patch.object(webui, "run", side_effect=run) as started:
+            webui.main(None, folder.name, show=lambda url, profile: None)
+        started.assert_called_once()
+        lock(path).close()
 
     def test_the_page_needs_the_key(self):
         self.assertEqual(self.request("GET", "/")[0], 403)
