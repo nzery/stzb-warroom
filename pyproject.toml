@@ -5,7 +5,7 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "stzb-warroom"
 dynamic = ["version"]
-description = "率土战局: the desktop client of 率土游戏助手, a helper for 率土之滨 (STZB) players"
+description = "率土战局: a third-party desktop helper for 率土之滨 (STZB) players"
 requires-python = ">=3.11"
 dependencies = []
 
