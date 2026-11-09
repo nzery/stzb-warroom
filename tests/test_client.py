@@ -632,6 +632,19 @@ class LocalTests(unittest.TestCase):
         self.assertIn(winsys.npcap_installed(), (True, False))
         self.assertFalse(winsys.autostart())  # not a packaged exe
 
+    def test_npcap_needs_both_the_service_and_the_library(self):
+        winreg = unittest.mock.Mock()
+        dll = self.folder / "System32" / "Npcap" / "wpcap.dll"
+        with unittest.mock.patch.object(winsys, "WINDOWS", True), \
+                unittest.mock.patch.dict("sys.modules", {"winreg": winreg}), \
+                unittest.mock.patch.dict("os.environ", {"SystemRoot": str(self.folder)}):
+            self.assertIs(winsys.npcap_installed(), False)  # the service is left, the library is gone
+            dll.parent.mkdir(parents=True)
+            dll.write_bytes(b"")
+            self.assertIs(winsys.npcap_installed(), True)
+            winreg.OpenKey.side_effect = OSError
+            self.assertIs(winsys.npcap_installed(), False)  # the library is left, no service
+
     def test_dumpcap_is_looked_for_in_order(self):
         picked = self.folder / "dumpcap"
         with unittest.mock.patch.dict("os.environ", {"ST_DUMPCAP": str(self.folder / "missing")}):

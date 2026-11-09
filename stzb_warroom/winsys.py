@@ -52,15 +52,16 @@ def set_autostart(enabled):
 
 
 def npcap_installed():
-    """True or False on Windows (the Npcap driver's service is registered), None elsewhere."""
+    """True or False on Windows (the Npcap driver's service is registered and the wpcap.dll dumpcap loads
+    is there: an uninstall or a broken install can leave the service alone), None elsewhere."""
     if not WINDOWS:
         return None
     import winreg
     try:
         winreg.OpenKey(winreg.HKEY_LOCAL_MACHINE, r"SYSTEM\CurrentControlSet\Services\npcap").Close()
-        return True
     except OSError:
         return False
+    return (Path(os.environ.get("SystemRoot", r"C:\Windows")) / "System32" / "Npcap" / "wpcap.dll").is_file()
 
 
 def window_command():
