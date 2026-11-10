@@ -1275,9 +1275,10 @@ document.addEventListener('click', async (event) => {
   const action = button.dataset.action;
   const extra = button.dataset.index !== undefined ? { index: Number(button.dataset.index) } : {};
   try {
-    await withBusy(button, '', () => act(action, extra));
+    const result = await withBusy(button, '', () => act(action, extra));
     if (MESSAGES[action]) toast(MESSAGES[action]);
-    if (action === 'remove_token') S.accountsKey = '';
+    if (action === 'join_public') toast((result && result.joined) || '已生成账号');
+    if (action === 'remove_token' || action === 'join_public') S.accountsKey = '';
   } catch { /* shown */ }
 });
 

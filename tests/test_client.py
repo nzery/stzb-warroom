@@ -701,6 +701,12 @@ class JoinTests(unittest.TestCase):
     def test_a_code_is_traded_for_a_token_without_any_token(self):
         self.assertEqual(api.invite_code(f" {self.CODE} "), self.CODE)
         self.assertIsNone(api.invite_code(self.TOKEN))
+        self.assertEqual(api.invite_code(f"邀请码：{self.CODE}（复制这行）"), self.CODE)
+        self.assertIsNone(api.invite_code(self.CODE + "x"))  # one character too many is not cut off
+        self.assertEqual(api.tokens_in(f"Token：{self.TOKEN}。"), [self.TOKEN])
+        server, sent = self.server({"token": self.TOKEN, "text": "已加入"})
+        server.join(None)
+        self.assertEqual(sent[0][2], {"public": True})  # one click: the server picks the public code
         server, sent = self.server({"token": self.TOKEN, "text": "已加入"})
         self.assertEqual(server.join(self.CODE)["token"], self.TOKEN)
         url, method, body, headers = sent[0]

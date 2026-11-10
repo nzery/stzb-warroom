@@ -68,6 +68,8 @@ class FakeServer:
 
     def join(self, code, tokens=()):
         self.calls.append(("JOIN", code, list(tokens)))
+        if code is None:
+            return {"token": NEW, "text": "已加入「公共域」"}
         if code != INVITE:
             raise ValueError("邀请码无效")
         return {"token": NEW, "text": "已加入「某盟」"}
@@ -156,6 +158,18 @@ class AppTests(unittest.TestCase):
             app.add_token("stj_" + "x" * 22)
         self.assertEqual(app.tokens, [NEW])
         self.assertIn(("JOIN", "stj_" + "x" * 22, [NEW]), app.server.calls)  # what it holds goes along
+
+    def test_words_copied_around_a_code_or_token_are_left_out(self):
+        app = self.app()
+        self.assertEqual(app.add_token(f"公共域邀请码：{INVITE}。"), {"joined": "已加入「某盟」"})
+        app.add_token(f"Token：{GOOD}\n")
+        self.assertEqual(app.tokens, [NEW, GOOD])
+
+    def test_one_click_joins_the_public_domain(self):
+        app = self.app()
+        self.assertEqual(app.join_public(), {"joined": "已加入「公共域」"})
+        self.assertEqual(app.tokens, [NEW])
+        self.assertIn(("JOIN", None, []), app.server.calls)
 
     def test_the_page_settings_outlive_a_restart(self):
         # 2026-10-14 user: the page's own storage is emptied at each start (another port).

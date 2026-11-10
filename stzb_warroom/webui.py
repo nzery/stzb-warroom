@@ -267,6 +267,7 @@ class Window(ThreadingHTTPServer):
             "show": self.show,
             "closing": lambda: self.page_gone(str(body.get("page") or "")),
             "add_token": lambda: app.add_token(body.get("token") or ""),
+            "join_public": app.join_public,
             "remove_token": lambda: app.remove_token(int(index)),
             "refresh_accounts": app.poke.set,
             "bark_bind": lambda: app.bark_bind(int(index), body.get("address")),

@@ -15,6 +15,9 @@ from urllib.parse import urlsplit
 from . import __version__
 
 INVITE = re.compile(r"stj_[A-Za-z0-9_-]{22}")
+# A code or token inside what was copied ("邀请码：stj_…", a chat line, full-width punctuation around it).
+INVITE_IN = re.compile(r"(?<![A-Za-z0-9_-])stj_[A-Za-z0-9_-]{22}(?![A-Za-z0-9_-])")
+TOKEN_IN = re.compile(r"(?<![A-Za-z0-9_-])sta_[A-Za-z0-9_-]{43}(?![A-Za-z0-9_-])")
 # Every request and relay socket names the client's version (0.0.0 run from source): the server
 # tells an old major version to upgrade, and its access log tells this client from other callers.
 CLIENT_HEADERS = (("User-Agent", f"stzb-warroom/{__version__}"), ("X-Client-Version", __version__))
@@ -101,9 +104,16 @@ def site():
 
 
 def invite_code(text):
-    """The invitation code in what the player pasted, or None when it is not one."""
-    text = str(text or "").strip()
-    return text if INVITE.fullmatch(text) else None
+    """The invitation code in what the player pasted (words around it allowed), or None when there is
+    none or the paste also holds a token (that one is added instead)."""
+    text = str(text or "")
+    found = INVITE_IN.findall(text)
+    return found[0] if len(found) == 1 and not TOKEN_IN.search(text) else None
+
+
+def tokens_in(text):
+    """The tokens in what the player pasted, words around them allowed."""
+    return list(dict.fromkeys(TOKEN_IN.findall(str(text or ""))))
 
 
 def client_tokens(value=None):
@@ -146,10 +156,11 @@ class Server:
             return json.load(response)
 
     def join(self, code, tokens=(), timeout=30):
-        """Trade an invitation code for a new token -> {"token", "scope", "text"}.
+        """Trade an invitation code for a new token -> {"token", "scope", "text"}; code None joins
+        the public domain with its current code, which the server looks up (one-click account).
         ValueError with the server's own message when it is refused or unreachable.
         `tokens`: the ones already added, so the server can tell a code pasted twice."""
-        data = json.dumps({"code": code}).encode()
+        data = json.dumps({"code": code} if code else {"public": True}).encode()
         headers = {"Content-Type": "application/json"}
         if tokens:
             headers["Authorization"] = "Bearer " + ",".join(tokens)

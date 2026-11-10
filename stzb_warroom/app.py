@@ -34,7 +34,7 @@ from urllib.error import HTTPError
 from urllib.parse import urlencode
 
 from . import __version__, chat, notify, relay, update as updates, vault, winsys
-from .api import client_tokens, invite_code, site
+from .api import client_tokens, invite_code, site, tokens_in
 from .capture import adapter_report, find_dumpcap
 from .runner import run_capture
 
@@ -296,20 +296,25 @@ class App:
         except SystemExit:  # nothing saved
             pass
 
-    def add_token(self, text):
+    def join_public(self):
+        """One click: a new account of the public domain, the server picking its current code
+        (2026-11-10: players who could not paste the code)."""
+        return self.add_token(None, public=True)
+
+    def add_token(self, text, public=False):
         """Add the pasted tokens, or join with a pasted invitation code (the server gives a token).
         Returns what the server said about the joining, if any."""
         with self.lock:
             self._merge_saved()
-        code = invite_code(text)
+        code = None if public else invite_code(text)
         joined = None
-        if code:
+        if code or public:
             with self.lock:
                 held = list(self.tokens)
             joined = self.server.join(code, held)
             text = joined["token"]
         try:
-            new = client_tokens(text)
+            new = tokens_in(text) or client_tokens(text)
         except SystemExit:
             raise ValueError("请粘贴同盟发的邀请码（stj_ 开头）或管理员发给你的 Token（sta_ 开头）")
         bad = [token for token in new if not token.startswith("sta_") or len(token) != 47]
