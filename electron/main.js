@@ -39,15 +39,6 @@ function create() {
     },
   });
   window.once('ready-to-show', () => window.show());
-  // Electron has no right-click menu of its own: without one, players who paste with the mouse could not
-  // paste the invitation code (2026-11-10). Input boxes get cut/copy/paste, selected text gets copy.
-  window.webContents.on('context-menu', (event, params) => {
-    const items = params.isEditable
-      ? [{ role: 'cut', label: '剪切' }, { role: 'copy', label: '复制' }, { role: 'paste', label: '粘贴' },
-        { type: 'separator' }, { role: 'selectAll', label: '全选' }]
-      : params.selectionText ? [{ role: 'copy', label: '复制' }] : [];
-    if (items.length) Menu.buildFromTemplate(items).popup({ window });
-  });
   window.webContents.setWindowOpenHandler(({ url }) => { openOutside(url); return { action: 'deny' }; });
   window.webContents.on('will-navigate', (event, url) => {
     if (new URL(url).origin !== origin) { event.preventDefault(); openOutside(url); }
