@@ -119,6 +119,17 @@ class InstallTests(unittest.TestCase):
                 (self.place / "failed.json").write_text(json.dumps({"version": "9.0.0"}))
                 self.assertFalse(update.code_only(release, self.place))
 
+    def test_a_newer_version_the_launcher_could_not_start_is_told(self):
+        self.assertIsNone(update.load_failed(self.place))  # nothing failed
+        self.place.mkdir()
+        (self.place / "failed.json").write_text(json.dumps({"version": "9.0.0", "runtime": "r1"}))
+        with unittest.mock.patch.object(update, "__version__", "8.0.0"):
+            self.assertEqual(update.load_failed(self.place), "9.0.0")  # the exe's older code runs
+        with unittest.mock.patch.object(update, "__version__", "9.0.1"):
+            self.assertIsNone(update.load_failed(self.place))  # since updated past it
+        (self.place / "failed.json").write_text("{")
+        self.assertIsNone(update.load_failed(self.place))
+
     def test_the_code_is_checked_unpacked_and_named_current(self):
         (self.place / "8.0.0" / "stzb_warroom").mkdir(parents=True)
         update.install(self.release(), self.opener, self.place)

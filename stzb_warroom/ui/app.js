@@ -370,7 +370,8 @@ function renderBanners(d) {
   for (const hint of d.hints) {
     if (!S.dismissed.has(hint.id)) parts.push(banner('warn', 'info', esc(hint.text), '', hint.id));
   }
-  if (d.update) parts.push(updateBanner(d.update));
+  if (d.update) parts.push(updateBanner(d.update, d));
+  else if (d.load_failed) parts.push(banner('warn', 'info', `下载的新版本 <b>${esc(d.load_failed)}</b> 在这台电脑上没能启动，现在用的还是 ${esc(d.app_version)}。请下载完整安装包，解压后替换原来的程序文件夹。`));
   // The first start of a new version: what it brought, until the player closes it.
   const updatedId = d.updated ? 'updated-' + d.updated.version : '';
   if (d.updated && !S.dismissed.has(updatedId)) {
@@ -394,7 +395,7 @@ function releaseNotes(notes, open = false) {
   return `<details class="release-notes"${open ? ' open' : ''}><summary>这次更新了什么</summary><div class="notes-body">${esc(notes)}</div></details>`;
 }
 
-function updateBanner(u) {
+function updateBanner(u, d = {}) {
   const v = `<b>${esc(u.version)}</b>`;
   const notes = releaseNotes(u.notes);
   const download = `<a class="btn" href="${esc(u.url)}" target="_blank" rel="noopener">下载</a>`;
@@ -402,7 +403,9 @@ function updateBanner(u) {
     case 'downloading': return banner('info', 'clock', `正在下载新版本 ${v}…${notes}`);
     case 'ready': return banner('info', 'info', `新版本 ${v} 已下载，重启程序后生效。${notes}`, '<button class="btn primary" data-action="restart_for_update">立即重启</button>');
     case 'failed': return banner('warn', 'info', `新版本 ${v} 自动下载失败（${esc(u.error || '')}），稍后会再试，也可以下载完整安装包。${notes}`, download);
-    default: return banner('info', 'info', `发现新版本 ${v}，请下载完整安装包，解压后替换原来的程序文件夹。${notes}`, download);
+    default:
+      if (d.load_failed === u.version) return banner('warn', 'info', `新版本 ${v} 已下载，但在这台电脑上没能启动，现在用的还是 ${esc(d.app_version)}。请下载完整安装包，解压后替换原来的程序文件夹。${notes}`, download);
+      return banner('info', 'info', `发现新版本 ${v}，请下载完整安装包，解压后替换原来的程序文件夹。${notes}`, download);
   }
 }
 

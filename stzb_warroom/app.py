@@ -131,6 +131,8 @@ class App:
         self.session = None
         self.update = None  # a newer release: {"version", "url", "code_only", "state", "error"}
         self.update_lock = threading.Lock()  # one download at a time
+        # The downloaded version the launcher could not start, so the exe's own runs: only a start changes it.
+        self.load_failed = updates.load_failed(self.state_dir / "app")
         self.relaunch = False  # start again once quit (to run the code an update downloaded)
         self.quit = threading.Event()
         self.poke = threading.Event()  # look at the accounts now
@@ -186,6 +188,7 @@ class App:
                              "dumpcap": self.find_dumpcap()[0], "dumpcap_picked": self._picked(),
                              "state_dir": str(self.state_dir), "windows": winsys.WINDOWS},
                 "update": self.update,
+                "load_failed": self.load_failed,
                 "updated": self._updated(),
                 "notice_prefs": dict(self.notice_prefs),
                 "chat": {**self.chat.view(chat_after), **self.chat_accounts()},
@@ -930,6 +933,7 @@ class App:
                  # what a capture problem needs comes first: pasted in the group chat, only 500 characters arrive
                  *adapter_report(snapshot["settings"]["dumpcap"]),
                  f"dumpcap：{snapshot['settings']['dumpcap'] or '没有找到'}；Npcap：{ {True: '已安装', False: '未安装', None: '-'}[winsys.npcap_installed()]}",
+                 *([f"更新：新版本 {self.load_failed} 没能启动，用的是自带的 {__version__}"] if self.load_failed else []),
                  f"上报：{snapshot['capture']['state']} {snapshot['capture']['error'] or ''}".rstrip(),
                  f"服务器：{self.server.origin}（{reach}）",
                  f"统计：已上传 {snapshot['stats']['uploaded']} 条，待上传 {snapshot['stats']['pending']}，"
@@ -1004,6 +1008,9 @@ class App:
         """At launch: the background work, and the capture when it can start."""
         sys.stdout = sys.stderr = Lines(self.log)
         self.log(f"程序 {__version__} 已启动")
+        if self.load_failed:
+            self.log(f"下载的新版本 {self.load_failed} 在这台电脑上没能启动，现在用的是程序自带的 {__version__}；"
+                     "请下载完整安装包", "warn")
         threading.Thread(target=self.run_background, name="background", daemon=True).start()
         threading.Thread(target=self.chat.run, args=(self.quit,), name="chat", daemon=True).start()
         if self.tokens:

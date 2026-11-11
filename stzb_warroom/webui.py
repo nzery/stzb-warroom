@@ -7,7 +7,8 @@ neither other sites in a browser nor other computers can use it. The page polls
 everything through ``POST /api/action``.
 
 One window per computer: a second start finds the first through ``window.json`` in the
-state folder and asks it to show its window. Showing it (a start, the tray icon) brings an
+state folder and asks it to show its window; a second start of a newer version (code an update
+downloaded) asks it to quit instead and takes its place. Showing it (a start, the tray icon) brings an
 open window to the front, and opens one only when none is open or opening. When the last page
 closes (it says so as it goes, else its events stream breaks), the program stays running by
 default. The player can disable this, except when started at login (``--background``). On Windows an icon
@@ -28,9 +29,10 @@ from pathlib import Path
 from urllib.parse import parse_qs, urlsplit
 from urllib.request import ProxyHandler, Request, build_opener
 
-from . import winsys
+from . import __version__, winsys
 from .app import App
 from .runner import lock
+from .update import version
 
 UI = Path(__file__).resolve().parent / "ui"
 TITLE = "工作台"  # the page's <title>, which names the window; plain so it passes for office software (2026-10-29 user)
@@ -41,6 +43,7 @@ BANNER_RETRY = 60  # seconds between tries to start the banner window
 CLOSED_AFTER = 3  # seconds without any page open before the program ends (a reload comes back sooner)
 KEEP_ALIVE = 2  # seconds between writes to a quiet events stream, which find a page that is gone
 FIRST_STARTING = 20  # seconds a second start waits for the first one's window to be up
+TAKE_OVER = 30  # seconds an older program asked to quit (for this newer start) may take to go
 COOKIE = "stzb_key"
 
 
@@ -333,19 +336,67 @@ def running_window(state_dir):
         return None
 
 
-def ask_to_show(state_dir):
-    """Ask the program already running to show its window: True if it did."""
+def ask(state_dir, action):
+    """Ask the program already running to do `action`: True if it did."""
     try:
         value = json.loads((Path(state_dir) / "window.json").read_text())
         origin = value["url"].split("/?")[0]
-        request = Request(origin + "/api/action", data=json.dumps({"action": "show"}).encode(),
+        request = Request(origin + "/api/action", data=json.dumps({"action": action}).encode(),
                           headers={"Cookie": f"{COOKIE}={value['key']}", "Origin": origin,
                                    "Content-Type": "application/json"})
-        winsys.let_others_focus()  # this start is what the player clicked, so it may give the front away
         with build_opener(ProxyHandler({})).open(request, timeout=5) as response:
             return response.status == 200
     except (OSError, ValueError, KeyError):
         return False
+
+
+def ask_to_show(state_dir):
+    """Ask the program already running to show its window: True if it did."""
+    winsys.let_others_focus()  # this start is what the player clicked, so it may give the front away
+    return ask(state_dir, "show")
+
+
+def running_version(state_dir):
+    """The version of the program already running, or None when none answers (or it does not say)."""
+    try:
+        value = json.loads((Path(state_dir) / "window.json").read_text())
+        origin = value["url"].split("/?")[0]
+        far = 10 ** 15  # past every notice, log line and chat message: only the version is wanted
+        request = Request(f"{origin}/api/state?n={far}&l={far}&c={far}", headers={"Cookie": f"{COOKIE}={value['key']}"})
+        with build_opener(ProxyHandler({})).open(request, timeout=5) as response:
+            return str(json.load(response)["app_version"])
+    except (OSError, ValueError, KeyError, TypeError):
+        return None
+
+
+def take_over(state_dir):
+    """When the program already running is older than this one, ask it to quit: True if it was.
+    A player who closed only the window (the program stays in the tray) and started it again
+    after an update downloaded its code would otherwise get the old version's window back
+    (2026-11-11 user: "updated and restarted, still the old version")."""
+    running = running_version(state_dir)
+    if running is None or not version(__version__) > version(running):
+        return False
+    return ask(state_dir, "quit")
+
+
+def gone(state_dir, held=None):
+    """Wait (at most TAKE_OVER seconds) for the program asked to quit to be gone -> the window
+    lock (`held`, when this start already has it), or None if it is still there."""
+    deadline = time.monotonic() + TAKE_OVER
+    while True:
+        if held is None:
+            try:
+                held = lock(Path(state_dir) / "window.lock")
+            except RuntimeError:
+                pass
+        if held is not None and not running_window(state_dir):
+            return held
+        if time.monotonic() >= deadline:
+            if held is not None:
+                held.close()
+            return None
+        time.sleep(0.5)
 
 
 def show_running(state_dir, show, wait=0):
@@ -365,7 +416,7 @@ def show_running(state_dir, show, wait=0):
 
 def main(server, state_dir, background=False, show=None, after=None):
     """Run the window until it is closed (or quit), one program per state folder: a second start
-    only brings up the first one's window. `show(url, profile)` opens the page.
+    only brings up the first one's window, unless it is a newer version (then the first quits). `show(url, profile)` opens the page.
     `after`: the process this one restarts (for an update), which must be gone first."""
     show = show or winsys.open_window
     state_dir = Path(state_dir)
@@ -377,20 +428,25 @@ def main(server, state_dir, background=False, show=None, after=None):
     try:
         held = lock(state_dir / "window.lock")
     except RuntimeError:
-        if not background:
-            show_running(state_dir, show, FIRST_STARTING)
-        return
-    try:
-        if running_window(state_dir):  # a version from before this lock, still running after an update
+        held = None
+    stay = False
+    if held is None or running_window(state_dir):  # running_window: a version from before this lock
+        taken = gone(state_dir, held) if take_over(state_dir) else None
+        if taken is None:
+            if held is not None:
+                held.close()
             if not background:
-                show_running(state_dir, show)
+                show_running(state_dir, show, FIRST_STARTING if held is None else 0)
             return
-        run(server, state_dir, background, show)
+        # It ran in the tray: so does this one, its window closed or not.
+        held, stay = taken, True
+    try:
+        run(server, state_dir, background, show, stay)
     finally:
         held.close()
 
 
-def run(server, state_dir, background, show):
+def run(server, state_dir, background, show, stay=False):
     """The program itself, once it is the only one."""
     winsys.sharp()
     app = App(server, state_dir)
@@ -412,7 +468,7 @@ def run(server, state_dir, background, show):
         while not app.quit.wait(1):
             window.keep_banner()
             # Started at login it stays, as does a player's choice to keep it running.
-            if window.closed() and not (background or app.settings["keep_running"]):
+            if window.closed() and not (background or stay or app.settings["keep_running"]):
                 window.quit()
     except KeyboardInterrupt:
         window.quit()

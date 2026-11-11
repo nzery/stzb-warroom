@@ -71,7 +71,12 @@ runtime 指纹：构建用的 Python 和 PyInstaller 版本、PyInstaller 打进
 - 新版本与本机 exe 的 runtime 相同：后台下载 `stzb-warroom-app.zip`，核对大小和 SHA-256，解压到
   `%LOCALAPPDATA%\stzb-warroom\app\<版本>`，写 `app\current.json`；窗口提示“重启程序后生效”，可以点“立即重启”。
   下次启动时 `launcher.py` 先从这里加载 `stzb_warroom`，代码连导入都失败就退回 exe 自带的代码，并把那个版本记进
-  `app\failed.json`，以后不再自动下载它（改为提示下载完整包）。
+  `app\failed.json`，以后不再自动下载它（改为提示下载完整包）。退回后启动时读 `failed.json`：窗口横幅、日志和诊断信息
+  写明“新版本 X 没能启动，用的是自带的 Y”，请玩家下载完整包（`launcher.py` 不用改，所以只发代码包）。
+- 玩家只点 × 关窗口时（开机自启或“关掉窗口也不停”），程序还在托盘里，再双击 exe 通常只是把它的窗口调出来。
+  如果这次启动的是更新下载来的新版本，比正在运行的版本新，就让旧的退出（`quit`，所有版本都有这个操作），
+  等它放开 `window.lock` 后自己接着跑，关窗口后也照旧留在托盘（2026-11-11 用户：网友更新重启后还是原来版本）。
+  版本相同或更旧的启动仍只调出窗口。
 - runtime 不同（升级了 Python、Electron、`main.js`、`launcher.py`，或新代码用到了 exe 里没有的模块）：提示下载完整包，
   链接也指向网站。
 

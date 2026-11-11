@@ -123,6 +123,17 @@ def code_only(release, place=None):
         return True
 
 
+def load_failed(place=None):
+    """The newer downloaded version the launcher could not start (app/failed.json), so the exe's
+    own, older code runs instead; None when there is none."""
+    try:
+        failed = json.loads(((place or folder()) / "failed.json").read_text(encoding="utf-8"))
+        name = str(failed["version"])
+    except (OSError, ValueError, KeyError, TypeError):
+        return None
+    return name if version(name) > version(__version__) else None
+
+
 def installed(release, place=None):
     """Whether the release's code is already downloaded and is what the next start runs."""
     place = place or folder()

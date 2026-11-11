@@ -764,6 +764,68 @@ class PageServerTests(unittest.TestCase):
         webui.main(None, folder.name, show=lambda url, profile: shown.append("second"))
         self.assertEqual(shown, ["first"])
 
+    def test_a_load_failure_is_said_in_the_state_and_the_diagnostics(self):
+        (self.app.state_dir / "app").mkdir()
+        (self.app.state_dir / "app" / "failed.json").write_text(json.dumps({"version": "99.0.0"}))
+        app = App(FakeServer(), self.app.state_dir)
+        self.assertEqual(app.snapshot()["load_failed"], "99.0.0")
+        self.assertIn("更新：新版本 99.0.0 没能启动", app.diagnostics())
+        self.assertIsNone(self.app.snapshot()["load_failed"])  # read at the start only
+
+    def marker(self):
+        folder = tempfile.TemporaryDirectory()
+        self.addCleanup(folder.cleanup)
+        (Path(folder.name) / "window.json").write_text(json.dumps({"url": self.window.url, "key": self.window.key}))
+        return Path(folder.name)
+
+    def test_a_newer_second_start_takes_the_first_ones_place(self):
+        # 2026-11-11 user: a player who closed only the window got the old version back after the update.
+        folder = self.marker()
+        held = lock(folder / "window.lock")  # the first program, still in the tray
+        quit_asked = []
+
+        def quit_first():
+            quit_asked.append(1)
+            (folder / "window.json").unlink()
+            held.close()
+
+        self.window.quit = quit_first
+        with unittest.mock.patch.object(webui, "__version__", "99.0.0"), \
+                unittest.mock.patch.object(webui, "run") as started:
+            webui.main(None, folder, show=lambda url, profile: None)
+        self.assertEqual(quit_asked, [1])
+        started.assert_called_once()
+        self.assertTrue(started.call_args.args[4])  # it stays in the tray, as the first one did
+        lock(folder / "window.lock").close()  # and let the lock go when it ended
+
+    def test_the_same_or_an_older_version_only_shows_the_first_window(self):
+        folder = self.marker()
+        held = lock(folder / "window.lock")
+        self.addCleanup(held.close)
+        quit_asked, opened = [], []
+        self.window.quit = lambda: quit_asked.append(1)
+        self.window.opener = lambda: opened.append("first")
+        for version in ("5.0.0", "4.9.9"):
+            with unittest.mock.patch.object(appmod, "__version__", "5.0.0"), \
+                    unittest.mock.patch.object(webui, "OPENING", -1), \
+                    unittest.mock.patch.object(webui, "__version__", version), \
+                    unittest.mock.patch.object(webui, "run", side_effect=AssertionError("started a second program")):
+                webui.main(None, folder, show=lambda url, profile: opened.append("second"))
+        self.assertEqual((quit_asked, opened), ([], ["first", "first"]))
+
+    def test_a_first_program_that_does_not_quit_keeps_its_place(self):
+        folder = self.marker()
+        held = lock(folder / "window.lock")
+        self.addCleanup(held.close)
+        self.window.quit = lambda: None
+        opened = []
+        self.window.opener = lambda: opened.append("first")
+        with unittest.mock.patch.object(webui, "__version__", "99.0.0"), \
+                unittest.mock.patch.object(webui, "TAKE_OVER", 0.6), \
+                unittest.mock.patch.object(webui, "run", side_effect=AssertionError("started a second program")):
+            webui.main(None, folder, show=lambda url, profile: opened.append("second"))
+        self.assertEqual(opened, ["first"])
+
     def held_start(self, **kwargs):
         """webui.main in a folder whose window.lock another program holds -> (folder, what opened).
         The program itself must never start."""
