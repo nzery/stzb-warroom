@@ -540,6 +540,15 @@ class AppTests(unittest.TestCase):
             app.bark_test(5)
         app.ntfy_bind(0)  # an Android phone: the server makes up its topic
         self.assertEqual(self.server.calls[-1], ("POST", "/v1/client/bark", {"kind": "ntfy"}))
+        # An ally's phone: the same route, the server tells what it is.
+        app.bark_ally(0, "add", name="老王" * 10, address="ALLYKEY")
+        self.assertEqual(self.server.calls[-1], ("POST", "/v1/client/bark", {"ally": "add", "name": "老王" * 6, "address": "ALLYKEY"}))
+        app.bark_ally(0, "add", kind="ntfy")
+        self.assertEqual(self.server.calls[-1], ("POST", "/v1/client/bark", {"ally": "add", "name": "", "kind": "ntfy"}))
+        app.bark_ally(0, "remove", "ab12")
+        self.assertEqual(self.server.calls[-1], ("POST", "/v1/client/bark", {"ally": "remove", "id": "ab12"}))
+        with self.assertRaises(ValueError):
+            app.bark_ally(0, "drop", "ab12")
 
     def test_a_missing_dumpcap_stops_with_a_hint(self):
         app = self.app(saved=GOOD)

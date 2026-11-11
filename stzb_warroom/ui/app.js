@@ -872,13 +872,55 @@ function pushBlock(a, index, os) {
       主题 <code>${esc(ntfy.topic)}</code> ${copyLink(ntfy.topic, '复制')}</p>` : '';
     return `${sub}<div class="row-actions"><span class="token-text">已绑定 ${esc(a.bark.address)}</span></div>
       <div class="row-actions"><button class="btn ghost small" data-action="bark_test" data-index="${index}">发测试推送</button>
-      <button class="btn ghost small" data-action="bark_unbind" data-index="${index}" data-confirm="解绑后这台${phone}不再收到推送，确定吗？">解绑</button></div>`;
+      <button class="btn ghost small" data-action="bark_unbind" data-index="${index}" data-confirm="解绑后这台${phone}不再收到推送，确定吗？">解绑</button></div>
+      ${a.bark.ally_help ? '<p class="small-note muted">盟友没有电脑？上面“手机”选“盟友手机”，你的推送也发给他。</p>' : ''}`;
   }
   return os === 'android'
     ? `<div class="row-actions"><button class="btn primary" data-action="ntfy_bind" data-index="${index}">绑定安卓</button></div>`
     : `<form class="inline-form phone-bark" data-bark-form="${index}"><input type="text" data-bark-input="${index}" spellcheck="false" autocomplete="off" placeholder="粘贴 Bark 里的地址：https://api.day.app/…">
       <button class="btn primary" type="submit">绑定</button></form>`;
 }
+// An ally's phones (no computer of their own): the server's texts, one line each, a form to add one.
+// The QR code of an Android one is what the last add / show gave (the status each minute has none).
+function allyCard(a, index) {
+  const bark = a.bark;
+  if (!bark || !bark.ally_help) {
+    return { media: '', html: '<p class="muted">服务器还不支持盟友手机，请稍后再试。</p>' };
+  }
+  const allies = bark.allies || [];
+  const help = bark.ally_help;
+  const max = bark.ally_max || 3;
+  const shownId = S.allyShown && S.allyShown.role === a.role.id ? S.allyShown.id : null;
+  const shown = allies.find((x) => x.id === shownId && x.kind === 'ntfy');
+  const rows = allies.map((x) => `<div class="ally-row${x.id === shownId ? ' active' : ''}">
+      <span class="ally-name">${esc(x.name || '未命名')}</span>
+      <span class="token-text">${x.kind === 'ntfy' ? '安卓' : 'iPhone'} ${esc(x.address)}</span>
+      ${x.error ? `<span class="ally-bad" title="${esc(x.error)}">上一条没送达</span>` : ''}
+      <span class="ally-actions">${x.kind === 'ntfy' ? `<button class="link" data-ally-op="show" data-ally-id="${esc(x.id)}">订阅方法</button>` : ''}
+        <button class="link" data-ally-op="test" data-ally-id="${esc(x.id)}">发测试推送</button>
+        <button class="link" data-ally-op="remove" data-ally-id="${esc(x.id)}" data-confirm="删掉后这台手机不再收到你的推送，确定吗？">删除</button></span></div>`).join('');
+  let media = '', how = '';
+  if (shown) {
+    const n = S.allyShown.android || shown.android || {};
+    if (n.qr) media = `<img class="qr" alt="盟友的 ntfy 订阅二维码" src="${svgImage(n.qr)}">`;
+    how = `<div class="ally-how"><b>${esc(shown.name || '这台安卓手机')}的订阅方法</b><ol>${(n.steps || []).map((t) => `<li>${esc(t)}</li>`).join('')}</ol>
+      <p class="phone-sub">服务器 <code>${esc(n.server || '')}</code> ${copyLink(n.server || '', '复制')}，主题 <code>${esc(n.topic || '')}</code> ${copyLink(n.topic || '', '复制')}</p>
+      ${n.note ? `<p class="small-note muted">${esc(n.note)}</p>` : ''}</div>`;
+  }
+  const form = allies.length >= max ? `<p class="muted">已经 ${allies.length} 台，最多 ${max} 台；要加新的先删掉一台。</p>`
+    : `<form class="inline-form ally-form" data-ally-form="${index}">
+        <input type="text" class="ally-name-input" data-ally-name maxlength="12" spellcheck="false" autocomplete="off" placeholder="盟友名字">
+        <input type="text" data-ally-address spellcheck="false" autocomplete="off" placeholder="粘贴盟友 Bark 里的地址：https://api.day.app/…">
+        <button class="btn primary" type="submit">添加 iPhone</button>
+        <button class="btn" type="button" data-ally-ntfy="${index}">添加安卓手机</button></form>
+      <p class="small-note muted">${esc(help.bark || '')}<br>${esc(help.ntfy || '')}</p>`;
+  return {
+    media,
+    html: `<h3>盟友手机（${allies.length}/${max}）</h3><p>${esc(help.text || '')}</p>
+      ${rows ? `<div class="ally-list">${rows}</div>` : ''}${how}${form}`,
+  };
+}
+
 // Which step of the phone's guide the player is on, per phone (kept, so the page opens where they were).
 function phoneStep(os) { return Number((S.phoneStep || {})[os]) || 0; }
 
@@ -949,7 +991,7 @@ function renderPhone(d) {
   watchPhone(S.page === 'phone' && Boolean(account) && step?.check === 'connect');
   const qrPart = step && PHONE_QR[step.show] ? step.show : null;
   const { key: _drawn, ...shown } = view;
-  const key = JSON.stringify([shown, accounts.map(({ a }) => a.role.id), account?.a.role.id, account?.a.bark, os, pipes, S.phoneStep, S.phoneSeen]);
+  const key = JSON.stringify([shown, accounts.map(({ a }) => a.role.id), account?.a.role.id, account?.a.bark, os, pipes, S.phoneStep, S.phoneSeen, S.allyShown?.id]);
   if (key === view.key) return;
   const box = $('phone-box');
   if (!account) {
@@ -961,15 +1003,20 @@ function renderPhone(d) {
   if (qrPart && !(view.parts || {})[qrPart] && !view.loading && !view.error && !view.problem) { loadPhone(qrPart); return; }
   view.key = key;
   const typed = [...document.querySelectorAll('#phone-box [data-bark-input]')].map((input) => input.value)[0] || '';
+  const allyTyped = ['data-ally-name', 'data-ally-address'].map((attr) => [...document.querySelectorAll(`#phone-box [${attr}]`)][0]?.value || '');
   const chips = (name, items) => `<div class="vfilter"><span>${name}</span><div class="chips">${items}</div></div>`;
   const who = accounts.length > 1 ? chips('账号', accounts.map(({ a }) =>
     `<button class="chip${a.role.id === account.a.role.id ? ' active' : ''}" data-phone-role="${esc(a.role.id)}">${esc(roleName(a.role.label))}</button>`).join('')) : '';
-  const phones = chips('手机', [['iphone', 'iPhone'], ['android', '安卓']].map(([id, label]) =>
+  const phones = chips('手机', [['iphone', 'iPhone'], ['android', '安卓'], ['ally', '盟友手机']].map(([id, label]) =>
     `<button class="chip${os === id ? ' active' : ''}" data-phone-os="${id}">${label}</button>`).join(''));
   const dots = steps.length ? `<div class="phone-dots">${steps.map((st, i) => `<button class="phone-dot${i === at ? ' active' : ''}${i < at ? ' done' : ''}" data-phone-step="${i}" title="${esc(st.title)}">${i + 1}</button>`).join('')}</div>` : '';
   const bar = `<div class="phone-bar">${who}${phones}${dots}</div>`;
   let body;
-  if (view.error) body = banner('warn', 'info', `${esc(view.error)}`, '<button class="btn" data-phone-retry="1">重试</button>');
+  if (os === 'ally') {
+    const card = allyCard(account.a, account.index);
+    body = `<div class="card phone-step${card.media ? '' : ' single'}"><div class="phone-step-body">
+      ${card.media ? `<div class="phone-step-media">${card.media}</div>` : ''}<div class="phone-step-text">${card.html}</div></div></div>`;
+  } else if (view.error) body = banner('warn', 'info', `${esc(view.error)}`, '<button class="btn" data-phone-retry="1">重试</button>');
   else if (view.problem) body = banner('warn', 'info', esc(view.problem));
   else if (!view.guide) body = '<div class="card empty">正在读取…</div>';
   else if (!os) body = '<div class="card empty">先在上面选你的手机是 iPhone 还是安卓，然后一步一步照着做。</div>';
@@ -997,6 +1044,31 @@ function renderPhone(d) {
   }
   box.innerHTML = bar + body;
   document.querySelectorAll('#phone-box [data-bark-input]').forEach((input) => { input.value = typed; });
+  ['data-ally-name', 'data-ally-address'].forEach((attr, i) => {
+    const input = [...document.querySelectorAll(`#phone-box [${attr}]`)][0];
+    if (input) input.value = allyTyped[i];
+  });
+}
+
+// What the server answered an ally's add / show: which one to show, with its QR code.
+function allyShow(account, reply, id) {
+  const ally = (reply && reply.allies || []).find((x) => x.id === id);
+  S.allyShown = ally && ally.kind === 'ntfy' ? { role: account.a.role.id, id, android: ally.android } : null;
+}
+
+async function allyAdd(button, payload) {
+  const account = personalAccount();
+  if (!account) return;
+  const before = new Set(((account.a.bark || {}).allies || []).map((x) => x.id));
+  const name = [...document.querySelectorAll('#phone-box [data-ally-name]')][0]?.value || '';
+  try {
+    const reply = await withBusy(button, '添加中', () => act('bark_ally', { index: account.index, op: 'add', name, ...payload }));
+    const added = (reply && reply.allies || []).find((x) => !before.has(x.id));
+    allyShow(account, reply, added && added.id);
+    document.querySelectorAll('#phone-box [data-ally-name], #phone-box [data-ally-address]').forEach((input) => { input.value = ''; });
+    toast(payload.kind === 'ntfy' ? '已添加，让盟友用 ntfy 扫码或手动订阅' : '已添加，盟友手机应该收到了一条测试通知');
+    renderPhone(S.data);
+  } catch { /* act said why */ }
 }
 
 
@@ -1033,6 +1105,24 @@ async function phoneClick(event) {
   }
   if (event.target.closest('[data-phone-reset]')) {
     if (!S.phone.loading && confirm('换新的二维码？旧的 30 秒内失效，手机上要删掉旧节点、重新扫码。')) loadPhone('guide', true);
+    return true;
+  }
+  const allyNtfy = event.target.closest('[data-ally-ntfy]');
+  if (allyNtfy) { await allyAdd(allyNtfy, { kind: 'ntfy' }); return true; }
+  const allyOp = event.target.closest('[data-ally-op]');
+  if (allyOp) {
+    const account = personalAccount();
+    if (!account || (allyOp.dataset.confirm && !confirm(allyOp.dataset.confirm))) return true;
+    const { allyOp: op, allyId: id } = allyOp.dataset;
+    if (op === 'show' && S.allyShown?.id === id) { S.allyShown = null; renderPhone(S.data); return true; }
+    try {
+      const reply = await withBusy(allyOp, '', () => act('bark_ally', { index: account.index, op, id }));
+      if (op === 'show') allyShow(account, reply, id);
+      if (op === 'remove' && S.allyShown?.id === id) S.allyShown = null;
+      if (op === 'test') toast('已发送测试推送，问问盟友有没有收到');
+      if (op === 'remove') toast('已删除这台盟友手机');
+      renderPhone(S.data);
+    } catch { /* act said why */ }
     return true;
   }
   if (event.target.closest('[data-phone-retry]')) { S.phone.error = null; renderPhone(S.data); return true; }
@@ -1303,6 +1393,8 @@ document.addEventListener('submit', async (event) => {
     const { show } = view.query;
     view.query = { [form.dataset.psearch]: form.querySelector('input').value.trim(), page: 1, ...(show ? { show } : {}) };
     loadPersonal(S.page);
+  } else if (form.dataset.allyForm !== undefined) {
+    await allyAdd(form.querySelector('button[type="submit"]'), { address: form.querySelector('[data-ally-address]').value });
   } else if (form.dataset.barkForm !== undefined) {
     const index = Number(form.dataset.barkForm);
     const input = form.querySelector('input');

@@ -512,6 +512,24 @@ class App:
     def bark_test(self, index):
         return self._bark("POST", "/v1/client/bark/test", index, {})
 
+    ALLY_OPS = ("add", "remove", "test", "show")
+
+    def bark_ally(self, index, op, ally_id=None, name=None, address=None, kind=None):
+        """An ally's phone (no computer of their own): added (a Bark address, or `kind` "ntfy" for an
+        Android one whose topic the server makes up), removed, tested or shown (its QR code)."""
+        if op not in self.ALLY_OPS:
+            raise ValueError("不支持的操作")
+        body = {"ally": op}
+        if op == "add":
+            body["name"] = str(name or "")[:12]
+            if kind == "ntfy":
+                body["kind"] = "ntfy"
+            else:
+                body["address"] = str(address or "")
+        else:
+            body["id"] = str(ally_id or "")
+        return self._bark("POST", "/v1/client/bark", index, body)
+
     # the server's pages (玩家信息) ----------------------------------------------------
 
     def personal(self, index, page, query=None):
@@ -923,7 +941,8 @@ class App:
             bark = account.get("bark") or {}
             waits = (account.get("pending") or {}).get("label")
             lines.append(f"账号 {number}：{account['state']}{f'（{waits}）' if waits else ''} {role}；手机推送 {({'ntfy': '已绑定安卓', 'bark': '已绑定 iPhone'}.get(bark.get('kind'), '已绑定')) if bark.get('bound') else '未绑定'}"
-                         + (f"（{bark['error']}）" if bark.get("error") else ""))
+                         + (f"（{bark['error']}）" if bark.get("error") else "")
+                         + (f"，盟友手机 {len(bark['allies'])} 台" if bark.get("allies") else ""))
         lines.append("最近日志：")
         lines += [f"  {datetime.fromtimestamp(line['time']):%H:%M:%S} {line['text']}" for line in snapshot["logs"][-60:]]
         return "\n".join(lines)

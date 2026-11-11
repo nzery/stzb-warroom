@@ -146,6 +146,22 @@ async function main() {
   assert.ok(phone.includes('data-copy-text="https://api.example/v1/phone/sub?k=&lt;x&gt;"') && phone.includes('data-phone-reset'), phone);
   phone = at(9);
   assert.ok(phone.includes('第 3 / 3 步'), 'a step past the end is the last');
+  // an ally's phones: the server's texts, names escaped, the QR code only of the one shown
+  vm.runInContext(`S.data.tokens.forEach((t) => { t.bark = { bound: false, ally_max: 3,
+      ally_help: { text: '帮<盟友>', bark: 'iPhone：', ntfy: '安卓：' },
+      allies: [{ id: 'a1', name: '<b>老王</b>', kind: 'bark', address: 'https://api.day.app/ABCD…', error: 'down' },
+               { id: 'a2', name: '', kind: 'ntfy', address: 'https://ntfy.example/abcd…',
+                 android: { server: 'https://ntfy.example', topic: 'abcd1234', link: 'ntfy://x', qr: null, steps: ['装 <ntfy>'], note: '只发给他' } }] }; });
+    S.phoneOs = 'ally'; S.allyShown = null; renderPhone(S.data);`, context);
+  phone = nodes.get('phone-box').innerHTML;
+  assert.ok(phone.includes('盟友手机（2/3）') && phone.includes('帮&lt;盟友&gt;') && phone.includes('&lt;b&gt;老王') && phone.includes('上一条没送达'), phone);
+  assert.ok(phone.includes('data-ally-form') && phone.includes('data-ally-ntfy') && !phone.includes('<img') && !phone.includes('ally-how'), phone);
+  vm.runInContext(`S.allyShown = { role: 7, id: 'a2', android: { ...S.data.tokens[0].bark.allies[1].android, qr: '<svg xmlns="http://www.w3.org/2000/svg"></svg>' } }; renderPhone(S.data);`, context);
+  phone = nodes.get('phone-box').innerHTML;
+  assert.ok(phone.includes('alt="盟友的 ntfy 订阅二维码"') && phone.includes('装 &lt;ntfy&gt;') && phone.includes('data-copy-text="abcd1234"'), phone);
+  vm.runInContext(`S.data.tokens.forEach((t) => { t.bark.allies.push({ id: 'a3', name: '三', kind: 'bark', address: 'x' }); }); renderPhone(S.data);`, context);
+  assert.ok(!nodes.get('phone-box').innerHTML.includes('data-ally-form'), 'three at most: no form');
+  vm.runInContext(`S.phoneOs = 'android'; S.allyShown = null; S.data.tokens.forEach((t) => { t.bark = { bound: false }; }); renderPhone(S.data);`, context);
   // a problem of the exits shows at the top
   vm.runInContext(`S.data.phone.exits[0].state = 'busy'; renderPhone(S.data);`, context);
   assert.ok(nodes.get('phone-status').innerHTML.includes('另一台电脑正在用'));

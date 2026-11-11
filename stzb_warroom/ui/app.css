@@ -488,6 +488,18 @@ input[type=text]:focus, input[type=password]:focus { border-color: var(--gold2);
 .phone-sub code { word-break: break-all; }
 .phone-sub .link { font-size: 12px; margin-right: 4px; }
 .phone-bark { max-width: 520px; margin-top: 4px; }
+.ally-list { margin: 8px 0 12px; border-top: 1px solid var(--line); }
+.ally-row { display: flex; align-items: center; gap: 12px; padding: 7px 4px; border-bottom: 1px solid var(--line); white-space: nowrap; }
+.ally-row.active { background: var(--hover, rgba(127, 127, 127, .08)); }
+.ally-name { font-weight: 600; min-width: 6em; overflow: hidden; text-overflow: ellipsis; }
+.ally-bad { color: var(--red); font-size: 12px; }
+.ally-actions { margin-left: auto; display: flex; gap: 10px; }
+.ally-actions .link { font-size: 12px; }
+.ally-how { margin: 4px 0 12px; font-size: 13px; }
+.ally-how ol { margin: 6px 0; padding-left: 20px; line-height: 1.7; }
+.ally-form { flex-wrap: wrap; gap: 8px; max-width: 820px; margin-top: 4px; }
+.ally-form .ally-name-input { flex: 0 0 7em; }
+.ally-form input[data-ally-address] { flex: 1 1 260px; }
 .phone-step-nav { flex: none; display: flex; align-items: center; justify-content: space-between; padding-top: 14px; margin-top: 12px;
   border-top: 1px solid var(--line); }
 .phone-step-nav .btn { min-width: 96px; }
