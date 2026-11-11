@@ -380,6 +380,15 @@ class NotifyTests(unittest.TestCase):
         follow_prompts(server, "t", stop, show=lambda text, ask: None)
         self.assertEqual(len(server.requests), 1)
 
+    def test_only_a_prompt_that_asks_is_polled_fast(self):
+        stop = threading.Event()
+        server = FakeServer([{"id": "p1", "text": "扫码", "ask": "验证码："}, {"ok": True},
+                             {"id": "sync-0", "text": "同盟战报已同步 45/2000 场", "ask": None},
+                             lambda _body: stop.set() or {"id": None}])
+        waits = []
+        stop.wait = lambda delay: waits.append(delay) or stop.is_set()
+        follow_prompts(server, "t", stop, show=lambda text, ask: "1234" if ask else None)
+        self.assertEqual(waits, [2, 60, 60])
 
     def test_a_prompt_the_server_drops_is_taken_down(self):
         for gone in ({"id": None, "text": None, "ask": None}, refuse(403)):

@@ -194,7 +194,10 @@ def follow_prompts(server, token, stop, show=ask_terminal):
                 except (OSError, ValueError):
                     pass
         shown = prompt_id
-        stop.wait(2 if prompt_id else 60)
+        # Every 2 s only while the server asks for an answer. A prompt that only tells (an alliance short of
+        # reports, a capture hint) stays up for hours: every 2 s it was about 1600 requests an hour per player
+        # (2026-11-11); it is taken down within a minute of the server dropping it.
+        stop.wait(2 if prompt_id and value.get("ask") else 60)
 
 
 def start(server, tokens, state_dir, stop, prompt_for=lambda _token: ask_terminal, ready_for=lambda _token: None,
