@@ -24,6 +24,10 @@ from .frames import Splitter, body, message_id
 PATH = "/v2/capture/frames"
 # Report lists: the personal one and the alliance one.
 BATTLE_LISTS = {0x0A: "personal", 0x5C: "alliance"}
+# The game's own time sync: about once a minute the game asks and its server answers [its time in
+# milliseconds]. Countdowns to the game's times (an army's landing) go by it, not by the computer's
+# clock, which may be off (2026-11-11 players: countdowns not right).
+SYNC_SERVER_TIME = 0x2B6
 MAX_ROWS = 100  # per request, as the server takes them
 MAX_BODY = 3 * 1024 * 1024
 MAX_QUEUED = 50000
@@ -218,6 +222,9 @@ class Uploader:
         # showing "waiting" for up to a minute (2026-10-23: a player removed the token just
         # approved and joined again).
         self.on_role = None
+        # Called with how far the game's clock is ahead of this computer's (seconds) at each of the
+        # game's time syncs, on the capture thread.
+        self.on_clock = None
 
     # capture thread -----------------------------------------------------------------
 
@@ -241,6 +248,8 @@ class Uploader:
         self.heard_at = time.monotonic()
         self.heard = True
         for ends, at, client, frame in self.splitter.feed(captured_at, linktype, packet):
+            if not client and message_id(frame, client) == SYNC_SERVER_TIME:
+                self.game_clock(at, frame)
             if message_id(frame, client) in self.drop["client" if client else "server"]:
                 continue
             self.add_frame(ends, at, client, frame)
@@ -251,6 +260,15 @@ class Uploader:
                 if now - link[2] > LINK_IDLE:
                     del self.links[ends]
                     self.splitter.forget(ends)
+
+    def game_clock(self, at, frame):
+        """The game server's time in its time sync reply, against when this computer captured it."""
+        value = body(frame, False)[1]
+        if not (isinstance(value, list) and len(value) == 1 and type(value[0]) in (int, float)):
+            return
+        game = value[0] / 1000
+        if 1.5e9 < game < 4e9 and self.on_clock:  # 2017 to 2096: milliseconds since 1970
+            self.on_clock(game - at)
 
     def add_frame(self, ends, at, client, frame):
         channel = None if client else BATTLE_LISTS.get(message_id(frame, client))

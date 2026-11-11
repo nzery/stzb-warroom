@@ -11,6 +11,7 @@ const bridge = window.bannerWindow;
 const list = document.getElementById('banners');
 const queue = [];
 let pumping = false;
+let clock = 0;  // how far the game's clock (a banner's expiry) is ahead of this computer's
 
 const fit = () => bridge.fit(list.offsetHeight);
 
@@ -80,7 +81,7 @@ async function pump() {
   try {
     while (queue.length && list.children.length < AT_ONCE) {
       const item = queue.shift();
-      if (typeof item.expires === 'number' && item.expires * 1000 <= Date.now()) continue;
+      if (typeof item.expires === 'number' && item.expires <= Date.now() / 1000 + clock) continue;
       const card = build(item);
       list.append(card);
       await fit();  // the window is on the screen before the banner moves
@@ -103,6 +104,7 @@ async function poll() {
       failures = 0;
       if (!value.on) return bridge.quit();
       after = value.after;
+      clock = value.clock || 0;
       queue.push(...value.items);
       pump();
     } catch {

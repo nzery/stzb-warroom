@@ -106,8 +106,13 @@ const S = {
   // each account's messages are apart, so all of it starts again when the chat's account changes.
   chat: { account: '', messages: [], c: 0, more: false, loading: false, seen: 0, key: '', bottom: true, gone: new Set() },
   openRows: new Set(),  // the notice rows opened to their lineups (noticeTable)
+  clock: 0,  // how far the game's clock is ahead of this computer's (gameNow)
 };
 const PERSONAL = new Set(['players']);
+// The game's time, epoch seconds: the server's times (an army's landing, a notice's expiry) go by
+// it. This computer's clock as the game's time sync set it (the program's clock.offset), which may
+// be off by itself (2026-11-11 players: countdowns not right).
+const gameNow = () => Date.now() / 1000 + S.clock;
 
 // ---------------------------------------------------------------- server
 
@@ -140,6 +145,7 @@ async function refresh() {
     const response = await fetch(`/api/state?n=${S.n}&l=${S.l}&c=${S.chat.c}`);
     if (!response.ok) throw new Error(response.status);
     const data = await response.json();
+    S.clock = data.clock?.offset || 0;
     for (const notice of data.notices) {
       if (!live(notice)) continue;
       S.notices.push(notice);
@@ -249,7 +255,7 @@ function beep() {
 }
 // A notice is shown until the time the server gave it (`expires`, epoch seconds), then cleared.
 function live(notice) {
-  return typeof notice.expires !== 'number' || notice.expires * 1000 > Date.now();
+  return typeof notice.expires !== 'number' || notice.expires > gameNow();
 }
 setInterval(() => {
   const before = S.notices.length;
@@ -469,12 +475,11 @@ function renderOverview(d) {
 // player taps no other place); a table whose rows all went goes with the lines before it (its
 // group's name, where its armies went). A row whose army a recall named (`armies`, the server's, a
 // row's army id; `gone`, withdrawnArmies) goes too (2026-10-16 user). Any other notice is its text.
-const nowSec = () => Date.now() / 1000;
 function rowsLeft(t, gone = new Set()) {
   const at = t.countdown && Array.isArray(t.countdown.at) ? t.countdown.at : [];
   const armies = Array.isArray(t.armies) ? t.armies : [];
   return ((t && t.rows) || []).map((row, r) => [row, r])
-    .filter(([, r]) => !(typeof at[r] === 'number' && at[r] <= nowSec()) && !gone.has(armies[r]));
+    .filter(([, r]) => !(typeof at[r] === 'number' && at[r] <= gameNow()) && !gone.has(armies[r]));
 }
 const MINI_LEAVES_OUT = new Set(['来源', '最近兵力']);
 const textWidth = (value) => [...String(value)].reduce((n, ch) => n + (ch.charCodeAt(0) > 0xff ? 2 : 1), 0);
@@ -526,7 +531,7 @@ function landedAll(n, gone) {
 // When the next row lands, for the list to drop it then.
 function nextRowLanding(n) {
   return Math.min(Infinity, ...(n.view?.blocks || []).flatMap((b) => (b.table?.countdown?.at || [])
-    .filter((at) => typeof at === 'number' && at > nowSec())));
+    .filter((at) => typeof at === 'number' && at > gameNow())));
 }
 const countsDown = (n) => (n.view?.blocks || []).some((b) => b.table?.countdown);
 function noticeBody(n, gone) {
@@ -554,7 +559,7 @@ function withdrawnArmies() {
 }
 
 function nextArrival(n, gone) {
-  const now = Date.now() / 1000;
+  const now = gameNow();
   if (!Array.isArray(n.arrivals)) return undefined;
   const armies = Array.isArray(n.armies) ? n.armies : [];
   return n.arrivals.find((t, i) => typeof t === 'number' && t > now && !gone.has(armies[i]));
@@ -565,13 +570,13 @@ function withdrawnAll(n, gone) {
 }
 
 function left(at) {
-  const s = Math.max(0, Math.ceil(at - Date.now() / 1000));
+  const s = Math.max(0, Math.ceil(at - gameNow()));
   return s >= 60 ? `还有 ${Math.floor(s / 60)}分${String(s % 60).padStart(2, '0')}秒` : `还有 ${s}秒`;
 }
 
 // '1分05秒' to an army's landing in its row, '打平 1分05秒' to one attacking again; '已到' after.
 function short(at, draw) {
-  const s = Math.ceil(at - Date.now() / 1000);
+  const s = Math.ceil(at - gameNow());
   if (s <= 0) return '已到';
   return (draw ? '打平 ' : '') + (s >= 60 ? `${Math.floor(s / 60)}分${String(s % 60).padStart(2, '0')}秒` : `${s}秒`);
 }
@@ -580,9 +585,9 @@ function tickCountdowns() {
   for (const el of document.querySelectorAll('#notice-list .countdown')) el.textContent = left(Number(el.dataset.at));
   for (const el of document.querySelectorAll('#notice-list td.cd')) {
     el.textContent = short(Number(el.dataset.at), el.dataset.draw);
-    el.classList.toggle('soon', Number(el.dataset.at) * 1000 - Date.now() < 60000);
+    el.classList.toggle('soon', Number(el.dataset.at) - gameNow() < 60);
   }
-  if (Date.now() / 1000 >= S.nextFlip) renderNotices();  // a raid landed: the order changes
+  if (gameNow() >= S.nextFlip) renderNotices();  // a raid landed: the order changes
 }
 setInterval(tickCountdowns, 1000);
 

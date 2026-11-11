@@ -678,7 +678,7 @@ class PageServerTests(unittest.TestCase):
         # 2026-11-02 user: the desktop popup did not work, and was to match the phone's.
         app = self.app
         app.on_notice({"title": "列表用", "level": "warn", "body": "列表正文"})  # the phone does not get this one
-        self.assertEqual(app.banners_after(-1), {"on": False, "after": 0, "items": []})
+        self.assertEqual(app.banners_after(-1), {"on": False, "after": 0, "clock": 0.0, "items": []})
         app.set_ui("desktop", True)
         first = app.banners_after(-1)
         self.assertEqual((first["on"], first["items"]), (True, []))
@@ -687,6 +687,17 @@ class PageServerTests(unittest.TestCase):
         value = app.banners_after(first["after"])
         self.assertEqual([(b["title"], b["body"]) for b in value["items"]], [("敌人一", "敌人二")])
         self.assertEqual(app.banners_after(value["after"])["items"], [])
+
+    def test_the_games_clock_decides_what_expired(self):
+        # this computer's clock 100 s behind the game's: a notice to expire 50 s from now by the
+        # computer's has already expired by the game's
+        app = self.app
+        app.on_clock(100.0)
+        app.on_notice({"title": "过期", "level": "warn", "expires": time.time() + 50})
+        app.on_notice({"title": "还在", "level": "warn", "expires": time.time() + 150})
+        self.assertEqual([n["title"] for n in app.snapshot()["notices"]], ["还在"])
+        self.assertEqual(app.snapshot()["clock"]["offset"], 100.0)
+        self.assertIn("电脑时间比游戏慢了 100 秒", app.snapshot()["logs"][-1]["text"])
 
     def test_a_banner_arriving_wakes_the_waiting_request(self):
         app = self.app

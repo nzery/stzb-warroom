@@ -50,6 +50,8 @@ DIAGNOSTICS_MAX = 60000  # characters the server takes
 RELAYS_EVERY = 60  # seconds between two asks for the relays while none is known
 RELAYS_REFRESH = 600  # and once there are some (a token approved or moved since: more relays)
 UPDATE_EVERY = 6 * 3600
+# A computer clock this far off the game's is told in the log (the countdowns go by the game's anyway).
+CLOCK_TOLD = 2
 BLIND_AFTER = 60  # seconds of the phone's game flowing with no packet captured before the window says so
 ADAPTER_HINT = ("抓不到当前网络的数据，重装 Wireshark 通常没用：先关掉 VPN 和加速器再点重试；还不行的话，"
                 "宽带拨号的电脑可以改用路由器或光猫拨号，或者把“诊断”页的诊断信息发给管理员。")
@@ -122,6 +124,9 @@ class App:
         # notice after a restart (2026-10-16 user) until it passed the old number.
         self.seq = int(time.time() * 1000)
         self.hints = {}  # token -> {"id", "text", "time"}
+        # How far the game's clock is ahead of this computer's, from the game's time sync
+        # (upload.SYNC_SERVER_TIME), and when it last came; 0 and None before one.
+        self.clock_offset, self.clock_synced = 0.0, None
         self.accounts = {}  # token -> what /v1/client/status said, or why it could not
         self.capture = {"state": "stopped", "error": None, "hint": None, "since": None, "dumpcap": None}
         self.notice_prefs = {"note": None, "groups": None, "values": None, "error": None}  # as the server gave it
@@ -167,6 +172,19 @@ class App:
             self.logs.append({"seq": self.seq, "time": time.time(), "text": str(text), "level": level})
         self.touch()
 
+    def now(self):
+        """The game's time (the server's times go by it): this computer's, as the game's time sync set it."""
+        return time.time() + self.clock_offset
+
+    def on_clock(self, offset):
+        with self.lock:
+            before, first = self.clock_offset, self.clock_synced is None
+            self.clock_offset, self.clock_synced = offset, time.time()
+        if abs(offset) >= CLOCK_TOLD and (first or abs(offset - before) >= CLOCK_TOLD):
+            self.log(f"电脑时间比游戏{'慢' if offset > 0 else '快'}了 {abs(offset):.0f} 秒，倒计时已按游戏时间校准", "warn")
+        elif abs(offset - before) >= 0.5:
+            self.touch()
+
     def snapshot(self, notices_after=0, logs_after=0, chat_after=0):
         with self.lock:
             self._drop_expired()
@@ -192,6 +210,7 @@ class App:
                 "updated": self._updated(),
                 "notice_prefs": dict(self.notice_prefs),
                 "chat": {**self.chat.view(chat_after), **self.chat_accounts()},
+                "clock": {"offset": self.clock_offset, "synced": self.clock_synced},
             }
 
     def _account(self, token):
@@ -674,18 +693,18 @@ class App:
 
     def _drop_expired(self):
         """Notices past the time the server gave them (``expires``) are no longer shown."""
-        now = time.time()
+        now = self.now()
         if any(expired(n, now) for n in self.notices):
             kept = [n for n in self.notices if not expired(n, now)]
             self.notices.clear()
             self.notices.extend(kept)
 
     def on_notice(self, notice):
-        if expired(notice, time.time()):
+        if expired(notice, self.now()):
             return
         with self.lock:
             self.seq += 1
-            self.notices.append(dict(notice, seq=self.seq, time=notice.get("time") or time.time()))
+            self.notices.append(dict(notice, seq=self.seq, time=notice.get("time") or self.now()))
             if isinstance(notice.get("banner"), dict):
                 self._add_banner(notice["banner"], notice.get("expires"))
         self.touch()
@@ -718,7 +737,7 @@ class App:
                 newest = self.banner_seq
             left = deadline - time.monotonic()
             if items or not on or after < 0 or left <= 0 or self.quit.is_set():
-                return {"on": on, "after": newest,
+                return {"on": on, "after": newest, "clock": self.clock_offset,
                         "items": [{key: b[key] for key in ("seq", "title", "body", "expires")} for b in items]}
             self.wait(version, left)
 
@@ -816,6 +835,7 @@ class App:
     def _capture(self, session, dumpcap):
         def started(uploader):
             uploader.on_role = self.poke.set  # check_accounts now, not at the next minute
+            uploader.on_clock = self.on_clock
             with self.lock:
                 session["uploader"] = uploader
                 if session is self.session:
@@ -936,6 +956,8 @@ class App:
                  *([f"更新：新版本 {self.load_failed} 没能启动，用的是自带的 {__version__}"] if self.load_failed else []),
                  f"上报：{snapshot['capture']['state']} {snapshot['capture']['error'] or ''}".rstrip(),
                  f"服务器：{self.server.origin}（{reach}）",
+                 "电脑时间：" + (f"比游戏{'慢' if snapshot['clock']['offset'] > 0 else '快'} {abs(snapshot['clock']['offset']):.1f} 秒（倒计时按游戏时间）"
+                                if snapshot["clock"]["synced"] else "还没收到游戏的时间同步"),
                  f"统计：已上传 {snapshot['stats']['uploaded']} 条，待上传 {snapshot['stats']['pending']}，"
                  f"连接 {snapshot['stats']['connections']}",
                  "手机经本机：" + ("开" if snapshot["phone"]["enabled"] else "关") + "".join(

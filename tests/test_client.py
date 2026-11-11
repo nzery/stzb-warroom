@@ -221,6 +221,16 @@ class UploadTests(unittest.TestCase):
         uploader.on_packet(1.0, 1, packet(server_frame(9, [2]), 100 + len(server_frame(9, [1]))))
         self.assertIsNone(self.queue.batch())
 
+    def test_the_games_time_sync_sets_the_clock_even_when_dropped(self):
+        # 2026-11-11 players: countdowns not right on a computer whose clock is off.
+        uploader = self.uploader(accept(drop={"client": [], "server": [0x2B6]}))
+        offsets = []
+        uploader.on_clock = offsets.append
+        uploader.on_packet(1000.25, 1, packet(server_frame(0x2B6, [1794406887751]), 100))
+        uploader.on_packet(1001.0, 1, packet(server_frame(0x2B6, ["x"]), 100 + len(server_frame(0x2B6, [1794406887751]))))
+        self.assertEqual(len(offsets), 1)
+        self.assertAlmostEqual(offsets[0], 1794406887.751 - 1000.25, places=3)
+
     def test_report_lists_the_server_wants_whole_go_as_frames_too(self):
         uploader = self.uploader(lambda body: dict(accept()(body), whole=[0x0A]))
         self.feed(uploader, (server_frame(9, [1]), False))

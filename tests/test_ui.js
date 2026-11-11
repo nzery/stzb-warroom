@@ -237,6 +237,11 @@ async function main() {
   assert.ok(rows.includes('<td title="已驻守">已驻守</td>'), 'an army staying does not count down');
   assert.equal(vm.runInContext(`short(Date.now() / 1000 + 65, '1')`, context), '打平 1分05秒');
   assert.equal(vm.runInContext(`short(Date.now() / 1000 - 1)`, context), '已到');
+  // countdowns go by the game's clock (the program's clock.offset), not this computer's
+  vm.runInContext('S.clock = 120', context);
+  assert.equal(vm.runInContext(`short(Date.now() / 1000 + 185)`, context), '1分05秒');
+  assert.equal(vm.runInContext(`short(Date.now() / 1000 + 60)`, context), '已到');
+  vm.runInContext('S.clock = 0', context);
   // a row whose army landed goes; a table left with none goes with its group's lines; then the notice
   const soon = Math.floor(Date.now() / 1000) + 600;
   const landed = vm.runInContext(`({ view: { blocks: [{ text: '来袭 2 支' },
