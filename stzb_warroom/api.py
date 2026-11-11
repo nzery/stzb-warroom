@@ -151,6 +151,12 @@ class Server:
         return self.opener.open(request.Request(self.origin + path, data=data, headers=headers, method=method),
                                 timeout=timeout)
 
+    def post_bytes(self, path, token, data, kind, timeout=45):
+        """POST `data` as it is (a chat image), typed `kind`."""
+        headers = {"Authorization": "Bearer " + token, "Content-Type": kind}
+        return self.opener.open(request.Request(self.origin + path, data=data, headers=headers, method="POST"),
+                                timeout=timeout)
+
     def json(self, path, tokens, body=None, compress=False, timeout=45):
         with self.open(path, tokens, body, compress, timeout) as response:
             return json.load(response)

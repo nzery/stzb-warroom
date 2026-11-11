@@ -11,18 +11,24 @@ came after the newest message it got (the server keeps a week of them), and send
 account sent from another computer, or a stream that broke) is not kept twice.
 
 Everything that comes from the stream is checked before it is kept or shown: the page shows it as
-text, never as markup.
+text, never as markup. The zero-width joiner stays (it makes an emoji sequence one picture).
+
+An image is a message of its own (``image``: its name on the server and its size): sent with
+``/v1/chat/image``, fetched only when the page shows it (``image()``) and kept in ``chat-images`` in
+the state folder (IMAGE_CACHE at most, the oldest go first), so it is downloaded once.
 """
 
 import collections
 import hashlib
 import json
+import os
 import re
 import socket
 import threading
 import time
 from pathlib import Path
 from urllib.error import HTTPError
+from urllib.parse import urlencode
 
 from .notify import events
 
@@ -31,7 +37,12 @@ SEND = "/v1/chat/send"
 KEEP = 2000  # messages kept on this computer
 FIRST = 30  # messages a page opening the chat is given; older ones when it scrolls up
 MAX_TEXT = 500  # the server's limit too
-CONTROL = re.compile(r"[\x00-\x09\x0b-\x1f\x7f-\x9f​-‏‪-‮⁠-⁩﻿\ud800-\udfff]")
+IMAGE = "/v1/chat/image"
+IMAGE_MAX = 1024 * 1024  # the server's limit
+IMAGE_TYPES = {"jpg": "image/jpeg", "png": "image/png", "gif": "image/gif", "webp": "image/webp"}
+IMAGE_NAME = re.compile(r"[0-9a-f]{32}\.(?:jpg|png|gif|webp)\Z")
+IMAGE_CACHE = 300 * 1024 * 1024  # bytes of images kept on this computer
+CONTROL = re.compile(r"[\x00-\x09\x0b-\x1f\x7f-\x9f​‌‎‏‪-‮⁠-⁩﻿\ud800-\udfff]")
 
 
 def text_of(value, limit):
@@ -53,9 +64,25 @@ def message_of(data, mine=False):
     # `official`: the administrator, named for the service; `level` 1-3: how much the sender plays, the
     # avatar standing out more the higher (server 2026-11-08); anything else is the plain avatar.
     level = data.get("level")
-    return {"id": message_id if type(message_id) is int and message_id > 0 else None,
-            "name": name, "text": text, "time": float(stamp), "mine": bool(mine), "official": data.get("official") is True,
-            "level": level if type(level) is int and 1 <= level <= 3 else 0}
+    message = {"id": message_id if type(message_id) is int and message_id > 0 else None,
+               "name": name, "text": text, "time": float(stamp), "mine": bool(mine), "official": data.get("official") is True,
+               "level": level if type(level) is int and 1 <= level <= 3 else 0}
+    image = image_of(data.get("image"))
+    if image:
+        message["image"] = image
+    return message
+
+
+def image_of(value):
+    """A message's image ({"name", "w", "h"}) as kept, None when it has none (or not one right)."""
+    if not isinstance(value, dict):
+        return None
+    name, width, height = value.get("name"), value.get("w"), value.get("h")
+    if not (isinstance(name, str) and IMAGE_NAME.match(name)):
+        return None
+    if not all(type(v) is int and 0 < v <= 20000 for v in (width, height)):
+        return None
+    return {"name": name, "w": width, "h": height}
 
 
 def server_error(exc):
@@ -153,7 +180,8 @@ class Chat:
 
     @staticmethod
     def _line(message):
-        return json.dumps({key: message.get(key) for key in ("seq", "id", "name", "text", "time", "mine", "official", "level")}, ensure_ascii=False) + "\n"
+        keys = ("seq", "id", "name", "text", "time", "mine", "official", "level") + (("image",) if message.get("image") else ())
+        return json.dumps({key: message.get(key) for key in keys}, ensure_ascii=False) + "\n"
 
     def _keep(self, message, streamed=False):
         with self.lock:
@@ -200,6 +228,24 @@ class Chat:
             raise ValueError("消息是空的")
         if len(text) > MAX_TEXT:
             raise ValueError(f"消息太长了，最多 {MAX_TEXT} 个字")
+        return self._sent(lambda token, conn: self.server.json(SEND, token, {"conn": conn, "text": text}, timeout=15))
+
+    def send_image(self, data, kind, width, height):
+        """Send an image (the page has made it small: chat.js) -> the message, as `send`."""
+        if not isinstance(data, (bytes, bytearray)) or not 0 < len(data) <= IMAGE_MAX:
+            raise ValueError(f"图片太大了，最多 {IMAGE_MAX // 1024} KB")
+        if kind not in IMAGE_TYPES.values():
+            raise ValueError("只能发 JPG、PNG、GIF、WebP 图片")
+        if not all(type(v) is int and 0 < v <= 20000 for v in (width, height)):
+            raise ValueError("图片尺寸不对")
+
+        def post(token, conn):
+            path = f"{IMAGE}?{urlencode({'conn': conn, 'w': width, 'h': height})}"
+            with self.server.post_bytes(path, token, bytes(data), kind, timeout=60) as response:
+                return json.load(response)
+        return self._sent(post)
+
+    def _sent(self, post):
         token = self.token()  # not under self.lock: the window's lock is taken before it (view)
         with self.lock:
             conn, key = self.conn, self.key
@@ -210,7 +256,7 @@ class Chat:
         if conn is None:
             raise ValueError("群聊还没连上，稍等一下")
         try:
-            value = self.server.json(SEND, token, {"conn": conn, "text": text}, timeout=15)
+            value = post(token, conn)
         except HTTPError as exc:
             raise ValueError(server_error(exc)) from None
         except OSError as exc:
@@ -221,6 +267,56 @@ class Chat:
         if self.key != key:  # switched meanwhile: it is the other account's
             return message
         return self._keep(message)
+
+    def image(self, name):
+        """(bytes, content type) of a message's image: kept on this computer, else fetched from the
+        server and kept; None when it is not there (gone after a week) or cannot be fetched now."""
+        if not isinstance(name, str) or not IMAGE_NAME.match(name):
+            return None
+        kind = IMAGE_TYPES[name.rsplit(".", 1)[1]]
+        folder = self.dir / "chat-images"
+        path = folder / name
+        try:
+            data = path.read_bytes()
+            os.utime(path)  # looked at: the last to go
+            return data, kind
+        except OSError:
+            pass
+        token = self.token()
+        if token is None:
+            return None
+        try:
+            with self.server.open(f"{IMAGE}/{name}", token, timeout=30) as response:
+                data = response.read(IMAGE_MAX + 1)
+        except (OSError, ValueError):
+            return None
+        if not data or len(data) > IMAGE_MAX:
+            return None
+        try:
+            folder.mkdir(parents=True, exist_ok=True)
+            temporary = folder / f".{name}.tmp"
+            temporary.write_bytes(data)
+            temporary.replace(path)
+            self._trim_images(folder)
+        except OSError:
+            pass  # shown still, only not kept
+        return data, kind
+
+    @staticmethod
+    def _trim_images(folder, limit=None):
+        """The oldest looked at go once those kept pass IMAGE_CACHE."""
+        limit = IMAGE_CACHE if limit is None else limit
+        files = []
+        for path in folder.iterdir():
+            if IMAGE_NAME.match(path.name):
+                stat = path.stat()
+                files.append((stat.st_mtime, stat.st_size, path))
+        total = sum(size for _at, size, _path in files)
+        for _at, size, path in sorted(files):
+            if total <= limit:
+                break
+            path.unlink(missing_ok=True)
+            total -= size
 
     # the stream -----------------------------------------------------------------------
 

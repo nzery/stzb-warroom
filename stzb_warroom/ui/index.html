@@ -96,6 +96,13 @@
         <div class="chat-head"><small id="chat-state"></small><span id="chat-me" class="chat-me"></span><span id="chat-who" class="chat-who"></span></div>
         <div id="chat-list" class="chat-list"></div>
         <form id="chat-form" class="chat-input">
+          <div class="chat-tools">
+            <button type="button" class="chat-tool" id="chat-emoji-button" title="表情" aria-label="表情">😊</button>
+            <button type="button" class="chat-tool" id="chat-image-button" title="图片（也可以直接粘贴或拖进来）" aria-label="发送图片"><i data-icon="image"></i></button>
+            <input type="file" id="chat-file" accept="image/png,image/jpeg,image/gif,image/webp,image/bmp" multiple hidden>
+          </div>
+          <div id="chat-emoji" class="chat-emoji" hidden></div>
+          <div id="chat-pending" class="chat-pending" hidden></div>
           <textarea id="chat-text" rows="3" maxlength="500" spellcheck="false" placeholder="说点什么…（Enter 发送，Shift+Enter 换行）"></textarea>
           <div class="chat-send"><small id="chat-count"></small><button class="btn primary small" type="submit" id="chat-submit">发送</button></div>
         </form>

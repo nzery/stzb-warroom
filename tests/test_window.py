@@ -921,7 +921,10 @@ class PageServerTests(unittest.TestCase):
         # the chat's actions: what the page sends is checked, never sent on unchecked
         for body in ({"action": "chat_send"}, {"action": "chat_send", "text": ["x"]},
                      {"action": "chat_send", "text": "好"},  # not connected (no approved account here)
-                     {"action": "chat_older", "before": "1"}):
+                     {"action": "chat_older", "before": "1"},
+                     {"action": "chat_image", "data": "**", "type": "image/png", "w": 1, "h": 1},
+                     {"action": "chat_image", "data": ["x"]},
+                     {"action": "chat_image", "data": "aGk=", "type": "image/png", "w": 1, "h": 1}):  # not connected
             with self.subTest(body=body):
                 self.assertEqual(self.request("POST", "/api/action", headers, json.dumps(body))[0], 400)
 
@@ -935,6 +938,14 @@ class PageServerTests(unittest.TestCase):
         last = view["messages"][-2]["seq"]
         view = json.loads(self.request("GET", f"/api/state?c={last}", self.cookie())[2])["chat"]
         self.assertEqual([m["text"] for m in view["messages"]], ["39"])
+
+    def test_a_chat_image_is_served_from_the_chat(self):
+        name = "d" * 32 + ".webp"
+        self.app.chat.image = lambda asked: (b"RIFF....WEBP", "image/webp") if asked == name else None
+        status, headers, data = self.request("GET", f"/api/chat-image/{name}", self.cookie())
+        self.assertEqual((status, data), (200, b"RIFF....WEBP"))
+        self.assertEqual(self.request("GET", "/api/chat-image/" + "e" * 32 + ".png", self.cookie())[0], 404)
+        self.assertEqual(self.request("GET", f"/api/chat-image/{name}", {})[0], 403)  # the page's key, as everything
 
     @unittest.skipUnless(shutil.which("node"), "needs node to run the page's code")
     def test_the_chat_badge_of_a_new_account_ignores_the_old_shared_read_position(self):

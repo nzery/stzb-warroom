@@ -25,6 +25,7 @@ const ICONS = {
   search: '<circle cx="11" cy="11" r="7"/><path d="m20 20-4-4"/>',
   chat: '<path d="M4 5h16v11H9l-5 4z"/><path d="M8 9.5h8M8 12.5h5"/>',
   copy: '<rect x="9" y="9" width="11" height="11" rx="2"/><path d="M5 15V5a1 1 0 0 1 1-1h10"/>',
+  image: '<rect x="3" y="5" width="18" height="14" rx="2"/><circle cx="8.5" cy="10" r="1.5"/><path d="m21 15-5-5L5 19"/>',
 };
 const icon = (name) => `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">${ICONS[name] || ''}</svg>`;
 const $ = (id) => document.getElementById(id);
@@ -103,7 +104,7 @@ const S = {
   // 群聊: the messages this page has (the newest when it opened, older ones as asked), the program's
   // cursor, whether older ones are kept, and the newest one read (the badge counts those after it);
   // each account's messages are apart, so all of it starts again when the chat's account changes.
-  chat: { account: '', messages: [], c: 0, more: false, loading: false, seen: 0, key: '', bottom: true },
+  chat: { account: '', messages: [], c: 0, more: false, loading: false, seen: 0, key: '', bottom: true, gone: new Set() },
   openRows: new Set(),  // the notice rows opened to their lineups (noticeTable)
 };
 const PERSONAL = new Set(['players']);
@@ -1243,10 +1244,11 @@ function renderChat(d) {
   const canSend = c.state === 'online';
   $('chat-text').disabled = !canSend;
   if (!S.busy.has('chat')) $('chat-submit').disabled = !canSend;
+  $('chat-image-button').disabled = !canSend;
   const list = $('chat-list'), messages = S.chat.messages;
   const last = messages.length ? messages[messages.length - 1].seq : 0;
   if (last > S.chat.seen) { S.chat.seen = last; store.set(chatSeenKey(), last); }
-  const key = `${messages.length}:${messages[0]?.seq}:${last}:${S.chat.more}:${S.chat.loading}:${c.name}`;
+  const key = `${messages.length}:${messages[0]?.seq}:${last}:${S.chat.more}:${S.chat.loading}:${c.name}:${S.chat.gone.size}`;
   if (key === S.chat.key) return;
   S.chat.key = key;
   const atBottom = S.chat.bottom || list.scrollHeight - list.scrollTop - list.clientHeight < 80;
@@ -1256,13 +1258,178 @@ function renderChat(d) {
   for (const m of messages) {
     if (m.time - previous > 300) parts.push(`<div class="chat-time">${esc(chatClock(m.time))}</div>`);
     previous = m.time;
-    parts.push(`<div class="msg${m.mine ? ' mine' : ''}${m.official ? ' official' : ''}">${avatar(m.name, m.official, m.level)}<div class="col"><span class="who">${esc(m.name)}${m.official ? '<b class="tag-official">官方</b>' : ''}</span><div class="bubble">${esc(m.text)}</div></div></div>`);
+    parts.push(`<div class="msg${m.mine ? ' mine' : ''}${m.official ? ' official' : ''}">${avatar(m.name, m.official, m.level)}<div class="col"><span class="who">${esc(m.name)}${m.official ? '<b class="tag-official">官方</b>' : ''}</span>${chatBody(m)}</div></div>`);
   }
   if (!messages.length) parts.push('<div class="empty">还没有消息。打个招呼吧</div>');
   list.innerHTML = parts.join('');
   if (atBottom) list.scrollTop = list.scrollHeight;
   S.chat.bottom = false;
 }
+// Images and emoji as in WeChat / WeCom (2026-11-11 user): images pasted, dropped or picked wait above the
+// input as thumbnails and go with 发送 (each its own message, before the text); the emoji panel puts
+// one at the cursor and closes, the latest picks first next time.
+const CHAT_IMAGE_MAX = 1000 * 1024;  // the server takes 1 MB
+const CHAT_IMAGE_SIDE = 1920;
+const CHAT_IMAGES_AT_ONCE = 9;
+const CHAT_SEND_GAP = 1100;  // ms between two messages: the server takes one a second
+const CHAT_EMOJI = ('😀 😃 😄 😁 😆 😅 😂 🤣 😊 😇 🙂 😉 😌 😍 🥰 😘 😋 😛 😜 🤪 😎 🤩 🥳 😏 😒 😞 😔 😟 '
+  + '😕 🙁 😣 😖 😫 😩 🥺 😢 😭 😤 😠 😡 🤬 🤯 😳 🥵 🥶 😱 😨 😰 😥 😓 🤗 🤔 🤭 🤫 😶 😐 😑 😬 🙄 '
+  + '😯 😮 😲 🥱 😴 🤤 😪 😵 🤐 🥴 🤢 🤮 🤧 😷 🤒 🤕 🤑 🤠 😈 👿 💩 👻 💀 🤡 🙈 🙉 🙊 👍 👎 👌 ✌️ 🤞 '
+  + '🤝 👏 🙌 🙏 💪 👊 ✊ 👋 🤙 👉 👆 ❤️ 💔 💯 🔥 🎉 ✨ ⭐ 🌹 🍺 ☕ 🎁 💰 ⚔️ 🛡️ 🏹 🐴 🏰 🚩 ✅ ❌ ❓ ❗').split(' ');
+const chatPending = [];  // { file, url } waiting for 发送
+function chatImageSize(w, h, side = 240) {
+  const scale = Math.min(1, side / w, side / h);
+  return [Math.max(40, Math.round(w * scale)), Math.max(40, Math.round(h * scale))];
+}
+function chatBody(m) {
+  if (!m.image) return `<div class="bubble">${esc(m.text)}</div>`;
+  if (S.chat.gone.has(m.image.name)) return '<div class="bubble gone">[图片已过期]</div>';
+  const [width, height] = chatImageSize(m.image.w, m.image.h);
+  const src = `/api/chat-image/${encodeURIComponent(m.image.name)}`;
+  return `<div class="bubble pic"><img class="chat-img" src="${esc(src)}" width="${width}" height="${height}" alt="图片" title="点击查看大图" data-chat-view="${esc(src)}" data-image="${esc(m.image.name)}"></div>`;
+}
+// An image the page cannot show (gone after a week): said so, and not asked for again at every render.
+$('chat-list').addEventListener('error', (event) => {
+  const name = event.target?.dataset?.image;
+  if (name && !S.chat.gone.has(name)) { S.chat.gone.add(name); render(); }
+}, true);
+function chatViewer(src) {
+  const close = () => { overlay.remove(); document.removeEventListener('keydown', onKey, true); };
+  const onKey = (event) => { if (event.key === 'Escape') { event.stopPropagation(); close(); } };
+  const overlay = document.createElement('div');
+  overlay.className = 'chat-viewer';
+  overlay.title = '点击关闭';
+  const image = document.createElement('img');
+  image.src = src;
+  image.alt = '图片';
+  overlay.append(image);
+  overlay.addEventListener('click', close);
+  document.addEventListener('keydown', onKey, true);
+  document.body.append(overlay);
+}
+// As it is sent: a GIF small enough kept (it moves), the rest drawn again as WebP, at most
+// CHAT_IMAGE_SIDE a side and CHAT_IMAGE_MAX bytes -> { blob, w, h }.
+async function chatShrink(file) {
+  const url = URL.createObjectURL(file);
+  try {
+    const image = await new Promise((resolve, reject) => {
+      const node = new Image();
+      node.onload = () => resolve(node);
+      node.onerror = () => reject(new Error('这个文件不是图片，或者打不开'));
+      node.src = url;
+    });
+    const w = image.naturalWidth, h = image.naturalHeight;
+    if (!w || !h) throw new Error('这个文件不是图片，或者打不开');
+    if (file.type === 'image/gif' && file.size <= CHAT_IMAGE_MAX) return { blob: file, w, h };
+    let side = Math.min(CHAT_IMAGE_SIDE, Math.max(w, h));
+    for (let quality = 0.85; ; quality -= 0.15) {
+      const scale = side / Math.max(w, h);
+      const canvas = document.createElement('canvas');
+      canvas.width = Math.max(1, Math.round(w * scale));
+      canvas.height = Math.max(1, Math.round(h * scale));
+      const context = canvas.getContext('2d');
+      context.fillStyle = '#fff';
+      context.fillRect(0, 0, canvas.width, canvas.height);
+      context.drawImage(image, 0, 0, canvas.width, canvas.height);
+      let blob = await new Promise((resolve) => canvas.toBlob(resolve, 'image/webp', quality));
+      if (!blob || blob.type !== 'image/webp') blob = await new Promise((resolve) => canvas.toBlob(resolve, 'image/jpeg', quality));
+      if (!blob) throw new Error('图片处理失败');
+      if (blob.size <= CHAT_IMAGE_MAX) return { blob, w: canvas.width, h: canvas.height };
+      if (quality < 0.5) { side = Math.round(side * 0.7); quality = 1; }
+      if (side < 200) throw new Error('图片太大了');
+    }
+  } finally { URL.revokeObjectURL(url); }
+}
+function chatBase64(blob) {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(String(reader.result).split(',', 2)[1] || '');
+    reader.onerror = () => reject(new Error('图片读取失败'));
+    reader.readAsDataURL(blob);
+  });
+}
+function chatDrawPending() {
+  const box = $('chat-pending');
+  box.hidden = !chatPending.length;
+  box.replaceChildren(...chatPending.map((item) => {
+    const node = document.createElement('div');
+    node.className = 'chat-pending-item';
+    const image = document.createElement('img');
+    image.src = item.url;
+    image.alt = '待发送的图片';
+    const remove = document.createElement('button');
+    remove.type = 'button';
+    remove.className = 'chat-pending-remove';
+    remove.title = remove.ariaLabel = '不发这张';
+    remove.textContent = '×';
+    remove.addEventListener('click', () => {
+      URL.revokeObjectURL(item.url);
+      chatPending.splice(chatPending.indexOf(item), 1);
+      chatDrawPending();
+    });
+    node.append(image, remove);
+    return node;
+  }));
+}
+function chatAddImages(list) {
+  const images = [...list].filter((f) => f.type.startsWith('image/'));
+  if (list.length && !images.length) toast('只能发图片', true);
+  for (const file of images) {
+    if (chatPending.length >= CHAT_IMAGES_AT_ONCE) { toast(`一次最多 ${CHAT_IMAGES_AT_ONCE} 张`, true); break; }
+    chatPending.push({ file, url: URL.createObjectURL(file) });
+  }
+  chatDrawPending();
+  $('chat-text').focus();
+}
+function chatRecent() {
+  const kept = store.get('chatEmojiRecent', []);
+  return Array.isArray(kept) ? kept.filter((e) => CHAT_EMOJI.includes(e)).slice(0, 8) : [];
+}
+function chatEmojiPanel() {
+  const grid = (list) => `<div class="chat-emoji-grid">${list.map((e) => `<button type="button" class="chat-emoji-item" data-emoji="${esc(e)}">${esc(e)}</button>`).join('')}</div>`;
+  const recent = chatRecent();
+  $('chat-emoji').innerHTML = (recent.length ? `<div class="chat-emoji-title">最近使用</div>${grid(recent)}` : '')
+    + `<div class="chat-emoji-title">所有表情</div>${grid(CHAT_EMOJI)}`;
+}
+function chatInsert(emoji) {
+  const input = $('chat-text');
+  const start = input.selectionStart ?? input.value.length, end = input.selectionEnd ?? start;
+  input.value = input.value.slice(0, start) + emoji + input.value.slice(end);
+  input.selectionStart = input.selectionEnd = start + emoji.length;
+  store.set('chatEmojiRecent', [emoji, ...chatRecent().filter((e) => e !== emoji)].slice(0, 8));
+  $('chat-emoji').hidden = true;
+  chatCount();
+  input.focus();
+}
+$('chat-emoji-button').addEventListener('click', (event) => {
+  event.stopPropagation();
+  const panel = $('chat-emoji');
+  const opening = panel.hidden;
+  if (opening) chatEmojiPanel();
+  panel.hidden = !opening;
+  if (opening) panel.scrollTop = 0;  // the recent ones in sight (a hidden panel keeps no scroll)
+});
+$('chat-emoji').addEventListener('click', (event) => {
+  event.stopPropagation();
+  const item = event.target.closest('[data-emoji]');
+  if (item) chatInsert(item.dataset.emoji);
+});
+document.addEventListener('click', () => { $('chat-emoji').hidden = true; });
+document.addEventListener('keydown', (event) => { if (event.key === 'Escape') $('chat-emoji').hidden = true; });
+$('chat-image-button').addEventListener('click', () => $('chat-file').click());
+$('chat-file').addEventListener('change', () => { chatAddImages($('chat-file').files); $('chat-file').value = ''; });
+// A screenshot or a copied image pasted: only when no text comes with it (a spreadsheet's cells also give a picture).
+$('chat-text').addEventListener('paste', (event) => {
+  const files = [...(event.clipboardData?.files || [])].filter((f) => f.type.startsWith('image/'));
+  if (files.length && !event.clipboardData.getData('text/plain')) { event.preventDefault(); chatAddImages(files); }
+});
+// A file dropped anywhere would otherwise open in the window in place of the page.
+document.addEventListener('dragover', (event) => { if (event.dataTransfer?.types.includes('Files')) event.preventDefault(); });
+document.addEventListener('drop', (event) => {
+  if (!event.dataTransfer?.files.length) return;
+  event.preventDefault();
+  if (S.page === 'chat') chatAddImages(event.dataTransfer.files);
+});
 async function chatOlder() {
   if (S.chat.loading || !S.chat.messages.length) return;
   S.chat.loading = true;
@@ -1287,13 +1454,31 @@ function chatCount() {
 async function chatSend() {
   const input = $('chat-text');
   const text = input.value.trim();
-  if (!text || S.busy.has('chat')) return;
+  if ((!text && !chatPending.length) || S.busy.has('chat')) return;
   if (text.length > 500) return toast('消息太长了，最多 500 个字', true);
   S.busy.add('chat');
   try {
-    await withBusy($('chat-submit'), '', () => act('chat_send', { text }));
-    input.value = '';
-    chatCount();
+    await withBusy($('chat-submit'), '', async () => {
+      let first = true;
+      while (chatPending.length) {  // what did not go stays, to be sent again
+        const item = chatPending[0];
+        let shrunk;
+        try { shrunk = await chatShrink(item.file); } catch (error) { toast(error.message, true); throw error; }
+        if (!first) await new Promise((resolve) => setTimeout(resolve, CHAT_SEND_GAP));
+        first = false;
+        await act('chat_image', { type: shrunk.blob.type, data: await chatBase64(shrunk.blob), w: shrunk.w, h: shrunk.h });
+        URL.revokeObjectURL(item.url);
+        chatPending.shift();
+        chatDrawPending();
+        S.chat.bottom = true;
+      }
+      if (text) {
+        if (!first) await new Promise((resolve) => setTimeout(resolve, CHAT_SEND_GAP));
+        await act('chat_send', { text });
+        input.value = '';
+        chatCount();
+      }
+    });
     S.chat.bottom = true;
   } catch { /* shown */ } finally {
     S.busy.delete('chat');
@@ -1339,6 +1524,8 @@ document.addEventListener('click', async (event) => {
   const goto = event.target.closest('[data-goto]');
   if (goto) return show(goto.dataset.goto);
   if (event.target.closest('[data-chat-older]')) return chatOlder();
+  const view = event.target.closest('[data-chat-view]');
+  if (view) return chatViewer(view.dataset.chatView);
   const army = event.target.closest('tr[data-detail]');
   if (army) {
     const id = army.dataset.detail;

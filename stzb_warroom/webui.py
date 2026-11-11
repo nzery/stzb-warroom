@@ -45,6 +45,7 @@ KEEP_ALIVE = 2  # seconds between writes to a quiet events stream, which find a 
 FIRST_STARTING = 20  # seconds a second start waits for the first one's window to be up
 TAKE_OVER = 30  # seconds an older program asked to quit (for this newer start) may take to go
 COOKIE = "stzb_key"
+MAX_BODY = 1500 * 1024  # an action's body: a chat image in base64 is the largest
 
 
 class Handler(BaseHTTPRequestHandler):
@@ -118,6 +119,20 @@ class Handler(BaseHTTPRequestHandler):
             value = self.server.app.banners_after(after, BANNER_POLL)
             self.server.banner_asked(value["on"])
             return self.send(200, value)
+        if url.path.startswith("/api/chat-image/"):  # a chat message's image (chat.py Chat.image)
+            found = self.server.app.chat.image(url.path.rsplit("/", 1)[-1])
+            if found is None:
+                return self.send(404, {"error": "图片已过期或暂时打不开"})
+            data, kind = found
+            self.send_response(200)
+            self.send_header("Content-Type", kind)
+            self.send_header("Content-Length", str(len(data)))
+            self.send_header("Cache-Control", "private, max-age=604800, immutable")
+            self.send_header("X-Content-Type-Options", "nosniff")
+            self.send_header("Content-Security-Policy", "default-src 'none'; sandbox")
+            self.end_headers()
+            self.wfile.write(data)
+            return
         if url.path == "/api/ping":
             return self.send(200, {"ok": True})
         if url.path == "/api/ui":  # the page's settings, read as it loads
@@ -131,7 +146,7 @@ class Handler(BaseHTTPRequestHandler):
         kind = mimetypes.guess_type(path.name)[0] or "application/octet-stream"
         if kind.startswith("text/") or kind.endswith("javascript"):
             kind += "; charset=utf-8"
-        headers = (("Content-Security-Policy", "default-src 'self'; img-src 'self' data:; "
+        headers = (("Content-Security-Policy", "default-src 'self'; img-src 'self' data: blob:; "
                     "style-src 'self'; script-src 'self'; connect-src 'self'; frame-ancestors 'none'"),)
         self.send(200, path.read_bytes(), kind, headers)
 
@@ -168,7 +183,7 @@ class Handler(BaseHTTPRequestHandler):
             return self.send(404, {"error": "not found"})
         try:
             length = int(self.headers.get("Content-Length", "0"))
-            body = json.loads(self.rfile.read(length)) if 0 < length <= 65536 else None
+            body = json.loads(self.rfile.read(length)) if 0 < length <= MAX_BODY else None
         except ValueError:
             body = None
         if not isinstance(body, dict):
@@ -287,6 +302,7 @@ class Window(ThreadingHTTPServer):
             "phone": lambda: app.phone(int(index), reset=body.get("reset") is True, part=body.get("part")),
             "phone_status": lambda: app.phone(int(index), status=True),
             "chat_send": lambda: app.chat.send(body.get("text")),
+            "chat_image": lambda: app.chat.send_image(image_data(body.get("data")), body.get("type"), body.get("w"), body.get("h")),
             "chat_older": lambda: app.chat.older(body.get("before")),
             "chat_use": lambda: app.use_chat(int(index)),
             "pick_dumpcap": app.pick_dumpcap,
@@ -309,6 +325,18 @@ class Window(ThreadingHTTPServer):
     def quit(self):
         self.app.shutdown()
         self.shutdown()
+
+
+def image_data(value):
+    """The page's image (base64) as bytes; ValueError when it is not."""
+    import base64
+    import binascii
+    if not isinstance(value, str):
+        raise ValueError("图片不对")
+    try:
+        return base64.b64decode(value, validate=True)
+    except (binascii.Error, ValueError):
+        raise ValueError("图片不对") from None
 
 
 def open_installer(opener):

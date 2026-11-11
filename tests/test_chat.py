@@ -2,6 +2,7 @@
 
 import io
 import json
+import os
 import tempfile
 import threading
 import unittest
@@ -123,6 +124,72 @@ class ChatTests(unittest.TestCase):
         self.token = None
         with self.assertRaises(ValueError):
             room.send("好")
+
+    def test_an_emoji_sequence_keeps_its_joiner(self):
+        family = "\U0001F468\u200d\U0001F469\u200d\U0001F467"
+        self.assertEqual(message_of({"name": "甲", "text": f"{family}\u200b👍", "time": 1})["text"], f"{family}👍")
+
+    def test_an_image_message_is_checked_kept_and_sent(self):
+        name = "a" * 32 + ".webp"
+        value = {"id": 4, "name": "甲", "text": "[图片]", "time": 1, "image": {"name": name, "w": 30, "h": 20}}
+        self.assertEqual(message_of(value)["image"], {"name": name, "w": 30, "h": 20})
+        for bad in ({"name": "../x.png", "w": 1, "h": 1}, {"name": name, "w": 0, "h": 1}, {"name": name, "w": "1", "h": 1},
+                    {"name": name.upper(), "w": 1, "h": 1}, "x", None):
+            with self.subTest(bad=bad):
+                self.assertNotIn("image", message_of({**value, "image": bad}))
+        room = self.chat(Server())
+        room._keep(message_of(value))
+        room._keep(message_of({**value, "id": 5, "image": None, "text": "字"}))
+        again = self.chat(Server())  # kept across a start
+        self.assertEqual([m.get("image") for m in again.messages], [{"name": name, "w": 30, "h": 20}, None])
+        # sent as its bytes, named by the stream
+        posted = []
+
+        class Response(io.BytesIO):
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *exc):
+                return False
+
+        def post_bytes(path, token, data, kind, timeout=45):
+            posted.append((path, data, kind))
+            return Response(json.dumps({**value, "id": 9}).encode())
+        room.server.post_bytes = post_bytes
+        room.conn = "c1"
+        message = room.send_image(b"RIFF....WEBP", "image/webp", 30, 20)
+        self.assertEqual(posted, [(chat.IMAGE + "?conn=c1&w=30&h=20", b"RIFF....WEBP", "image/webp")])
+        self.assertTrue(message["mine"] and message["image"]["name"] == name)
+        for data, kind, w, h in ((b"", "image/webp", 1, 1), (b"x" * (chat.IMAGE_MAX + 1), "image/webp", 1, 1),
+                                 (b"x", "text/html", 1, 1), (b"x", "image/png", 0, 1), (b"x", "image/png", 1, "2")):
+            with self.subTest(kind=kind, w=w), self.assertRaises(ValueError):
+                room.send_image(data, kind, w, h)
+
+    def test_an_image_is_fetched_once_and_kept(self):
+        name = "b" * 32 + ".png"
+        fetched = []
+
+        class Images(Server):
+            def open(self, path, token, timeout=45):
+                fetched.append(path)
+                if path.endswith(name):
+                    return Stream(b"\x89PNG data")
+                raise HTTPError(path, 404, "gone", {}, io.BytesIO(b"{}"))
+        room = self.chat(Images())
+        self.assertEqual(room.image(name), (b"\x89PNG data", "image/png"))
+        self.assertEqual(room.image(name), (b"\x89PNG data", "image/png"))
+        self.assertEqual(fetched, [chat.IMAGE + "/" + name])  # the second from this computer
+        self.assertIsNone(room.image("c" * 32 + ".png"))  # gone from the server
+        for bad in ("../../x.png", "x.exe", None):
+            self.assertIsNone(room.image(bad))
+        self.assertEqual(len(fetched), 2)
+        # the oldest looked at go past the limit
+        folder = self.dir / "chat-images"
+        for n in range(3):
+            (folder / f"{n:032x}.png").write_bytes(b"x" * 10)
+            os.utime(folder / f"{n:032x}.png", (n, n))
+        Chat._trim_images(folder, limit=25)
+        self.assertEqual(sorted(p.name for p in folder.iterdir()), sorted([name, f"{2:032x}.png"]))
 
     def test_the_servers_refusal_is_said(self):
         refusal = HTTPError(chat.SEND, 429, "too many", {}, io.BytesIO('{"error": "发得太快了"}'.encode()))
