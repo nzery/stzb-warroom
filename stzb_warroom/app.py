@@ -414,6 +414,11 @@ class App:
                 value = dict(self.accounts.get(token) or {}, state="offline", error=f"{type(exc).__name__}: {exc}")
             with self.lock:
                 if token in self.tokens:
+                    # A new device of this account asks whether it is the player's (server/rejoin.py):
+                    # a desktop banner the first time, the question itself on the accounts page.
+                    if value.get("confirm") and not known.get("confirm"):
+                        self._add_banner({"title": value["confirm"].get("title") or "有新设备要接手你的账号",
+                                          "body": "打开本程序的“账号”页回答是不是你本人。"})
                     self.accounts[token] = value
         self.touch()
         self.sync_notice_prefs()
@@ -540,6 +545,30 @@ class App:
                 self.accounts[token]["bark"] = value
         self.touch()
         return value
+
+    def rejoin_answer(self, index, answer):
+        """Whether the new device asking for this account (/v1/client/status ``confirm``) is the
+        player's: the server replaces this token with it ("yes") or turns it away ("no")."""
+        if answer not in ("yes", "no"):
+            raise ValueError("回答无效")
+        token = self._token(index)
+        try:
+            value = self.server.json("/v1/client/rejoin", token, {"answer": answer}, timeout=20)
+        except HTTPError as exc:
+            try:
+                message = json.loads(exc.read() or b"{}").get("error")
+            except (OSError, ValueError):
+                message = None
+            raise ValueError(message or f"服务器返回 HTTP {exc.code}")
+        except OSError as exc:
+            raise ValueError(f"连不上服务器：{exc}")
+        with self.lock:
+            if token in self.accounts:
+                self.accounts[token].pop("confirm", None)
+        self.log(str(value.get("text") or "已回答"))
+        self.poke.set()  # this token stops at once when it was "yes": the accounts are looked at again
+        self.touch()
+        return {"text": value.get("text")}
 
     def bark_bind(self, index, address):
         return self._bark("POST", "/v1/client/bark", index, {"address": str(address or "")})

@@ -361,6 +361,11 @@ function renderBanners(d) {
     parts.push(banner('error', 'alert', `<b>${invalid.length === d.tokens.length ? 'Token 无效' : `有 ${invalid.length} 个 Token 无效`}</b>：${esc(invalid.map((a) => a.token).join('、'))} 被服务器拒绝，这些账号的数据不会上传。请找管理员确认 Token，删掉后重新添加。`,
       '<button class="btn danger" data-goto="accounts">去处理</button>'));
   }
+  const asking = d.tokens.filter((a) => a.confirm);
+  if (asking.length) {
+    parts.push(banner('warn', 'user', `<b>${esc(asking[0].confirm.title)}</b>：${esc(asking.map((a) => a.role ? roleName(a.role.label) : a.name || a.token).join('、'))}。到“账号”页回答是不是你本人。`,
+      '<button class="btn primary" data-goto="accounts">去回答</button>'));
+  }
   const waiting = d.tokens.filter((a) => ['pending', 'no_role', 'problem'].includes(a.state));
   if (waiting.length) {
     parts.push(banner(waiting.some((a) => a.state === 'problem') ? 'error' : 'warn', 'user',
@@ -648,6 +653,10 @@ function renderAccounts(d) {
     else if (a.state === 'pending' && a.pending) problem = `<div class="account-problem warn"><b>${esc(a.pending.title)}</b><br>${esc(a.pending.text)}</div>`;
     else if (a.state === 'pending') problem = '<div class="account-problem warn">这个 Token 需要管理员审批，审批后才能看到这个账号的通知和推送。可以先联系管理员。</div>';
     else if (a.state === 'no_role') problem = '<div class="account-problem warn">还没收到这个账号的游戏登录。' + LOGIN_STEPS + '。</div>';
+    // A new device of this account asks whether it is the player's (the server's words, 2026-11-12).
+    if (a.confirm) problem = `<div class="account-problem warn"><b>${esc(a.confirm.title)}</b><br>${esc(a.confirm.text)}
+      <div class="row-actions"><button class="btn primary small" data-action="rejoin_answer" data-index="${index}" data-answer="yes" data-confirm="确定是你本人？这个账号会换到新设备，这台电脑停止上传。">是我</button>
+      <button class="btn ghost small danger-text" data-action="rejoin_answer" data-index="${index}" data-answer="no">不是我</button></div></div>` + problem;
     else if (a.state === 'offline') problem = `<div class="account-problem warn">暂时连不上服务器（${esc(a.error || '')}），稍后会自动重试。</div>`;
     // The name and state first, what it is next, then what can be done with it (2026-11-07 user:
     // the page was hard to read). Push is bound on 手机 and shown on 概览.
@@ -1618,10 +1627,12 @@ document.addEventListener('click', async (event) => {
   if (button.dataset.confirm && !confirm(button.dataset.confirm)) return;
   const action = button.dataset.action;
   const extra = button.dataset.index !== undefined ? { index: Number(button.dataset.index) } : {};
+  if (button.dataset.answer) extra.answer = button.dataset.answer;
   try {
     const result = await withBusy(button, '', () => act(action, extra));
     if (MESSAGES[action]) toast(MESSAGES[action]);
     if (action === 'join_public') toast((result && result.joined) || '已生成账号');
+    if (action === 'rejoin_answer') { toast((result && result.text) || '已回答'); S.accountsKey = ''; }
     if (action === 'remove_token' || action === 'join_public') S.accountsKey = '';
   } catch { /* shown */ }
 });

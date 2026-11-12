@@ -209,6 +209,28 @@ class AppTests(unittest.TestCase):
         app.remove_token(0)
         self.assertEqual(app.tokens, [])
 
+    def test_a_new_device_asking_is_shown_once_and_answered(self):
+        app = self.app(saved=GOOD)
+        confirm = {"title": "有新设备要接手你的账号", "text": "是你本人吗"}
+        real = self.server.json
+        sent = []
+
+        def json_(path, token, body=None, timeout=45):
+            if path == "/v1/client/rejoin":
+                sent.append(body)
+                return {"done": True, "text": "已拒绝"}
+            return dict(real(path, token, body, timeout), confirm=confirm)
+        self.server.json = json_
+        app.check_accounts()
+        app.check_accounts()
+        self.assertEqual([b["title"] for b in app.banners], ["有新设备要接手你的账号"])  # once
+        self.assertEqual(app.snapshot()["tokens"][0]["confirm"], confirm)
+        with self.assertRaises(ValueError):
+            app.rejoin_answer(0, "maybe")
+        self.assertEqual(app.rejoin_answer(0, "no"), {"text": "已拒绝"})
+        self.assertEqual(sent, [{"answer": "no"}])
+        self.server.json = real
+
     def test_capture_setup_failure_stops_notification_workers(self):
         app = self.app(saved=GOOD)
         session = app.session = {"stop": threading.Event(), "uploader": None, "tokens": app.tokens}
