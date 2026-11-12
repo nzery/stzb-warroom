@@ -73,11 +73,14 @@ def message_of(data, mine=False):
         return None
     message_id = data.get("id")
     # `official`: the administrator, named for the service; `level` 1-3: how much the sender plays, the
-    # avatar standing out more the higher (server 2026-11-08); anything else is the plain avatar.
+    # avatar standing out more the higher (server 2026-11-08); anything else is the plain avatar. `staff`: a
+    # player the administrator made 群管理员 (server 2026-11-12, sent with level 3), shown with a 管理员 tag.
     level = data.get("level")
     message = {"id": message_id if type(message_id) is int and message_id > 0 else None,
                "name": name, "text": text, "time": float(stamp), "mine": bool(mine), "official": data.get("official") is True,
                "level": level if type(level) is int and 1 <= level <= 3 else 0}
+    if data.get("staff") is True:
+        message["staff"] = True
     if data.get("recalled") is True:
         return dict(message, text=RECALLED_TEXT, recalled=True)
     image = image_of(data.get("image"))
@@ -197,6 +200,7 @@ class Chat:
     @staticmethod
     def _line(message):
         keys = ("seq", "id", "name", "text", "time", "mine", "official", "level") + (("image",) if message.get("image") else ()) \
+            + (("staff",) if message.get("staff") else ()) \
             + (("recalled",) if message.get("recalled") else ())
         return json.dumps({key: message.get(key) for key in keys}, ensure_ascii=False) + "\n"
 

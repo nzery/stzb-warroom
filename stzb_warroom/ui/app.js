@@ -1224,11 +1224,13 @@ function chatClock(seconds) {
   if (date.toDateString() === now.toDateString()) return time;
   return `${date.getFullYear() !== now.getFullYear() ? date.getFullYear() + '年' : ''}${date.getMonth() + 1}月${date.getDate()}日 ${time}`;
 }
-function avatar(name, official, level) {
+function avatar(name, official, level, staff) {
   if (official) return '<span class="av official" title="率土战局官方">率</span>';
-  const lv = Number.isInteger(level) && level >= 1 && level <= 3 ? ` lv${level}` : '';
   const text = String(name);
   const shown = text.includes('的') ? text.split('的').pop()[0] : text[0];
+  // A 群管理员 (2026-11-12): round, its own colours and a star, apart from the level-3 players it is sent as.
+  if (staff) return `<span class="av staff" title="群管理员">${esc(shown || '?')}</span>`;
+  const lv = Number.isInteger(level) && level >= 1 && level <= 3 ? ` lv${level}` : '';
   let hash = 0;
   for (const ch of text) hash = (hash * 31 + ch.charCodeAt(0)) >>> 0;
   return `<span class="av c${hash % 6}${lv}">${esc(shown || '?')}</span>`;
@@ -1279,7 +1281,7 @@ function renderChat(d) {
     const recall = m.id && (c.admin || (m.mine && c.recall && Date.now() / 1000 - m.time < c.recall))
       ? `<button class="link recall" data-chat-recall="${m.id}" data-mine="${m.mine ? 1 : ''}">撤回</button>` : '';
     const at = !m.mine && c.name && m.text.includes(`@${c.name}`);  // someone @s me
-    parts.push(`<div class="msg${m.mine ? ' mine' : ''}${m.official ? ' official' : ''}${at ? ' at' : ''}">${avatar(m.name, m.official, m.level)}<div class="col"><span class="who">${esc(m.name)}${m.official ? '<b class="tag-official">官方</b>' : ''}</span>${chatBody(m)}${recall}</div></div>`);
+    parts.push(`<div class="msg${m.mine ? ' mine' : ''}${m.official ? ' official' : ''}${at ? ' at' : ''}">${avatar(m.name, m.official, m.level, m.staff)}<div class="col"><span class="who">${esc(m.name)}${m.official ? '<b class="tag-official">官方</b>' : m.staff ? '<b class="tag-staff">管理员</b>' : ''}</span>${chatBody(m)}${recall}</div></div>`);
   }
   if (!messages.length) parts.push('<div class="empty">还没有消息。打个招呼吧</div>');
   list.innerHTML = parts.join('');

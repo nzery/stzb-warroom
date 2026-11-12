@@ -379,6 +379,13 @@ input[type=text]:focus, input[type=password]:focus { border-color: var(--gold2);
 /* The administrator (率土战局): gold, ringed, and its bubble tinted, to stand out among the players. */
 .msg .av.official { background: linear-gradient(135deg, #f5c24c, #d9901a); font-weight: 700; box-shadow: 0 0 0 2px #fff, 0 0 0 4px #e6a23c; }
 .msg .tag-official { margin-left: 6px; padding: 0 5px; border-radius: 3px; background: #e6a23c; color: #fff; font-size: 11px; font-weight: 600; }
+/* A 群管理员 (server 2026-11-12): a round rose-to-violet avatar with a gold star, apart from both the
+   level-3 players (an old client shows it as one) and the official's gold square. */
+.msg .av.staff { position: relative; border-radius: 50%; background: linear-gradient(135deg, #ff5f6d, #7b4fd6); font-weight: 700;
+  box-shadow: 0 0 0 2px #fff, 0 0 0 4px #7b4fd6, 0 0 12px 3px rgba(123, 79, 214, .45); }
+.msg .av.staff::after { content: '★'; position: absolute; right: -5px; bottom: -5px; width: 16px; height: 16px; border-radius: 50%;
+  background: #f5b82e; color: #fff; font-size: 10px; line-height: 16px; text-align: center; box-shadow: 0 0 0 2px #fff; }
+.msg .tag-staff { margin-left: 6px; padding: 0 5px; border-radius: 3px; background: #7b4fd6; color: #fff; font-size: 11px; font-weight: 600; }
 .msg.official:not(.mine) .bubble { background: #fff4dc; box-shadow: inset 0 0 0 1px #f0d08a; }
 /* Players by how much they play (server level 1-3): a ring that stands out more the higher; never gold. */
 .msg .av.lv1 { box-shadow: 0 0 0 2px #fff, 0 0 0 3px #b8c4d4; }

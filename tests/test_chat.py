@@ -70,6 +70,11 @@ class ChatTests(unittest.TestCase):
         # how much the sender plays: 1-3 kept, anything else the plain avatar
         for value, kept in ((1, 1), (3, 3), (0, 0), (4, 0), ("2", 0), (True, 0), (2.0, 0)):
             self.assertEqual(message_of({"name": "甲", "text": "a", "time": 1, "level": value})["level"], kept)
+        # a 群管理员 (server 2026-11-12): kept marked only when true, and in the file
+        staff = message_of({"name": "姜君", "text": "a", "time": 1, "level": 3, "staff": True})
+        self.assertEqual((staff["staff"], staff["level"]), (True, 3))
+        self.assertNotIn("staff", message_of({"name": "姜君", "text": "a", "time": 1, "staff": "true"}))
+        self.assertTrue(message_of(json.loads(Chat._line(dict(staff, seq=1))))["staff"])
         for bad in (0, -1, "3", 2.0, True):
             self.assertIsNone(message_of({"id": bad, "name": "甲", "text": "a", "time": 1})["id"])
 
