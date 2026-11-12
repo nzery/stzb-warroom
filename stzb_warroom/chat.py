@@ -325,9 +325,12 @@ class Chat:
         return {"mention_push": self.mention_push}
 
     def web_logout(self):
-        """Every phone's web chat of this account ends (its links and sessions)."""
-        self._post(WEB_LOGOUT, {})
-        return {"ok": True}
+        """发群聊链接到手机: the server makes this account a new phone web chat link (the old one ends) and
+        pushes it to the phone bound; the link never comes here -> {"ok", "message"} as the server says."""
+        value = self._post(WEB_LOGOUT, {})
+        value = value if isinstance(value, dict) else {}
+        message = value.get("message") if isinstance(value.get("message"), str) else ""
+        return {"ok": value.get("ok") is True, "message": message[:200]}
 
     def _post(self, path, body):
         token = self.token()

@@ -1587,8 +1587,8 @@ document.addEventListener('click', async (event) => {
   if (goto) return show(goto.dataset.goto);
   if (event.target.closest('[data-chat-older]')) return chatOlder();
   if (event.target.closest('#chat-web-logout')) {
-    if (!confirm('退出所有点推送打开过的手机网页群聊？之后要等下次有人 @ 你，点推送才能再进。')) return;
-    try { await act('chat_web_logout'); toast('已退出手机网页群聊'); } catch { /* act said why */ }
+    if (!confirm('把手机群聊链接推送到你手机？之前发过的旧链接会马上失效（链接泄漏了也点这里换一条）。')) return;
+    try { const r = await act('chat_web_logout'); toast((r && r.message) || '已发出', !(r && r.ok)); } catch { /* act said why */ }
     return;
   }
   const recall = event.target.closest('[data-chat-recall]');

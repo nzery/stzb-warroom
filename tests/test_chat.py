@@ -171,8 +171,12 @@ class ChatTests(unittest.TestCase):
         self.assertEqual(room.set_mention_push(True), {"mention_push": True})
         self.assertEqual(room.server.sent[-1], {"mention_push": True})
         self.assertRaises(ValueError, room.set_mention_push, "yes")
+        room.server.reply = {"ok": True, "pushed": True, "message": "已推送到你手机"}
+        self.assertEqual(room.web_logout(), {"ok": True, "message": "已推送到你手机"})
+        room.server.reply = {"ok": False, "message": "先在“手机”页绑定"}
+        self.assertEqual(room.web_logout(), {"ok": False, "message": "先在“手机”页绑定"})
         room.server.reply = {"ok": True}
-        self.assertEqual(room.web_logout(), {"ok": True})
+        self.assertEqual(room.web_logout(), {"ok": True, "message": ""})
         room.server.reply = HTTPError("u", 503, "x", {}, io.BytesIO('{"error": "暂时改不了，稍后再试"}'.encode()))
         with self.assertRaisesRegex(ValueError, "暂时改不了"):
             room.set_mention_push(False)
