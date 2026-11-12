@@ -74,7 +74,7 @@ def message_of(data, mine=False):
     message_id = data.get("id")
     # `official`: the administrator, named for the service; `level` 1-3: how much the sender plays, the
     # avatar standing out more the higher (server 2026-11-08); anything else is the plain avatar. `staff`: a
-    # player the administrator made 群管理员 (server 2026-11-12, sent with level 3), shown with a 管理员 tag.
+    # player the administrator made 管理员 (server 2026-11-12, sent with level 3), shown with a 管理员 tag.
     level = data.get("level")
     message = {"id": message_id if type(message_id) is int and message_id > 0 else None,
                "name": name, "text": text, "time": float(stamp), "mine": bool(mine), "official": data.get("official") is True,

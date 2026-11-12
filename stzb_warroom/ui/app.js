@@ -1228,8 +1228,8 @@ function avatar(name, official, level, staff) {
   if (official) return '<span class="av official" title="率土战局官方">率</span>';
   const text = String(name);
   const shown = text.includes('的') ? text.split('的').pop()[0] : text[0];
-  // A 群管理员 (2026-11-12): round, its own colours and a star, apart from the level-3 players it is sent as.
-  if (staff) return `<span class="av staff" title="群管理员">${esc(shown || '?')}</span>`;
+  // A 管理员 (2026-11-12): round, its own colours and a star, apart from the level-3 players it is sent as.
+  if (staff) return `<span class="av staff" title="管理员">${esc(shown || '?')}</span>`;
   const lv = Number.isInteger(level) && level >= 1 && level <= 3 ? ` lv${level}` : '';
   let hash = 0;
   for (const ch of text) hash = (hash * 31 + ch.charCodeAt(0)) >>> 0;
