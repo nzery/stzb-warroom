@@ -655,6 +655,9 @@ class AppTests(unittest.TestCase):
         self.assertIs(self.server.outdated.__func__, App._outdated)
         checks = []
         app.check_update = lambda: checks.append(True)
+        # A computer started a minute ago looks at once too (monotonic counts from the start: CI's runners).
+        unittest.mock.patch.object(appmod.time, "monotonic", lambda: 60.0).start()
+        self.addCleanup(unittest.mock.patch.stopall)
         app._outdated()
         app._outdated()  # told once
         self.assertEqual(sum("不再支持" in line["text"] for line in app.logs), 1)
@@ -664,7 +667,7 @@ class AppTests(unittest.TestCase):
         self.assertFalse(app._update_outdated())
         self.assertEqual(checks, [True])
         app.update = {"version": "9.0.0", "state": "downloading"}
-        app.outdated_checked = 0.0
+        app.outdated_checked = None
         self.assertFalse(app._update_outdated())
         self.assertEqual(checks, [True])  # the download is under way
         app.update = {"version": "9.0.0", "state": "available"}  # a full package: the player downloads it

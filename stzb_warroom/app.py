@@ -146,7 +146,8 @@ class App:
         # started without waiting for the player (2026-11-12 user: a 1.19.1 left running for days had
         # downloaded 1.22.0 but kept running the old code, its uploads refused until restarted by hand).
         self.outdated_at = None
-        self.outdated_checked = 0.0  # when the release was last looked for since
+        self.outdated_checked = None  # when the release was last looked for since (None: not yet; not 0: monotonic
+        # counts from the computer's start, so a computer up for less than OUTDATED_CHECK_EVERY never looked)
         server.outdated = self._outdated
         self.quit = threading.Event()
         self.poke = threading.Event()  # look at the accounts now
@@ -972,7 +973,7 @@ class App:
             threading.Thread(target=self.shutdown, name="restart", daemon=True).start()
             return True
         if not (update and update["state"] in ("downloading", "available")) and \
-                time.monotonic() - self.outdated_checked >= OUTDATED_CHECK_EVERY:
+                (self.outdated_checked is None or time.monotonic() - self.outdated_checked >= OUTDATED_CHECK_EVERY):
             self.outdated_checked = time.monotonic()
             try:
                 self.check_update()
