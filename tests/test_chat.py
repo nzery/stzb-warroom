@@ -40,7 +40,7 @@ class Server:
         return self.stream
 
     def json(self, path, token, body=None, timeout=45):
-        assert path in (chat.SEND, chat.RECALL)
+        assert path in (chat.SEND, chat.RECALL, chat.PREFS, chat.WEB_LOGOUT)
         self.sent.append(body)
         if isinstance(self.reply, Exception):
             raise self.reply
@@ -158,6 +158,25 @@ class ChatTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "超过 10 分钟"):
             room.recall(5)
 
+    def test_the_push_switch_and_leaving_the_web_chat(self):
+        room = self.chat(Server(sse(("hello", {"conn": "c1", "name": "沉稳的赤兔", "mention_push": False, "phone": True}))))
+        room.follow_once(TOKEN, threading.Event())
+        self.assertEqual((room.view()["mention_push"], room.view()["phone"]), (False, True))
+        room.server.reply = {"mention_push": True, "phone": True}
+        self.assertEqual(room.set_mention_push(True), {"mention_push": True})
+        self.assertEqual(room.server.sent[-1], {"mention_push": True})
+        self.assertRaises(ValueError, room.set_mention_push, "yes")
+        room.server.reply = {"ok": True}
+        self.assertEqual(room.web_logout(), {"ok": True})
+        room.server.reply = HTTPError("u", 503, "x", {}, io.BytesIO('{"error": "暂时改不了，稍后再试"}'.encode()))
+        with self.assertRaisesRegex(ValueError, "暂时改不了"):
+            room.set_mention_push(False)
+
+    def test_a_moving_image_may_be_larger(self):
+        room = self.chat(Server())
+        room.conn = "c1"
+        self.assertRaises(ValueError, room.send_image, b"x" * (chat.ANIMATED_MAX + 1), "image/gif", 1, 1)
+
     def test_an_emoji_sequence_keeps_its_joiner(self):
         family = "\U0001F468\u200d\U0001F469\u200d\U0001F467"
         self.assertEqual(message_of({"name": "甲", "text": f"{family}\u200b👍", "time": 1})["text"], f"{family}👍")
@@ -193,7 +212,7 @@ class ChatTests(unittest.TestCase):
         message = room.send_image(b"RIFF....WEBP", "image/webp", 30, 20)
         self.assertEqual(posted, [(chat.IMAGE + "?conn=c1&w=30&h=20", b"RIFF....WEBP", "image/webp")])
         self.assertTrue(message["mine"] and message["image"]["name"] == name)
-        for data, kind, w, h in ((b"", "image/webp", 1, 1), (b"x" * (chat.IMAGE_MAX + 1), "image/webp", 1, 1),
+        for data, kind, w, h in ((b"", "image/webp", 1, 1), (b"x" * (chat.ANIMATED_MAX + 1), "image/webp", 1, 1),
                                  (b"x", "text/html", 1, 1), (b"x", "image/png", 0, 1), (b"x", "image/png", 1, "2")):
             with self.subTest(kind=kind, w=w), self.assertRaises(ValueError):
                 room.send_image(data, kind, w, h)

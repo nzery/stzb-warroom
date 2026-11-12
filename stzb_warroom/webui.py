@@ -45,7 +45,7 @@ KEEP_ALIVE = 2  # seconds between writes to a quiet events stream, which find a 
 FIRST_STARTING = 20  # seconds a second start waits for the first one's window to be up
 TAKE_OVER = 30  # seconds an older program asked to quit (for this newer start) may take to go
 COOKIE = "stzb_key"
-MAX_BODY = 1500 * 1024  # an action's body: a chat image in base64 is the largest
+MAX_BODY = 3000 * 1024  # an action's body: a chat image in base64 is the largest (a 动图 of 2 MB)
 
 
 class Handler(BaseHTTPRequestHandler):
@@ -305,6 +305,8 @@ class Window(ThreadingHTTPServer):
             "chat_image": lambda: app.chat.send_image(image_data(body.get("data")), body.get("type"), body.get("w"), body.get("h")),
             "chat_older": lambda: app.chat.older(body.get("before")),
             "chat_recall": lambda: app.chat.recall(body.get("id")),
+            "chat_mention_push": lambda: app.chat.set_mention_push(body.get("on")),
+            "chat_web_logout": app.chat.web_logout,
             "chat_use": lambda: app.use_chat(int(index)),
             "pick_dumpcap": app.pick_dumpcap,
             "forget_dumpcap": app.forget_dumpcap,

@@ -1252,6 +1252,11 @@ function renderChat(d) {
       return `<button class="chip${index === c.using ? ' active' : ''}" data-chat-use="${index}">${esc(a.role ? roleName(a.role.label) : a.name || a.token)}</button>`;
     }).join('')}</div>` : '';
   }
+  // @ pushes (2026-11-12): an admin's @ always reaches the phone; another player's only when switched on.
+  $('chat-opts').hidden = c.state !== 'online' || typeof c.mention_push !== 'boolean';
+  if (!S.busy.has('chat-mention')) $('chat-mention').checked = c.mention_push === true;
+  $('chat-mention').disabled = !c.phone;
+  $('chat-mention-tip').textContent = c.phone ? '管理员 @ 你一定会推送' : '先在“手机”页绑定手机，@ 你时才能推送';
   const canSend = c.state === 'online';
   $('chat-text').disabled = !canSend;
   if (!S.busy.has('chat')) $('chat-submit').disabled = !canSend;
@@ -1273,7 +1278,8 @@ function renderChat(d) {
     // One's own within the server's minutes (said in hello), any for an admin; a late one the server refuses.
     const recall = m.id && (c.admin || (m.mine && c.recall && Date.now() / 1000 - m.time < c.recall))
       ? `<button class="link recall" data-chat-recall="${m.id}" data-mine="${m.mine ? 1 : ''}">撤回</button>` : '';
-    parts.push(`<div class="msg${m.mine ? ' mine' : ''}${m.official ? ' official' : ''}">${avatar(m.name, m.official, m.level)}<div class="col"><span class="who">${esc(m.name)}${m.official ? '<b class="tag-official">官方</b>' : ''}</span>${chatBody(m)}${recall}</div></div>`);
+    const at = !m.mine && c.name && m.text.includes(`@${c.name}`);  // someone @s me
+    parts.push(`<div class="msg${m.mine ? ' mine' : ''}${m.official ? ' official' : ''}${at ? ' at' : ''}">${avatar(m.name, m.official, m.level)}<div class="col"><span class="who">${esc(m.name)}${m.official ? '<b class="tag-official">官方</b>' : ''}</span>${chatBody(m)}${recall}</div></div>`);
   }
   if (!messages.length) parts.push('<div class="empty">还没有消息。打个招呼吧</div>');
   list.innerHTML = parts.join('');
@@ -1284,6 +1290,27 @@ function renderChat(d) {
 // input as thumbnails and go with 发送 (each its own message, before the text); the emoji panel puts
 // one at the cursor and closes, the latest picks first next time.
 const CHAT_IMAGE_MAX = 1000 * 1024;  // the server takes 1 MB
+const CHAT_ANIMATED_MAX = 2 * 1024 * 1024;  // a 动图 is sent as it is, up to 2 MB (2026-11-12)
+// Whether an image file moves (a GIF of several frames, an animated WebP or PNG): sent as it is, never made still.
+async function chatAnimated(file) {
+  if (!['image/gif', 'image/webp', 'image/png'].includes(file.type)) return false;
+  const bytes = new Uint8Array(await file.slice(0, Math.min(file.size, CHAT_ANIMATED_MAX + 1)).arrayBuffer());
+  const text = (from, to) => String.fromCharCode(...bytes.subarray(from, to));
+  if (file.type === 'image/gif') {
+    let frames = 0;
+    for (let i = 0; i + 2 < bytes.length && frames < 2; i += 1) if (bytes[i] === 0x21 && bytes[i + 1] === 0xf9 && bytes[i + 2] === 0x04) frames += 1;
+    return frames > 1;
+  }
+  if (file.type === 'image/webp') return text(12, 16) === 'VP8X' && (bytes[20] & 0x02) !== 0;
+  for (let i = 8; i + 8 <= bytes.length;) {  // PNG chunks: acTL comes before the first IDAT
+    const length = ((bytes[i] << 24) | (bytes[i + 1] << 16) | (bytes[i + 2] << 8) | bytes[i + 3]) >>> 0;
+    const kind = text(i + 4, i + 8);
+    if (kind === 'acTL') return true;
+    if (kind === 'IDAT') return false;
+    i += 12 + length;
+  }
+  return false;
+}
 const CHAT_IMAGE_SIDE = 1920;
 const CHAT_IMAGES_AT_ONCE = 9;
 const CHAT_SEND_GAP = 1100;  // ms between two messages: the server takes one a second
@@ -1335,6 +1362,10 @@ async function chatShrink(file) {
     });
     const w = image.naturalWidth, h = image.naturalHeight;
     if (!w || !h) throw new Error('这个文件不是图片，或者打不开');
+    if (await chatAnimated(file)) {
+      if (file.size > CHAT_ANIMATED_MAX) throw new Error('动图太大了，最多 2 MB');
+      return { blob: file, w, h };
+    }
     if (file.type === 'image/gif' && file.size <= CHAT_IMAGE_MAX) return { blob: file, w, h };
     let side = Math.min(CHAT_IMAGE_SIDE, Math.max(w, h));
     for (let quality = 0.85; ; quality -= 0.15) {
@@ -1432,6 +1463,11 @@ $('chat-emoji').addEventListener('click', (event) => {
 document.addEventListener('click', () => { $('chat-emoji').hidden = true; });
 document.addEventListener('keydown', (event) => { if (event.key === 'Escape') $('chat-emoji').hidden = true; });
 $('chat-image-button').addEventListener('click', () => $('chat-file').click());
+$('chat-mention').addEventListener('change', async () => {
+  const on = $('chat-mention').checked;
+  S.busy.add('chat-mention');
+  try { await act('chat_mention_push', { on }); } catch { $('chat-mention').checked = !on; } finally { S.busy.delete('chat-mention'); }
+});
 $('chat-file').addEventListener('change', () => { chatAddImages($('chat-file').files); $('chat-file').value = ''; });
 // A screenshot or a copied image pasted: only when no text comes with it (a spreadsheet's cells also give a picture).
 $('chat-text').addEventListener('paste', (event) => {
@@ -1539,6 +1575,11 @@ document.addEventListener('click', async (event) => {
   const goto = event.target.closest('[data-goto]');
   if (goto) return show(goto.dataset.goto);
   if (event.target.closest('[data-chat-older]')) return chatOlder();
+  if (event.target.closest('#chat-web-logout')) {
+    if (!confirm('退出所有点推送打开过的手机网页群聊？之后要等下次有人 @ 你，点推送才能再进。')) return;
+    try { await act('chat_web_logout'); toast('已退出手机网页群聊'); } catch { /* act said why */ }
+    return;
+  }
   const recall = event.target.closest('[data-chat-recall]');
   if (recall) {
     if (!recall.dataset.mine && !confirm('撤回这条别人的消息？撤回后所有人都看不到了。')) return;

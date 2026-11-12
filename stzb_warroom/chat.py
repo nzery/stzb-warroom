@@ -47,6 +47,9 @@ FIRST = 30  # messages a page opening the chat is given; older ones when it scro
 MAX_TEXT = 500  # the server's limit too
 IMAGE = "/v1/chat/image"
 IMAGE_MAX = 1024 * 1024  # the server's limit
+ANIMATED_MAX = 2 * 1024 * 1024  # a 动图 (GIF, animated WebP / PNG) is sent as it is, up to this
+PREFS = "/v1/chat/prefs"
+WEB_LOGOUT = "/v1/chat/web-logout"
 IMAGE_TYPES = {"jpg": "image/jpeg", "png": "image/png", "gif": "image/gif", "webp": "image/webp"}
 IMAGE_NAME = re.compile(r"[0-9a-f]{32}\.(?:jpg|png|gif|webp)\Z")
 IMAGE_CACHE = 300 * 1024 * 1024  # bytes of images kept on this computer
@@ -117,6 +120,7 @@ class Chat:
         self.after = 0  # the newest id the stream gave: what came after it is asked for
         self.state, self.name, self.online, self.error = "connecting", None, None, None
         self.admin, self.recall_seconds = False, 0  # what the server said in hello
+        self.mention_push, self.phone = None, False  # another player's @ pushed too; a phone bound to push to
         self.conn = None  # this client's stream, named when sending
         self.stream = None  # the response being read, cut when the player switches accounts
         first = token()
@@ -137,6 +141,7 @@ class Chat:
                 return
             if self.key is not None:  # the other account's stream and name are not this one's
                 self.conn, self.name, self.online, self.admin, self.recall_seconds = None, None, None, False, 0
+                self.mention_push, self.phone = None, False
             self.key, self.path = key, self.dir / f"chat-{key}.jsonl"
             self.messages.clear()
             self.seq = self.after = 0
@@ -249,6 +254,7 @@ class Chat:
             return {"account": self.key, "state": self.state, "name": self.name, "online": self.online, "error": self.error,
                     "messages": messages, "oldest": self.messages[0]["seq"] if self.messages else None,
                     "admin": self.admin, "recall": self.recall_seconds,
+                    "mention_push": self.mention_push, "phone": self.phone,
                     # those the page has already: shown recalled in place
                     "recalled": [m["seq"] for m in self.messages if m.get("recalled")]}
 
@@ -269,8 +275,8 @@ class Chat:
 
     def send_image(self, data, kind, width, height):
         """Send an image (the page has made it small: chat.js) -> the message, as `send`."""
-        if not isinstance(data, (bytes, bytearray)) or not 0 < len(data) <= IMAGE_MAX:
-            raise ValueError(f"图片太大了，最多 {IMAGE_MAX // 1024} KB")
+        if not isinstance(data, (bytes, bytearray)) or not 0 < len(data) <= ANIMATED_MAX:
+            raise ValueError(f"图片太大了，动图最多 {ANIMATED_MAX // 1024 // 1024} MB")
         if kind not in IMAGE_TYPES.values():
             raise ValueError("只能发 JPG、PNG、GIF、WebP 图片")
         if not all(type(v) is int and 0 < v <= 20000 for v in (width, height)):
@@ -304,6 +310,31 @@ class Chat:
         if self.key != key:  # switched meanwhile: it is the other account's
             return message
         return self._keep(message)
+
+    def set_mention_push(self, on):
+        """The 群聊 page's switch: another player's @ also pushed to the phone (an admin's always is)."""
+        if not isinstance(on, bool):
+            raise ValueError("设置不对")
+        value = self._post(PREFS, {"mention_push": on})
+        self._set(mention_push=value.get("mention_push") is True if isinstance(value, dict) else on,
+                  phone=isinstance(value, dict) and value.get("phone") is True)
+        return {"mention_push": self.mention_push}
+
+    def web_logout(self):
+        """Every phone's web chat of this account ends (its links and sessions)."""
+        self._post(WEB_LOGOUT, {})
+        return {"ok": True}
+
+    def _post(self, path, body):
+        token = self.token()
+        if token is None:
+            raise ValueError("账号还没通过服务器检查，稍后再试")
+        try:
+            return self.server.json(path, token, body, timeout=15)
+        except HTTPError as exc:
+            raise ValueError(server_error(exc)) from None
+        except OSError as exc:
+            raise ValueError(f"连不上服务器：{exc}") from None
 
     def recall(self, message_id):
         """Recall a message (its id): one's own within the minutes the server allows, any by an admin."""
@@ -344,10 +375,10 @@ class Chat:
             return None
         try:
             with self.server.open(f"{IMAGE}/{name}", token, timeout=30) as response:
-                data = response.read(IMAGE_MAX + 1)
+                data = response.read(ANIMATED_MAX + 1)
         except (OSError, ValueError):
             return None
-        if not data or len(data) > IMAGE_MAX:
+        if not data or len(data) > ANIMATED_MAX:
             return None
         try:
             folder.mkdir(parents=True, exist_ok=True)
@@ -413,7 +444,9 @@ class Chat:
             recall = data.get("recall")
             self._set(state="online", conn=data["conn"][:64], name=text_of(data.get("name"), 32),
                       online=data.get("online") if type(data.get("online")) is int else None, error=None,
-                      admin=data.get("admin") is True, recall_seconds=recall if type(recall) is int and recall > 0 else 0)
+                      admin=data.get("admin") is True, recall_seconds=recall if type(recall) is int and recall > 0 else 0,
+                      mention_push=data["mention_push"] if isinstance(data.get("mention_push"), bool) else None,
+                      phone=data.get("phone") is True)
         elif kind == "online" and type(data.get("online")) is int:
             self._set(online=data["online"])
         # `mine`: this account's own, sent from another computer or the console (server 2026-10-31)
