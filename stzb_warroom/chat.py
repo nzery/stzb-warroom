@@ -16,6 +16,12 @@ text, never as markup. The zero-width joiner stays (it makes an emoji sequence o
 An image is a message of its own (``image``: its name on the server and its size): sent with
 ``/v1/chat/image``, fetched only when the page shows it (``image()``) and kept in ``chat-images`` in
 the state folder (IMAGE_CACHE at most, the oldest go first), so it is downloaded once.
+
+A message can be recalled (``/v1/chat/recall``; server 2026-11-12): one's own within the minutes the
+server says in ``hello``, any by an admin. The server sends the recalled message again as a ``msg``
+with ``"recalled": true`` (also, as the stream opens with ``recall=1``, those recalled while this
+client was away): what this computer kept of it, its text and its image, is forgotten, and the page
+shows "… 撤回了一条消息".
 """
 
 import collections
@@ -34,6 +40,8 @@ from .notify import events
 
 STREAM = "/v1/chat/stream"
 SEND = "/v1/chat/send"
+RECALL = "/v1/chat/recall"
+RECALLED_TEXT = "撤回了一条消息"
 KEEP = 2000  # messages kept on this computer
 FIRST = 30  # messages a page opening the chat is given; older ones when it scrolls up
 MAX_TEXT = 500  # the server's limit too
@@ -67,6 +75,8 @@ def message_of(data, mine=False):
     message = {"id": message_id if type(message_id) is int and message_id > 0 else None,
                "name": name, "text": text, "time": float(stamp), "mine": bool(mine), "official": data.get("official") is True,
                "level": level if type(level) is int and 1 <= level <= 3 else 0}
+    if data.get("recalled") is True:
+        return dict(message, text=RECALLED_TEXT, recalled=True)
     image = image_of(data.get("image"))
     if image:
         message["image"] = image
@@ -106,6 +116,7 @@ class Chat:
         self.seq = 0
         self.after = 0  # the newest id the stream gave: what came after it is asked for
         self.state, self.name, self.online, self.error = "connecting", None, None, None
+        self.admin, self.recall_seconds = False, 0  # what the server said in hello
         self.conn = None  # this client's stream, named when sending
         self.stream = None  # the response being read, cut when the player switches accounts
         first = token()
@@ -125,7 +136,7 @@ class Chat:
             if key == self.key:
                 return
             if self.key is not None:  # the other account's stream and name are not this one's
-                self.conn, self.name, self.online = None, None, None
+                self.conn, self.name, self.online, self.admin, self.recall_seconds = None, None, None, False, 0
             self.key, self.path = key, self.dir / f"chat-{key}.jsonl"
             self.messages.clear()
             self.seq = self.after = 0
@@ -180,8 +191,31 @@ class Chat:
 
     @staticmethod
     def _line(message):
-        keys = ("seq", "id", "name", "text", "time", "mine", "official", "level") + (("image",) if message.get("image") else ())
+        keys = ("seq", "id", "name", "text", "time", "mine", "official", "level") + (("image",) if message.get("image") else ()) \
+            + (("recalled",) if message.get("recalled") else ())
         return json.dumps({key: message.get(key) for key in keys}, ensure_ascii=False) + "\n"
+
+    def _forget(self, recalled, streamed=False):
+        """A message recalled: what is kept of it goes (the file written again, its image deleted);
+        one not kept is kept recalled only when it is new to this client."""
+        with self.lock:
+            if self.path is None:
+                return
+            kept = next((m for m in self.messages if m.get("id") == recalled["id"]), None)
+            if kept is None and recalled["id"] <= self.after:
+                return  # recalled before this client had it (it was away), or long gone from here
+            if kept is not None:
+                if kept.get("recalled"):
+                    return
+                image = kept.pop("image", None)
+                kept.update(text=RECALLED_TEXT, recalled=True)
+                self._rewrite()
+        if kept is None:
+            self._keep(recalled, streamed)
+            return
+        if image:
+            (self.dir / "chat-images" / image["name"]).unlink(missing_ok=True)
+        self.changed()
 
     def _keep(self, message, streamed=False):
         with self.lock:
@@ -213,7 +247,10 @@ class Chat:
         with self.lock:
             messages = [m for m in self.messages if m["seq"] > after] if after else list(self.messages)[-FIRST:]
             return {"account": self.key, "state": self.state, "name": self.name, "online": self.online, "error": self.error,
-                    "messages": messages, "oldest": self.messages[0]["seq"] if self.messages else None}
+                    "messages": messages, "oldest": self.messages[0]["seq"] if self.messages else None,
+                    "admin": self.admin, "recall": self.recall_seconds,
+                    # those the page has already: shown recalled in place
+                    "recalled": [m["seq"] for m in self.messages if m.get("recalled")]}
 
     def older(self, before, limit=FIRST):
         """Up to `limit` messages before seq `before`, oldest first."""
@@ -267,6 +304,26 @@ class Chat:
         if self.key != key:  # switched meanwhile: it is the other account's
             return message
         return self._keep(message)
+
+    def recall(self, message_id):
+        """Recall a message (its id): one's own within the minutes the server allows, any by an admin."""
+        if type(message_id) is not int or message_id <= 0:
+            raise ValueError("这条消息不能撤回")
+        token = self.token()
+        if token is None:
+            raise ValueError("账号还没通过服务器检查，稍后再试")
+        try:
+            value = self.server.json(RECALL, token, {"id": message_id}, timeout=15)
+        except HTTPError as exc:
+            raise ValueError(server_error(exc)) from None
+        except OSError as exc:
+            raise ValueError(f"连不上服务器：{exc}") from None
+        message = message_of(value, value.get("mine") is True) if isinstance(value, dict) else None
+        if message is None or not message.get("recalled") or message["id"] != message_id:
+            raise ValueError("服务器的回复不对")
+        if self.key_of(token) == self.key:
+            self._forget(message)
+        return {"id": message_id}
 
     def image(self, name):
         """(bytes, content type) of a message's image: kept on this computer, else fetched from the
@@ -335,7 +392,7 @@ class Chat:
         # Looked at on every line (the keep-alives too), not only on a message: a switch is not
         # left waiting for someone to speak.
         gone = Either(stop, lambda: self.token() != token)
-        with self.server.open(f"{STREAM}?after={after}", token, timeout=60) as stream:
+        with self.server.open(f"{STREAM}?after={after}&recall=1", token, timeout=60) as stream:
             with self.lock:
                 self.stream = stream
             try:
@@ -353,13 +410,19 @@ class Chat:
         if not isinstance(data, dict):
             return
         if kind == "hello" and isinstance(data.get("conn"), str):
+            recall = data.get("recall")
             self._set(state="online", conn=data["conn"][:64], name=text_of(data.get("name"), 32),
-                      online=data.get("online") if type(data.get("online")) is int else None, error=None)
+                      online=data.get("online") if type(data.get("online")) is int else None, error=None,
+                      admin=data.get("admin") is True, recall_seconds=recall if type(recall) is int and recall > 0 else 0)
         elif kind == "online" and type(data.get("online")) is int:
             self._set(online=data["online"])
         # `mine`: this account's own, sent from another computer or the console (server 2026-10-31)
         elif kind == "msg" and (message := message_of(data, data.get("mine") is True)) is not None:
-            self._keep(message, streamed=True)
+            if message.get("recalled"):
+                if message["id"]:
+                    self._forget(message, streamed=True)
+            else:
+                self._keep(message, streamed=True)
 
     def run(self, stop):
         delay = 2

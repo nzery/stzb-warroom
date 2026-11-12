@@ -304,6 +304,7 @@ class Window(ThreadingHTTPServer):
             "chat_send": lambda: app.chat.send(body.get("text")),
             "chat_image": lambda: app.chat.send_image(image_data(body.get("data")), body.get("type"), body.get("w"), body.get("h")),
             "chat_older": lambda: app.chat.older(body.get("before")),
+            "chat_recall": lambda: app.chat.recall(body.get("id")),
             "chat_use": lambda: app.use_chat(int(index)),
             "pick_dumpcap": app.pick_dumpcap,
             "forget_dumpcap": app.forget_dumpcap,

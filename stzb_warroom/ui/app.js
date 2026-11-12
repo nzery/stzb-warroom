@@ -1202,6 +1202,12 @@ function takeChat(chat) {
   // Read past the newest this account has: not its own (the "one for all" of before v1.13.2, on a
   // new account), and no message would count as unread until the numbers caught up with it.
   if (S.chat.seen > S.chat.c) { S.chat.seen = S.chat.c; store.set(chatSeenKey(), S.chat.c); }
+  // Recalled since the page got them (chat.py Chat._forget): shown recalled in place.
+  const recalled = new Set(chat.recalled || []);
+  for (const m of S.chat.messages) {
+    if (recalled.has(m.seq) && !m.recalled) Object.assign(m, { recalled: true, text: '撤回了一条消息', image: undefined });
+  }
+  S.chat.recalled = recalled.size;
   if (first) S.chat.more = chat.oldest != null && S.chat.messages.length > 0 && chat.oldest < S.chat.messages[0].seq;
   if (S.chat.messages.length > CHAT_KEEP) { S.chat.messages.splice(0, S.chat.messages.length - CHAT_KEEP); S.chat.more = true; }
 }
@@ -1253,7 +1259,7 @@ function renderChat(d) {
   const list = $('chat-list'), messages = S.chat.messages;
   const last = messages.length ? messages[messages.length - 1].seq : 0;
   if (last > S.chat.seen) { S.chat.seen = last; store.set(chatSeenKey(), last); }
-  const key = `${messages.length}:${messages[0]?.seq}:${last}:${S.chat.more}:${S.chat.loading}:${c.name}:${S.chat.gone.size}`;
+  const key = `${messages.length}:${messages[0]?.seq}:${last}:${S.chat.more}:${S.chat.loading}:${c.name}:${S.chat.gone.size}:${S.chat.recalled}:${c.admin}`;
   if (key === S.chat.key) return;
   S.chat.key = key;
   const atBottom = S.chat.bottom || list.scrollHeight - list.scrollTop - list.clientHeight < 80;
@@ -1263,7 +1269,11 @@ function renderChat(d) {
   for (const m of messages) {
     if (m.time - previous > 300) parts.push(`<div class="chat-time">${esc(chatClock(m.time))}</div>`);
     previous = m.time;
-    parts.push(`<div class="msg${m.mine ? ' mine' : ''}${m.official ? ' official' : ''}">${avatar(m.name, m.official, m.level)}<div class="col"><span class="who">${esc(m.name)}${m.official ? '<b class="tag-official">官方</b>' : ''}</span>${chatBody(m)}</div></div>`);
+    if (m.recalled) { parts.push(`<div class="chat-tip">${m.mine ? '你' : esc(m.name)}撤回了一条消息</div>`); continue; }
+    // One's own within the server's minutes (said in hello), any for an admin; a late one the server refuses.
+    const recall = m.id && (c.admin || (m.mine && c.recall && Date.now() / 1000 - m.time < c.recall))
+      ? `<button class="link recall" data-chat-recall="${m.id}" data-mine="${m.mine ? 1 : ''}">撤回</button>` : '';
+    parts.push(`<div class="msg${m.mine ? ' mine' : ''}${m.official ? ' official' : ''}">${avatar(m.name, m.official, m.level)}<div class="col"><span class="who">${esc(m.name)}${m.official ? '<b class="tag-official">官方</b>' : ''}</span>${chatBody(m)}${recall}</div></div>`);
   }
   if (!messages.length) parts.push('<div class="empty">还没有消息。打个招呼吧</div>');
   list.innerHTML = parts.join('');
@@ -1529,6 +1539,12 @@ document.addEventListener('click', async (event) => {
   const goto = event.target.closest('[data-goto]');
   if (goto) return show(goto.dataset.goto);
   if (event.target.closest('[data-chat-older]')) return chatOlder();
+  const recall = event.target.closest('[data-chat-recall]');
+  if (recall) {
+    if (!recall.dataset.mine && !confirm('撤回这条别人的消息？撤回后所有人都看不到了。')) return;
+    try { await act('chat_recall', { id: Number(recall.dataset.chatRecall) }); } catch { /* act said why */ }
+    return;
+  }
   const view = event.target.closest('[data-chat-view]');
   if (view) return chatViewer(view.dataset.chatView);
   const army = event.target.closest('tr[data-detail]');

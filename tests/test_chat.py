@@ -40,7 +40,7 @@ class Server:
         return self.stream
 
     def json(self, path, token, body=None, timeout=45):
-        assert path == chat.SEND
+        assert path in (chat.SEND, chat.RECALL)
         self.sent.append(body)
         if isinstance(self.reply, Exception):
             raise self.reply
@@ -89,7 +89,7 @@ class ChatTests(unittest.TestCase):
         room = self.chat(Server(sse(("hello", {"conn": "c1", "name": "沉稳的赤兔", "online": 1}),
                                     ("msg", {"id": 4, "name": "机灵的白马", "text": "一", "time": 140}))))
         room.follow_once(TOKEN, threading.Event())
-        self.assertEqual(room.server.opened, [chat.STREAM + "?after=0"])  # never connected: the recent ones
+        self.assertEqual(room.server.opened, [chat.STREAM + "?after=0&recall=1"])  # never connected: the recent ones
         room.server.reply = mine
         room.send("我说的")
         # Started again: asks after the newest it got (not its own: one of the others' may be before it),
@@ -98,7 +98,7 @@ class ChatTests(unittest.TestCase):
                                      ("msg", {"id": 4, "name": "机灵的白马", "text": "一", "time": 140}),
                                      ("msg", mine), ("msg", {"id": 6, "name": "机灵的白马", "text": "二", "time": 160}))))
         again.follow_once(TOKEN, threading.Event())
-        self.assertEqual(again.server.opened, [chat.STREAM + "?after=4"])
+        self.assertEqual(again.server.opened, [chat.STREAM + "?after=4&recall=1"])
         self.assertEqual([(m["text"], m["mine"]) for m in again.messages], [("一", False), ("我说的", True), ("二", False)])
         self.assertEqual(again.after, 6)
 
@@ -124,6 +124,39 @@ class ChatTests(unittest.TestCase):
         self.token = None
         with self.assertRaises(ValueError):
             room.send("好")
+
+    def test_a_recalled_message_is_forgotten_with_its_image(self):
+        name = "b" * 32 + ".webp"
+        picture = {"id": 4, "name": "机灵的白马", "text": "[图片]", "time": 140, "image": {"name": name, "w": 3, "h": 2}}
+        room = self.chat(Server(sse(("hello", {"conn": "c1", "name": "沉稳的赤兔", "recall": 600}),
+                                    ("msg", {"id": 3, "name": "机灵的白马", "text": "一", "time": 130}), ("msg", picture),
+                                    ("msg", {"id": 4, "name": "机灵的白马", "text": "撤回了一条消息", "time": 140, "recalled": True}),
+                                    # recalled while away, never had here: nothing shown
+                                    ("msg", {"id": 2, "name": "机灵的白马", "text": "撤回了一条消息", "time": 120, "recalled": True}),
+                                    # new to this client and already recalled: shown recalled
+                                    ("msg", {"id": 5, "name": "机灵的白马", "text": "撤回了一条消息", "time": 150, "recalled": True}))))
+        (self.dir / "chat-images").mkdir()
+        (self.dir / "chat-images" / name).write_bytes(b"x")
+        room.follow_once(TOKEN, threading.Event())
+        view = room.view()
+        self.assertEqual((view["recall"], view["admin"]), (600, False))
+        self.assertEqual([(m["id"], m["text"], m.get("recalled", False), "image" in m) for m in view["messages"]],
+                         [(3, "一", False, False), (4, "撤回了一条消息", True, False), (5, "撤回了一条消息", True, False)])
+        self.assertEqual(view["recalled"], [m["seq"] for m in view["messages"][1:]])
+        self.assertFalse((self.dir / "chat-images" / name).exists())
+        kept = (self.dir / f"chat-{Chat.key_of(TOKEN)}.jsonl").read_text(encoding="utf-8")
+        self.assertNotIn(name, kept)
+        self.assertEqual([m.get("recalled", False) for m in self.chat(Server()).messages], [False, True, True])  # after a restart
+        # recalling one's own: the server's tombstone, kept in place
+        room.server.reply = {"id": 3, "name": "机灵的白马", "text": "撤回了一条消息", "time": 130, "recalled": True}
+        self.assertEqual(room.recall(3), {"id": 3})
+        self.assertEqual(room.server.sent[-1], {"id": 3})
+        self.assertTrue(room.messages[0]["recalled"])
+        for bad in (0, "3", None):
+            self.assertRaises(ValueError, room.recall, bad)
+        room.server.reply = HTTPError("u", 409, "late", {}, io.BytesIO('{"error": "超过 10 分钟的消息不能撤回了"}'.encode()))
+        with self.assertRaisesRegex(ValueError, "超过 10 分钟"):
+            room.recall(5)
 
     def test_an_emoji_sequence_keeps_its_joiner(self):
         family = "\U0001F468\u200d\U0001F469\u200d\U0001F467"
@@ -241,7 +274,7 @@ class ChatTests(unittest.TestCase):
         room.server.stream = sse(("hello", {"conn": "c2", "name": "沉稳的赤兔"}),
                                  ("msg", {"id": 7, "name": "仗义的犀牛（曹操）", "text": "有人么？", "time": 300}))
         room.follow_once(TOKEN, threading.Event())
-        self.assertEqual(room.server.opened[-1], chat.STREAM + "?after=0")
+        self.assertEqual(room.server.opened[-1], chat.STREAM + "?after=0&recall=1")
         self.assertEqual([(m["name"], m["mine"]) for m in room.view()["messages"]], [("仗义的犀牛（曹操）", False)])
         self.assertIsNone(room.view()["online"])  # not told: none shown
         self.token = other  # and the other's are as they were
