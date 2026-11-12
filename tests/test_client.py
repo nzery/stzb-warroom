@@ -717,6 +717,20 @@ class JoinTests(unittest.TestCase):
         server.opener = Opener()
         return server, sent
 
+    def test_a_426_tells_the_app_this_version_is_no_longer_served(self):
+        server, _sent = self.server(error=(426, {"error": "client update required"}))
+        told = []
+        server.outdated = lambda: told.append(True)
+        for _ in range(2):
+            with self.assertRaises(HTTPError):
+                server.json("/v1/client/notice-prefs", "t", {})
+        self.assertEqual(told, [True, True])
+        other, _sent = self.server(error=(503, {}))
+        other.outdated = lambda: told.append(False)
+        with self.assertRaises(HTTPError):
+            other.json("/v1/client/notice-prefs", "t", {})
+        self.assertEqual(told, [True, True])
+
     def test_a_code_is_traded_for_a_token_without_any_token(self):
         self.assertEqual(api.invite_code(f" {self.CODE} "), self.CODE)
         self.assertIsNone(api.invite_code(self.TOKEN))

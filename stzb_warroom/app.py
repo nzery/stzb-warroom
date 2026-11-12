@@ -50,6 +50,9 @@ DIAGNOSTICS_MAX = 60000  # characters the server takes
 RELAYS_EVERY = 60  # seconds between two asks for the relays while none is known
 RELAYS_REFRESH = 600  # and once there are some (a token approved or moved since: more relays)
 UPDATE_EVERY = 6 * 3600
+# Once the server answers 426 (it no longer serves this version), the release is looked for this
+# often until the code an update brings is downloaded; then the program restarts into it by itself.
+OUTDATED_CHECK_EVERY = 600
 # A computer clock this far off the game's is told in the log (the countdowns go by the game's anyway).
 CLOCK_TOLD = 2
 BLIND_AFTER = 60  # seconds of the phone's game flowing with no packet captured before the window says so
@@ -139,6 +142,12 @@ class App:
         # The downloaded version the launcher could not start, so the exe's own runs: only a start changes it.
         self.load_failed = updates.load_failed(self.state_dir / "app")
         self.relaunch = False  # start again once quit (to run the code an update downloaded)
+        # Since when the server answers 426 (None: it serves this version): a downloaded update is then
+        # started without waiting for the player (2026-11-12 user: a 1.19.1 left running for days had
+        # downloaded 1.22.0 but kept running the old code, its uploads refused until restarted by hand).
+        self.outdated_at = None
+        self.outdated_checked = 0.0  # when the release was last looked for since
+        server.outdated = self._outdated
         self.quit = threading.Event()
         self.poke = threading.Event()  # look at the accounts now
         self.exit_said = {}  # (event, relay) -> when the phone exit last said it in the log
@@ -938,6 +947,39 @@ class App:
                 raise ValueError("新版本还没有下载好")
             self.relaunch = True
 
+    def _outdated(self):
+        """The server answered 426: it no longer serves this version."""
+        with self.lock:
+            if self.outdated_at is not None:
+                return
+            self.outdated_at = time.monotonic()
+        self.log(f"服务器不再支持 {__version__}，正在检查更新；新版本的代码下载好后会自动重启", "warn")
+        self.poke.set()
+
+    def _update_outdated(self):
+        """While the server refuses this version: restart into a downloaded update (True), or look for
+        one now and then. A full package (new runtime) is left to the player, as is a version the
+        launcher could not start (restarting into it would only start this one again)."""
+        with self.lock:
+            update = self.update
+            if update and update["state"] == "ready" and update["version"] != self.load_failed:
+                self.relaunch = True
+                version = update["version"]
+            else:
+                version = None
+        if version:
+            self.log(f"自动重启，换到新版本 {version}")
+            threading.Thread(target=self.shutdown, name="restart", daemon=True).start()
+            return True
+        if not (update and update["state"] in ("downloading", "available")) and \
+                time.monotonic() - self.outdated_checked >= OUTDATED_CHECK_EVERY:
+            self.outdated_checked = time.monotonic()
+            try:
+                self.check_update()
+            except ValueError:
+                pass
+        return False
+
     def diagnostics(self):
         """Text to send to the maintainer: no token, no device key."""
         with self.lock:
@@ -1018,6 +1060,8 @@ class App:
                 self.poke.clear()
                 last_accounts = now
                 self.check_accounts(asked)
+            if self.outdated_at is not None and self._update_outdated():
+                return
             if now - last_update >= UPDATE_EVERY:
                 last_update = now
                 try:

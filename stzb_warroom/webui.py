@@ -501,9 +501,10 @@ def run(server, state_dir, background, show, stay=False):
     except KeyboardInterrupt:
         window.quit()
     finally:
+        hidden = window.closed() or not window.seen_page  # a restart keeps the window shut
         tray.close()
         winsys.close_windows()
         marker.unlink(missing_ok=True)
     sys.stdout, sys.stderr = sys.__stdout__, sys.__stderr__
     if app.relaunch:
-        winsys.relaunch()
+        winsys.relaunch(background=hidden)

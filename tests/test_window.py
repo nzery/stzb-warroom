@@ -650,6 +650,37 @@ class AppTests(unittest.TestCase):
         self.assertFalse(app.relaunch)
 
 
+    def test_a_refused_version_restarts_into_the_downloaded_update(self):
+        app = self.app()
+        self.assertIs(self.server.outdated.__func__, App._outdated)
+        checks = []
+        app.check_update = lambda: checks.append(True)
+        app._outdated()
+        app._outdated()  # told once
+        self.assertEqual(sum("不再支持" in line["text"] for line in app.logs), 1)
+        self.assertTrue(app.poke.is_set())
+        # nothing downloaded yet: the release is looked for at once, then not again for a while
+        self.assertFalse(app._update_outdated())
+        self.assertFalse(app._update_outdated())
+        self.assertEqual(checks, [True])
+        app.update = {"version": "9.0.0", "state": "downloading"}
+        app.outdated_checked = 0.0
+        self.assertFalse(app._update_outdated())
+        self.assertEqual(checks, [True])  # the download is under way
+        app.update = {"version": "9.0.0", "state": "available"}  # a full package: the player downloads it
+        self.assertFalse(app._update_outdated())
+        self.assertFalse(app.relaunch)
+        app.update = {"version": "9.0.0", "state": "ready"}
+        app.load_failed = "9.0.0"  # the launcher could not start it: restarting would only run this again
+        app.outdated_checked = time.monotonic()
+        self.assertFalse(app._update_outdated())
+        self.assertFalse(app.relaunch)
+        app.load_failed = None
+        self.assertTrue(app._update_outdated())
+        self.assertTrue(app.relaunch)
+        self.assertTrue(app.quit.wait(10))
+
+
 class PageServerTests(unittest.TestCase):
     def setUp(self):
         folder = tempfile.TemporaryDirectory()

@@ -138,6 +138,15 @@ class Server:
         self.opener = request.build_opener(request.ProxyHandler({}), request.HTTPSHandler(
             context=tls_context(ca)))
         self.opener.addheaders = list(CLIENT_HEADERS)
+        self.outdated = None  # called when the server answers 426: it no longer serves this version
+
+    def _send(self, req, timeout):
+        try:
+            return self.opener.open(req, timeout=timeout)
+        except HTTPError as exc:
+            if exc.code == 426 and self.outdated:
+                self.outdated()
+            raise
 
     def open(self, path, tokens, body=None, compress=False, timeout=45, method=None):
         """`tokens`: one token, or a list (the capture upload names all of them)."""
@@ -148,14 +157,12 @@ class Server:
             headers["Content-Type"] = "application/json"
             if compress:
                 data, headers["Content-Encoding"] = gzip.compress(data), "gzip"
-        return self.opener.open(request.Request(self.origin + path, data=data, headers=headers, method=method),
-                                timeout=timeout)
+        return self._send(request.Request(self.origin + path, data=data, headers=headers, method=method), timeout)
 
     def post_bytes(self, path, token, data, kind, timeout=45):
         """POST `data` as it is (a chat image), typed `kind`."""
         headers = {"Authorization": "Bearer " + token, "Content-Type": kind}
-        return self.opener.open(request.Request(self.origin + path, data=data, headers=headers, method="POST"),
-                                timeout=timeout)
+        return self._send(request.Request(self.origin + path, data=data, headers=headers, method="POST"), timeout)
 
     def json(self, path, tokens, body=None, compress=False, timeout=45):
         with self.open(path, tokens, body, compress, timeout) as response:

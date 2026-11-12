@@ -110,11 +110,13 @@ def close_windows():
             process.terminate()
 
 
-def relaunch():
+def relaunch(background=False):
     """Start the program again (it is quitting to run the code an update downloaded); the new
-    one waits for this one to be gone, so the capture and the window are free."""
+    one waits for this one to be gone, so the capture and the window are free. `background`:
+    no window was open (in the tray, restarting by itself), and none opens."""
     if getattr(sys, "frozen", False):
-        subprocess.Popen([sys.executable, "gui", "--after", str(os.getpid())], close_fds=True)
+        subprocess.Popen([sys.executable, "gui", *(["--background"] if background else []),
+                          "--after", str(os.getpid())], close_fds=True)
 
 
 def wait_exit(pid, timeout):
