@@ -949,7 +949,7 @@ function phoneCheck(step, account, pipes) {
   if (step.check === 'push') {
     const bark = account.a.bark;
     if (!bark || !bark.bound) return line('wait', '还没绑定。绑定后手机会收到一条测试通知。');
-    return bark.error ? line('bad', `已绑定，但上一条推送失败：${bark.error}`) : line('ok', '已绑定：敌袭等需要你下令的通知会推送到这台手机。');
+    return bark.error ? line('bad', `已绑定，但上一条推送失败：${bark.error}`) : line('ok', '已绑定：敌情通知会按“提醒”页的设置推送到这台手机。');
   }
   if (step.check !== 'connect') return '';
   const seen = S.phoneSeen && S.phoneSeen.role === account.a.role.id ? S.phoneSeen.status : undefined;
