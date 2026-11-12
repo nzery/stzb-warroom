@@ -226,6 +226,7 @@ class App:
     def _account(self, token):
         value = dict(self.accounts.get(token) or {"state": "checking"})
         value["token"] = mask(token)
+        value["removable"] = self.removable(token)
         return value
 
     # settings ---------------------------------------------------------------------------
@@ -364,9 +365,18 @@ class App:
         self.restart()
         return {"joined": joined.get("text") if joined else None}
 
+    def removable(self, token):
+        """Whether the player may delete the account: a token the server no longer takes, or one
+        the server says may go (it never claimed a role). A working account stays (2026-11-12
+        user: new players deleted theirs to add it again, and then waited on the old one)."""
+        account = self.accounts.get(token) or {}
+        return account.get("state") == "invalid" or account.get("removable") is True
+
     def remove_token(self, index):
         with self.lock:
             token = self._token(index)
+            if not self.removable(token):
+                raise ValueError("这个账号已认领角色，不能删除；有问题请联系管理员")
             self.tokens.pop(index)
             self.accounts.pop(token, None)
             self.hints.pop(token, None)

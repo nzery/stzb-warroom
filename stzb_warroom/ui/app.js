@@ -660,7 +660,7 @@ function renderAccounts(d) {
       <div class="account-head"><span class="avatar">${esc(title.slice(0, 1))}</span>
         <div class="who"><b>${esc(title)}<span class="state ${cls}">${label}</span></b><small>${facts}</small></div></div>
       ${problem}
-      <div class="account-actions">${site}<button class="btn ghost small danger-text" data-action="remove_token" data-index="${index}" data-confirm="${a.state === 'ok' ? '这个 Token 已认领角色、正常上报。删除后这个账号的数据不再上传；再用邀请码重新加入，要等管理员确认或原 Token 停用一天后才换过来。确定删除？' : '删除这个 Token？删除后这个账号的数据不再上传。'}">删除账号</button></div></div>`;
+      <div class="account-actions">${site}${a.removable ? `<button class="btn ghost small danger-text" data-action="remove_token" data-index="${index}" data-confirm="删除这个 Token？">删除账号</button>` : ''}</div></div>`;
   }).join('') || '<div class="card empty">还没有账号。在下面添加管理员发给你的 Token。</div>';
 }
 

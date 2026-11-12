@@ -195,6 +195,20 @@ class AppTests(unittest.TestCase):
                 app.remove_token(index)
         self.assertEqual(app.tokens, [GOOD, NEW])
 
+    def test_only_an_account_the_server_lets_go_can_be_removed(self):
+        app = self.app(saved=f"{GOOD},{NEW}")
+        app.accounts[GOOD] = {"state": "ok", "removable": False}
+        app.accounts[NEW] = {"state": "offline"}  # not known yet: kept
+        for index in (0, 1):
+            with self.subTest(index=index), self.assertRaises(ValueError):
+                app.remove_token(index)
+        self.assertEqual([a["removable"] for a in app.snapshot()["tokens"]], [False, False])
+        app.accounts[NEW] = {"state": "invalid"}  # the server no longer takes it
+        app.remove_token(1)
+        app.accounts[GOOD] = {"state": "no_role", "removable": True}
+        app.remove_token(0)
+        self.assertEqual(app.tokens, [])
+
     def test_capture_setup_failure_stops_notification_workers(self):
         app = self.app(saved=GOOD)
         session = app.session = {"stop": threading.Event(), "uploader": None, "tokens": app.tokens}
