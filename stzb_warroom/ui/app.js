@@ -318,7 +318,7 @@ function renderChrome(d) {
   $('m-uploaded').textContent = count(s.uploaded);
   $('m-pending').textContent = count(s.pending);
   $('m-last').textContent = s.uploaded_at ? ago(s.uploaded_at) : '-';
-  $('m-last-at').title = s.uploaded_at ? '最近一次上传 ' + clock(s.uploaded_at) : (d.capture.state === 'running' ? '登录游戏后开始上传' : '还没有上传');
+  $('m-last-at').title = s.uploaded_at ? '最近一次上传战报 ' + clock(s.uploaded_at) : (d.capture.state === 'running' ? '游戏里打开战报后上传' : '还没有上传战报');
   $('m-conn').textContent = s.connections;
   const unseen = S.notices.filter((n) => n.seq > S.seenNotices && !n.hidden).length;
   $('badge-notices').textContent = S.page === 'notices' || !unseen ? '' : unseen > 99 ? '99+' : unseen;
@@ -437,9 +437,10 @@ function renderOverview(d) {
   const st = d.stats, running = d.capture.state === 'running';
   const tile = (label, value, note, cls = '') => `<div class="ov-stat${cls}"><span>${label}</span><b>${esc(value)}</b><small>${esc(note)}</small></div>`;
   const stats = [
-    tile('已上传', st.uploaded.toLocaleString(), '这次打开程序后上传的数据条数'),
-    tile('待上传', st.pending == null ? '-' : st.pending.toLocaleString(), st.pending ? '网络断了先存在本机，连上后补传' : '没有积压，都传上去了', st.pending ? ' warn' : ''),
-    tile('最近上传', st.uploaded_at ? ago(st.uploaded_at) : '-', st.uploaded_at ? clock(st.uploaded_at) : running ? '登录游戏后开始上传' : '还没有上传'),
+    // Battle reports, not rows (2026-11-13 user); 已上传 counts every launch on this computer.
+    tile('已上传战报', st.uploaded.toLocaleString(), '这台电脑累计上传的战报'),
+    tile('待上传战报', st.pending == null ? '-' : st.pending.toLocaleString(), st.pending ? '网络断了先存在本机，连上后补传' : '没有积压，都传上去了', st.pending ? ' warn' : ''),
+    tile('最近上传战报', st.uploaded_at ? ago(st.uploaded_at) : '-', st.uploaded_at ? clock(st.uploaded_at) : running ? '游戏里打开战报后上传' : '还没有上传'),
     tile('游戏连接', String(st.connections), st.connections ? '最近 5 分钟看到的游戏连接' : '最近 5 分钟没看到：没在玩时正常'),
   ].join('');
   if ($('ov-stats').dataset.html !== stats) { $('ov-stats').innerHTML = stats; $('ov-stats').dataset.html = stats; }
@@ -1258,10 +1259,49 @@ function chatClock(seconds) {
   if (date.toDateString() === now.toDateString()) return time;
   return `${date.getFullYear() !== now.getFullYear() ? date.getFullYear() + '年' : ''}${date.getMonth() + 1}月${date.getDate()}日 ${time}`;
 }
-function avatar(name, official, level, staff) {
+// A special avatar the administrator gave (server 2026-11-13): drawn from the server's data (chat.avatar_of
+// kept only what is right), so a new look needs no new client. The CSP drops style attributes: the
+// colours go on as CSS variables once the list is drawn (chatLooks), by the index in data-look.
+const AVATAR_FX = { pulse: 'av-pulse 2.4s ease-in-out infinite', float: 'av-float 3s ease-in-out infinite',
+  rainbow: 'av-rainbow 6s linear infinite', shine: 'av-shine 3.2s ease-in-out infinite' };
+function lookAvatar(look, shown, looks) {
+  const index = looks.push(look) - 1;
+  const cls = ['av', 'custom', `shape-${look.shape || 'square'}`, ...(look.fx || []).map((n) => `fx-${n}`),
+    ...(look.badge && look.badge_pos === 'top' ? ['badge-top'] : [])];
+  const badge = look.badge ? ` data-badge="${esc(look.badge)}"` : '';
+  return `<span class="${cls.join(' ')}${look.badge ? ' badged' : ''}" data-look="${index}"${badge}${look.tag ? ` title="${esc(look.tag)}"` : ''}>${esc(look.text || shown || '?')}</span>`;
+}
+function chatLooks(list, looks) {
+  if (!looks.length) return;
+  for (const node of list.querySelectorAll('[data-look]')) {
+    const look = looks[Number(node.dataset.look)];
+    if (!look) continue;
+    if (node.classList.contains('av')) {
+      const bg = look.bg || [];
+      if (bg.length) node.style.setProperty('--av-bg', bg.length === 1 ? bg[0] : `linear-gradient(135deg, ${bg.join(', ')})`);
+      if (look.fg) node.style.setProperty('--av-fg', look.fg);
+      if (look.glow) node.style.setProperty('--av-glow', look.glow);
+      if (look.badge_bg) node.style.setProperty('--av-badge-bg', look.badge_bg);
+      if (look.badge_fg) node.style.setProperty('--av-badge-fg', look.badge_fg);
+      const shadow = ['0 0 0 2px var(--av-gap)'];
+      if (look.ring) shadow.push(`0 0 0 4px ${look.ring}`);
+      if (look.ring2) shadow.push(`0 0 0 ${look.ring ? 6 : 4}px ${look.ring2}`);
+      if (look.glow) shadow.push(`0 0 12px 3px ${look.glow}`);
+      node.style.setProperty('--av-shadow', shadow.join(', '));
+      const moves = (look.fx || []).map((n) => AVATAR_FX[n]).filter(Boolean);
+      if (moves.length) node.style.animation = moves.join(', ');
+    } else {
+      if (look.tag_bg) node.style.background = look.tag_bg;
+      if (look.tag_fg) node.style.color = look.tag_fg;
+    }
+  }
+}
+function avatar(m, looks) {
+  const { name, official, level, staff } = m;
   if (official) return '<span class="av official" title="率土战局官方">率</span>';
   const text = String(name);
   const shown = text.includes('的') ? text.split('的').pop()[0] : text[0];
+  if (m.avatar) return lookAvatar(m.avatar, shown, looks);
   // A 管理员 (2026-11-12): round, its own colours and a star, apart from the level-3 players it is sent as.
   if (staff) return `<span class="av staff" title="管理员">${esc(shown || '?')}</span>`;
   const lv = Number.isInteger(level) && level >= 1 && level <= 3 ? ` lv${level}` : '';
@@ -1304,7 +1344,7 @@ function renderChat(d) {
   if (key === S.chat.key) return;
   S.chat.key = key;
   const atBottom = S.chat.bottom || list.scrollHeight - list.scrollTop - list.clientHeight < 80;
-  const parts = [];
+  const parts = [], looks = [];
   if (S.chat.more) parts.push(`<button class="link chat-more" data-chat-older="1">${S.chat.loading ? '加载中…' : '查看更早的消息'}</button>`);
   let previous = 0;
   for (const m of messages) {
@@ -1315,10 +1355,11 @@ function renderChat(d) {
     const recall = m.id && (c.admin || (m.mine && c.recall && Date.now() / 1000 - m.time < c.recall))
       ? `<button class="link recall" data-chat-recall="${m.id}" data-mine="${m.mine ? 1 : ''}">撤回</button>` : '';
     const at = !m.mine && c.name && m.text.includes(`@${c.name}`);  // someone @s me
-    parts.push(`<div class="msg${m.mine ? ' mine' : ''}${m.official ? ' official' : ''}${at ? ' at' : ''}">${avatar(m.name, m.official, m.level, m.staff)}<div class="col"><span class="who">${esc(m.name)}${m.official ? '<b class="tag-official">官方</b>' : m.staff ? '<b class="tag-staff">管理员</b>' : ''}</span>${chatBody(m)}${recall}</div></div>`);
+    parts.push(`<div class="msg${m.mine ? ' mine' : ''}${m.official ? ' official' : ''}${at ? ' at' : ''}">${avatar(m, looks)}<div class="col"><span class="who">${esc(m.name)}${m.official ? '<b class="tag-official">官方</b>' : m.staff ? '<b class="tag-staff">管理员</b>' : ''}${!m.official && m.avatar?.tag ? `<b class="tag-av" data-look="${looks.length - 1}">${esc(m.avatar.tag)}</b>` : ''}</span>${chatBody(m)}${recall}</div></div>`);
   }
   if (!messages.length) parts.push('<div class="empty">还没有消息。打个招呼吧</div>');
   list.innerHTML = parts.join('');
+  chatLooks(list, looks);
   if (atBottom) list.scrollTop = list.scrollHeight;
   S.chat.bottom = false;
 }

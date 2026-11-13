@@ -34,7 +34,7 @@ from pathlib import Path
 from urllib.error import HTTPError
 from urllib.parse import urlencode
 
-from . import __version__, chat, notify, relay, update as updates, vault, winsys
+from . import __version__, chat, notify, relay, update as updates, upload, vault, winsys
 from .api import client_tokens, invite_code, site, tokens_in
 from .capture import adapter_report, find_dumpcap
 from .runner import run_capture
@@ -133,6 +133,9 @@ class App:
         self.clock_offset, self.clock_synced = 0.0, None
         self.accounts = {}  # token -> what /v1/client/status said, or why it could not
         self.capture = {"state": "stopped", "error": None, "hint": None, "since": None, "dumpcap": None}
+        # Battle reports uploaded from this computer, all launches together (2026-11-13 user), and when
+        # the last went: from the queue's file until a capture runs, then from its uploader.
+        self.totals = upload.saved_totals(self.state_dir / "queue.sqlite")
         self.notice_prefs = {"note": None, "groups": None, "values": None, "error": None}  # as the server gave it
         # One look or save of the notice settings at a time: a minute's look still under way would
         # otherwise end after a save and put back what it read before it, or clear the save's retries.
@@ -200,9 +203,10 @@ class App:
         with self.lock:
             self._drop_expired()
             uploader = self.session and self.session.get("uploader")
+            if uploader:
+                self.totals = (uploader.uploaded, uploader.uploaded_at)
             stats = {"pending": uploader.queue.pending() if uploader and self.capture["state"] == "running" else None,
-                     "uploaded": uploader.uploaded if uploader else 0,
-                     "uploaded_at": uploader.uploaded_at if uploader else None,
+                     "uploaded": self.totals[0], "uploaded_at": self.totals[1],
                      "connections": uploader.connections() if uploader else 0}
             return {
                 "version": self.version, "app_version": __version__, "server": self.server.origin, "site": site(),
@@ -1079,7 +1083,7 @@ class App:
                  f"服务器：{self.server.origin}（{reach}）",
                  "电脑时间：" + (f"比游戏{'慢' if snapshot['clock']['offset'] > 0 else '快'} {abs(snapshot['clock']['offset']):.1f} 秒（倒计时按游戏时间）"
                                 if snapshot["clock"]["synced"] else "还没收到游戏的时间同步"),
-                 f"统计：已上传 {snapshot['stats']['uploaded']} 条，待上传 {snapshot['stats']['pending']}，"
+                 f"统计：已上传战报 {snapshot['stats']['uploaded']} 份，待上传 {snapshot['stats']['pending']}，"
                  f"连接 {snapshot['stats']['connections']}",
                  "手机经本机：" + ("开" if snapshot["phone"]["enabled"] else "关") + "".join(
                      f"；{e['relay']} {e['state']}（{e['pipes']} 条）" for e in snapshot["phone"]["exits"])]

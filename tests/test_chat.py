@@ -78,6 +78,21 @@ class ChatTests(unittest.TestCase):
         for bad in (0, -1, "3", 2.0, True):
             self.assertIsNone(message_of({"id": bad, "name": "甲", "text": "a", "time": 1})["id"])
 
+    def test_a_special_avatar_keeps_only_what_is_right(self):
+        # server 2026-11-13: drawn from data, so a new look needs no new client
+        look = {"bg": ["#1a1a2e", "#C9A227"], "fg": "#ffe9a8", "shape": "round", "ring": "#f5c542", "glow": "red",
+                "badge": "♛", "fx": ["shine", "spin", "pulse"], "tag": "首位贡献者\x1b", "tag_bg": "#c9a227",
+                "text": "帅气的", "more": 1}
+        kept = message_of({"name": "甲", "text": "a", "time": 1, "avatar": look})
+        self.assertEqual(kept["avatar"], {"bg": ["#1a1a2e", "#C9A227"], "fg": "#ffe9a8", "shape": "round", "ring": "#f5c542",
+                                          "badge": "♛", "fx": ["shine", "pulse"], "tag": "首位贡献者", "tag_bg": "#c9a227",
+                                          "text": "帅气"})
+        self.assertEqual(message_of(json.loads(Chat._line(dict(kept, seq=1))))["avatar"], kept["avatar"])  # in the file
+        for bad in ("pioneer", {"bg": "#000000"}, {"bg": ["#000"], "shape": "star"}, {"tag": ""}, {"fx": "shine"}):
+            self.assertNotIn("avatar", message_of({"name": "甲", "text": "a", "time": 1, "avatar": bad}))
+        self.assertEqual(message_of({"name": "甲", "text": "a", "time": 1, "avatar": {"bg": ["#000000", "x"], "ring2": "#ffffff"}})["avatar"],
+                         {"ring2": "#ffffff"})
+
     def test_the_stream_keeps_messages_and_follows_the_count(self):
         stream = sse(("hello", {"conn": "c1", "name": "沉稳的赤兔", "online": 3}), ("msg", {"bad": 1}),
                      ("msg", {"id": 1, "name": "机灵的白马", "text": "集合", "time": 100}),

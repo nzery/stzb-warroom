@@ -20,7 +20,7 @@ from stzb_warroom.frames import Splitter, body
 from stzb_warroom.pcap import tcp_segment
 from stzb_warroom.notify import Follower, follow_prompts, render
 from stzb_warroom.runner import lock
-from stzb_warroom.upload import Queue, Uploader, battle_reports
+from stzb_warroom.upload import Queue, Uploader, battle_reports, saved_totals
 
 CLIENT, SERVER = "192.168.1.2", "1.2.3.4"
 SESSION = b"0123456789abcdef0123456789abcdef"
@@ -150,6 +150,11 @@ class UploadTests(unittest.TestCase):
                          server_frame(9, [0, {"login": 1}], pad=8))
         # Before the server named the role, the reports were sent as they came.
         self.assertEqual([r["battle_id"] for r in sent["frames"][1]["reports"]], [5, 6])
+        # the window counts battle reports (2026-11-13 user), kept across launches
+        self.assertEqual(uploader.uploaded, 2)
+        self.assertIsNotNone(uploader.uploaded_at)
+        self.assertEqual(saved_totals(self.queue.path), (2, uploader.uploaded_at))
+        self.assertEqual(saved_totals(self.queue.path.with_name("none.sqlite")), (0, None))
         self.assertFalse(uploader.upload_once())
         self.assertEqual(set(uploader.roles.values()), {7})
         # The role is known now: a list is sent once, then only a changed report or the alliance list.
@@ -207,7 +212,7 @@ class UploadTests(unittest.TestCase):
         self.queue.add("s", 1, {"frame": "x"})
         self.queue.add_reports(7, "s", 2, 1.0, "personal", [report(5)])
         self.assertEqual(self.queue.bind("https://a.test", ["t1", "t2"]), 0)  # a token added
-        self.assertEqual(self.queue.pending(), 2)
+        self.assertEqual(self.queue.pending(), 1)  # battle reports waiting, not rows
         self.assertEqual(self.queue.bind("https://a.test", ["t2"]), 2)  # t1 taken out
         self.assertIsNone(self.queue.batch())
         self.assertEqual(self.queue.add_reports(7, "s2", 1, 1.0, "personal", [report(5)]), 1)  # sent again

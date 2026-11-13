@@ -409,6 +409,8 @@ input[type=text]:focus, input[type=password]:focus { border-color: var(--gold2);
 .chat-send .btn { padding: 5px 16px; }
 .chat-send small.over { color: var(--red); }
 
+.msg .av.custom { --av-gap: #fff; }  /* the ring's gap: the chat's background */
+
 /* ===== the same in app.css and classic.css from here on: colours only through the variables ===== */
 
 /* A banner's close button says so (2026-11-07 user: the × alone was too small to be seen). */
@@ -585,3 +587,32 @@ input[type=text]:focus, input[type=password]:focus { border-color: var(--gold2);
 .chat-viewer { position: fixed; inset: 0; z-index: 200; display: flex; align-items: center; justify-content: center;
   background: rgba(0, 0, 0, .82); cursor: zoom-out; }
 .chat-viewer img { max-width: 94vw; max-height: 94vh; object-fit: contain; }
+
+/* A special avatar the administrator gave (server 2026-11-13): its colours come as variables from the
+   server's data (app.js chatLooks), the shapes and effects are these. */
+.msg .av.custom { position: relative; background: var(--av-bg, #5b6b82); color: var(--av-fg, #fff); font-weight: 700;
+  box-shadow: var(--av-shadow, none); text-shadow: 0 1px 2px rgba(0, 0, 0, .35); }
+.msg .av.custom.shape-round { border-radius: 50%; }
+.msg .av.custom.shape-square { border-radius: 6px; }
+.msg .av.custom.shape-leaf { border-radius: 4px 50%; }
+.msg .av.custom.fx-shine { background-image: linear-gradient(115deg, transparent 38%, rgba(255, 255, 255, .6) 50%, transparent 62%), var(--av-bg, none);
+  background-size: 300% 100%, 100% 100%; background-repeat: no-repeat; }
+.msg .av.custom.badged::after { content: attr(data-badge); position: absolute; right: -6px; bottom: -6px; min-width: 16px; height: 16px;
+  padding: 0 2px; border-radius: 8px; background: var(--av-badge-bg, #f5b82e); color: var(--av-badge-fg, #fff); font-size: 10px;
+  line-height: 16px; text-align: center; text-shadow: none; box-shadow: 0 0 0 2px var(--av-gap); }
+/* badge_pos top: the badge as a crown above the avatar, tilted (room left above it for the first message). */
+.msg .av.custom.badge-top { margin-top: 10px; }
+.msg .av.custom.badge-top::after { right: auto; left: 50%; bottom: auto; top: -11px; min-width: 0; height: auto; padding: 0;
+  margin-left: -8px; width: 16px; background: none; box-shadow: none; color: var(--av-badge-bg, #f5c542); font-size: 15px; line-height: 1;
+  transform: rotate(-12deg); filter: drop-shadow(0 1px 1px rgba(0, 0, 0, .45)); }
+.msg .av.custom.fx-twinkle::after { animation: av-twinkle 1.8s ease-in-out infinite; }
+.msg .av.custom.badge-top.fx-twinkle::after { animation-name: av-crown; }
+@keyframes av-crown { 0%, 100% { transform: rotate(-12deg) scale(1); } 50% { transform: rotate(-4deg) scale(1.18); } }
+.msg .tag-av { margin-left: 6px; padding: 0 5px; border-radius: 3px; background: #7b4fd6; color: #fff; font-size: 11px; font-weight: 600; }
+@keyframes av-shine { 0%, 30% { background-position: 0% 0, 0 0; } 100% { background-position: 100% 0, 0 0; } }
+@keyframes av-pulse { 0%, 100% { box-shadow: var(--av-shadow, none); }
+  50% { box-shadow: var(--av-shadow, none), 0 0 18px 6px var(--av-glow, rgba(255, 255, 255, .6)); } }
+@keyframes av-float { 0%, 100% { transform: translateY(0); } 50% { transform: translateY(-3px); } }
+@keyframes av-rainbow { from { filter: hue-rotate(0deg); } to { filter: hue-rotate(360deg); } }
+@keyframes av-twinkle { 0%, 100% { transform: scale(1) rotate(0deg); } 50% { transform: scale(1.25) rotate(18deg); } }
+@media (prefers-reduced-motion: reduce) { .msg .av.custom, .msg .av.custom::after { animation: none !important; } }

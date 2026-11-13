@@ -81,12 +81,51 @@ def message_of(data, mine=False):
                "level": level if type(level) is int and 1 <= level <= 3 else 0}
     if data.get("staff") is True:
         message["staff"] = True
+    look = avatar_of(data.get("avatar"))
+    if look:
+        message["avatar"] = look
     if data.get("recalled") is True:
         return dict(message, text=RECALLED_TEXT, recalled=True)
     image = image_of(data.get("image"))
     if image:
         message["image"] = image
     return message
+
+
+COLOR = re.compile(r"#[0-9a-fA-F]{6}\Z")
+AVATAR_COLORS = ("fg", "ring", "ring2", "glow", "badge_bg", "badge_fg", "tag_bg", "tag_fg")
+AVATAR_SHAPES = ("round", "square", "leaf")
+AVATAR_FX = ("shine", "pulse", "float", "rainbow", "twinkle")
+
+
+def avatar_of(value):
+    """A special avatar the administrator gave the sender (server 2026-11-13), as kept: colours,
+    shape, a corner badge, effects and a tag beside the name, drawn by the page from this data,
+    so a new look needs only the server. What is not one of these, or not right, is left out;
+    None when nothing is left."""
+    if not isinstance(value, dict):
+        return None
+    look = {}
+    bg = value.get("bg")
+    if isinstance(bg, list) and 1 <= len(bg) <= 3 and all(isinstance(c, str) and COLOR.match(c) for c in bg):
+        look["bg"] = list(bg)
+    for key in AVATAR_COLORS:
+        if isinstance(value.get(key), str) and COLOR.match(value[key]):
+            look[key] = value[key]
+    if value.get("shape") in AVATAR_SHAPES:
+        look["shape"] = value["shape"]
+    if value.get("badge_pos") in ("corner", "top"):
+        look["badge_pos"] = value["badge_pos"]
+    for key, limit in (("text", 2), ("badge", 2), ("tag", 8)):
+        text = text_of(value.get(key), limit)
+        if text:
+            look[key] = text
+    fx = value.get("fx")
+    if isinstance(fx, list):
+        fx = [name for name in AVATAR_FX if name in fx]
+        if fx:
+            look["fx"] = fx
+    return look or None
 
 
 def image_of(value):
@@ -201,6 +240,7 @@ class Chat:
     def _line(message):
         keys = ("seq", "id", "name", "text", "time", "mine", "official", "level") + (("image",) if message.get("image") else ()) \
             + (("staff",) if message.get("staff") else ()) \
+            + (("avatar",) if message.get("avatar") else ()) \
             + (("recalled",) if message.get("recalled") else ())
         return json.dumps({key: message.get(key) for key in keys}, ensure_ascii=False) + "\n"
 

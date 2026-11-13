@@ -59,7 +59,8 @@ def battle_reports(value):
 
 class Queue:
     def __init__(self, path):
-        Path(path).parent.mkdir(parents=True, exist_ok=True)
+        self.path = Path(path)
+        self.path.parent.mkdir(parents=True, exist_ok=True)
         self.db = sqlite3.connect(path, timeout=30, check_same_thread=False)
         self.db.execute("PRAGMA journal_mode=WAL")
         self.db.execute("CREATE TABLE IF NOT EXISTS rows (stream_id TEXT NOT NULL, seq INTEGER NOT NULL, "
@@ -70,6 +71,10 @@ class Queue:
                         "channel TEXT NOT NULL, digest TEXT NOT NULL, stream_id TEXT NOT NULL, "
                         "PRIMARY KEY(role, battle_id))")
         self.db.execute("CREATE TABLE IF NOT EXISTS meta (key TEXT PRIMARY KEY, value TEXT NOT NULL)")
+        # How many battle reports a row carries (0 for a game frame): the window counts reports, not
+        # rows (2026-11-13 user), and keeps the count across launches in meta.
+        if "reports" not in {column[1] for column in self.db.execute("PRAGMA table_info(rows)")}:
+            self.db.execute("ALTER TABLE rows ADD COLUMN reports INTEGER NOT NULL DEFAULT 0")
         self.db.commit()
         self.lock = threading.Lock()
         self.full_logged = 0
@@ -94,7 +99,8 @@ class Queue:
     def add(self, stream_id, seq, row):
         with self.lock:
             if self._room(1):
-                self.db.execute("INSERT INTO rows VALUES (?,?,?)", (stream_id, seq, json.dumps(row)))
+                self.db.execute("INSERT INTO rows (stream_id, seq, row) VALUES (?,?,?)",
+                                (stream_id, seq, json.dumps(row)))
                 self.db.commit()
                 return True
         self._warn_full()
@@ -136,7 +142,8 @@ class Queue:
             else:
                 for offset, (name, items) in enumerate(groups.items()):
                     row = {"captured_at": captured_at, "channel": name, "reports": items}
-                    self.db.execute("INSERT INTO rows VALUES (?,?,?)", (stream_id, seq + offset, json.dumps(row)))
+                    self.db.execute("INSERT INTO rows (stream_id, seq, row, reports) VALUES (?,?,?,?)",
+                                    (stream_id, seq + offset, json.dumps(row), len(items)))
         if full:
             self._warn_full()
             return 0
@@ -164,17 +171,37 @@ class Queue:
         return first[0], start, items
 
     def acknowledge(self, stream_id, cursor):
-        with self.lock:
+        """Delete the rows the server took; the battle reports among them add to the total kept."""
+        with self.lock, self.db:
+            reports = self.db.execute("SELECT coalesce(sum(reports), 0) FROM rows WHERE stream_id=? AND seq<=?",
+                                      (stream_id, cursor)).fetchone()[0]
             self.db.execute("DELETE FROM rows WHERE stream_id=? AND seq<=?", (stream_id, cursor))
-            self.db.commit()
+            if reports:
+                total, _at = self._totals()
+                self.db.execute("INSERT OR REPLACE INTO meta VALUES ('uploaded', ?)",
+                                (json.dumps({"reports": total + reports, "at": time.time()}),))
+
+    def _totals(self):
+        row = self.db.execute("SELECT value FROM meta WHERE key='uploaded'").fetchone()
+        try:
+            value = json.loads(row[0]) if row else {}
+            return int(value.get("reports") or 0), (float(value["at"]) if value.get("at") else None)
+        except (ValueError, TypeError, AttributeError):
+            return 0, None
+
+    def totals(self):
+        """(battle reports uploaded from this computer, when the last of them went), kept across launches."""
+        with self.lock:
+            return self._totals()
 
     def close(self):
         with self.lock:
             self.db.close()
 
     def pending(self):
+        """Battle reports waiting to go (the window shows reports, not rows)."""
         with self.lock:
-            return self.db.execute("SELECT count(*) FROM rows").fetchone()[0]
+            return self.db.execute("SELECT coalesce(sum(reports), 0) FROM rows").fetchone()[0]
 
     def drop(self, stream_id):
         with self.lock:
@@ -182,6 +209,20 @@ class Queue:
             self.db.execute("DELETE FROM reports WHERE stream_id=?", (stream_id,))
             self.db.commit()
         return count
+
+
+def saved_totals(path):
+    """Queue.totals() of the queue at `path` without opening it for writing: (0, None) when there is none."""
+    try:
+        db = sqlite3.connect(f"{Path(path).as_uri()}?mode=ro", uri=True, timeout=5)
+        try:
+            row = db.execute("SELECT value FROM meta WHERE key='uploaded'").fetchone()
+        finally:
+            db.close()
+        value = json.loads(row[0]) if row else {}
+        return int(value.get("reports") or 0), (float(value["at"]) if value.get("at") else None)
+    except (sqlite3.Error, ValueError, TypeError, AttributeError, OSError):
+        return 0, None
 
 
 def frame_row(captured_at, client, frame):
@@ -212,8 +253,8 @@ class Uploader:
         self.swept = time.monotonic()
         self.stop = threading.Event()
         self.error = None
-        self.uploaded_at = None  # time of the last acknowledged batch
-        self.uploaded = 0  # rows acknowledged since the start
+        # Battle reports the server took from this computer, all launches together, and when the last went.
+        self.uploaded, self.uploaded_at = queue.totals()
         self.heard_at = time.monotonic()  # the last packet captured
         self.heard = False  # any packet at all since the start
         self.moved_at = None  # when the computer changed network while a game was being captured
@@ -334,8 +375,7 @@ class Uploader:
             raise ValueError("server did not acknowledge the batch")
         self.queue.acknowledge(stream_id, result["cursor"])
         self.waiting.pop(stream_id, None)
-        self.uploaded_at = time.time()
-        self.uploaded += len(rows)
+        self.uploaded, self.uploaded_at = self.queue.totals()
         if type(result.get("role")) is int:
             new = self.roles.get(stream_id) != result["role"]
             self.roles[stream_id] = result["role"]
