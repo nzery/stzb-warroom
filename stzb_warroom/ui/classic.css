@@ -433,10 +433,11 @@ input[type=text]:focus, input[type=password]:focus { border-color: var(--gold2);
 .add-head { display: flex; align-items: baseline; gap: 12px; flex-wrap: wrap; margin-bottom: 12px; }
 .add-head .muted { font-size: 12px; }
 
-/* 查询: the name box is wide enough for its hint. */
+/* 查询: a short name box (2026-11-13 user); 刷新 and 导出玩家信息 on the right. */
 .vtoolbar .vfilters { flex: 1; }
-.vsearch { width: min(520px, 100%); }
-.vsearch input { min-width: 280px; }
+.vsearch { width: auto; flex: none; }
+.vsearch input { width: 200px; min-width: 0; flex: none; }
+.vtoolbar .vactions { display: flex; align-items: center; gap: 8px; flex: none; }
 
 /* 提醒: a setting a line, its help one line under its name, its switch or choices beside it. */
 .prefs-note { margin: 0 0 12px; }

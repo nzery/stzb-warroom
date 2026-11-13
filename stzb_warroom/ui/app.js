@@ -759,7 +759,7 @@ function renderPersonal(page) {
   const view = S.personal[page];
   const accounts = personalAccounts();
   const account = personalAccount();
-  const key = JSON.stringify([view.data, view.error, view.loading, accounts.map(({ a }) => [a.role.id, a.role.label]), account?.a.role.id]);
+  const key = JSON.stringify([view.data, view.error, view.loading, S.exporting, accounts.map(({ a }) => [a.role.id, a.role.label]), account?.a.role.id]);
   const box = $('personal-' + page);
   if (!box || key === view.key) return;
   view.key = key;
@@ -779,7 +779,12 @@ function renderPersonal(page) {
   const box2 = search ? `<form class="inline-form vsearch" data-psearch="${esc(search.key)}"><input type="text" autocomplete="off" spellcheck="false"
     maxlength="40" value="${esc(view.query[search.key] ?? search.value ?? '')}" placeholder="${esc(search.placeholder || '')}">
     <button class="btn primary" type="submit"${view.loading ? ' disabled' : ''}>查询</button></form>` : '';
-  const toolbar = `<div class="vtoolbar"><div class="vfilters">${box2}${who}${filters}</div>${refresh}</div>`;
+  // 导出玩家信息 (the server offers it on 玩家信息): an Excel file of the enemy players, saved in Downloads.
+  const exportLabel = d?.export?.label || view.exportLabel;
+  if (exportLabel) view.exportLabel = exportLabel;
+  const exporting = S.exporting === page;
+  const exportBtn = exportLabel ? `<button class="btn small" data-pexport="1"${exporting ? ' disabled' : ''}>${exporting ? '<span class="spin"></span>正在导出' : esc(exportLabel)}</button>` : '';
+  const toolbar = `<div class="vtoolbar"><div class="vfilters">${box2}${who}${filters}</div><div class="vactions">${refresh}${exportBtn}</div></div>`;
   let body;
   if (view.error) body = banner('warn', 'info', esc(view.error));
   else if (!d) body = '<div class="card empty">正在读取…</div>';
@@ -794,12 +799,32 @@ function renderPersonal(page) {
   box.innerHTML = toolbar + body;
 }
 
+async function exportPlayers(page) {
+  const account = personalAccount();
+  if (!account || S.exporting) return;
+  S.exporting = page;
+  renderPersonal(page);
+  try {
+    const done = await act('export_players', { index: account.index }, { quiet: true });
+    toast(`已导出${done.players != null ? ` ${done.players} 名玩家` : ''}，保存在：${done.path}`);
+  } catch (error) {
+    toast(error.message || String(error), true);
+  } finally {
+    S.exporting = null;
+    renderPersonal(page);
+  }
+}
+
 function personalClick(event) {
   if (!PERSONAL.has(S.page)) return false;
   const view = S.personal[S.page];
   const role = event.target.closest('[data-prole]');
   const filter = event.target.closest('[data-pfilter]');
   const pager = event.target.closest('[data-ppage]');
+  if (event.target.closest('[data-pexport]')) {
+    exportPlayers(S.page);
+    return true;
+  }
   if (role) {
     S.personalRole = Number(role.dataset.prole);
     store.set('personalRole', S.personalRole);

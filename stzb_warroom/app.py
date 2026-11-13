@@ -19,6 +19,7 @@ the account chosen on that page, else the first whose role is approved, else the
 server lets chat.
 """
 
+import base64
 import collections
 import hashlib
 import json
@@ -629,6 +630,44 @@ class App:
         if not isinstance(value, dict):
             raise ValueError("服务器的回复不对")
         return value
+
+    def export_players(self, index):
+        """The 玩家信息 page's 导出玩家信息: the server's workbook (the enemy players of our alliance's
+        reports this season) saved in Downloads, the folder opened -> {"path", "players"}."""
+        token = self._token(index)
+        try:
+            value = self.server.json(PERSONAL + "export", token, timeout=90)
+        except HTTPError as exc:
+            if exc.code == 404:
+                raise ValueError("服务器还不支持导出")
+            try:
+                message = json.loads(exc.read() or b"{}").get("error")
+            except (OSError, ValueError):
+                message = None
+            raise ValueError(message or f"服务器返回 HTTP {exc.code}")
+        except OSError as exc:
+            raise ValueError(f"连不上服务器：{exc}")
+        if not isinstance(value, dict) or not isinstance(value.get("xlsx"), str):
+            raise ValueError("服务器的回复不对")
+        data = base64.b64decode(value["xlsx"])
+        name = "".join("_" if ch in '\\/:*?"<>|' or ord(ch) < 32 else ch
+                       for ch in str(value.get("filename") or "玩家信息.xlsx"))[:120]
+        if not name.lower().endswith(".xlsx"):
+            name += ".xlsx"
+        folder = Path.home() / "Downloads"
+        if not folder.is_dir():
+            folder = Path.home()
+        path = folder / name
+        stem, number = path.stem, 1
+        while path.exists():
+            number += 1
+            path = folder / f"{stem} ({number}).xlsx"
+        path.write_bytes(data)
+        try:
+            winsys.open_folder(folder)
+        except OSError:
+            pass
+        return {"path": str(path), "players": value.get("players")}
 
     # the phone through this computer (relay.py) -----------------------------------
 

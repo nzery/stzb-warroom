@@ -58,6 +58,8 @@ class FakeServer:
             self.calls.append(("GET", path, token, None))
             if token == NEW:
                 raise HTTPError(path, 403, "forbidden", {}, io.BytesIO(b'{"error": "account not bound to token"}'))
+            if path.endswith("/export"):
+                return {"filename": "率土战局-敌对玩家-风/云.xlsx", "xlsx": "UEsFBg==", "players": 3}
             return {"note": "说明", "filters": [], "cards": [{"title": "曹操队"}], "empty": None, "page": None}
         if token == NEW:
             return {"name": "n", "approved": False, "role": None, "bark": {"bound": False}}
@@ -390,6 +392,20 @@ class AppTests(unittest.TestCase):
             app.personal(1, "players")
         with self.assertRaisesRegex(ValueError, "没有这个账号"):
             app.personal(5, "players")
+
+    def test_the_players_export_is_saved_in_downloads(self):
+        app = self.app(saved=GOOD)
+        with tempfile.TemporaryDirectory() as home, unittest.mock.patch("pathlib.Path.home", lambda: Path(home)), \
+                unittest.mock.patch("stzb_warroom.app.winsys.open_folder") as opened:
+            (Path(home) / "Downloads").mkdir()
+            first = app.export_players(0)
+            again = app.export_players(0)
+            self.assertEqual(self.server.calls[-1][:3], ("GET", "/v1/client/personal/export", GOOD))
+            self.assertEqual(Path(first["path"]).name, "率土战局-敌对玩家-风_云.xlsx")  # no folder from the name
+            self.assertEqual(Path(again["path"]).name, "率土战局-敌对玩家-风_云 (2).xlsx")  # nothing overwritten
+            self.assertEqual(Path(first["path"]).read_bytes(), b"PK\x05\x06")
+            self.assertEqual(first["players"], 3)
+            opened.assert_called_with(Path(home) / "Downloads")
 
     def test_the_phone_page_is_the_servers_and_never_logged(self):
         app = self.app(saved=f"{GOOD},{NEW}")
