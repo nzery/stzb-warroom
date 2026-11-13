@@ -1332,7 +1332,8 @@ function renderChat(d) {
   $('chat-opts').hidden = c.state !== 'online' || typeof c.mention_push !== 'boolean';
   if (!S.busy.has('chat-mention')) $('chat-mention').checked = c.mention_push === true;
   $('chat-mention').disabled = !c.phone;
-  $('chat-mention-tip').textContent = c.phone ? '管理员 @ 你一定会推送' : '先在“手机”页绑定手机，@ 你时才能推送';
+  // Said on hovering 通知提醒, not beside it (2026-11-13 user).
+  $('chat-mention-tip').title = c.phone ? '勾选后其他成员 @ 你时也推送到手机；管理员 @ 你一定会推送' : '先在“手机”页绑定手机，@ 你时才能推送';
   const canSend = c.state === 'online';
   $('chat-text').disabled = !canSend;
   if (!S.busy.has('chat')) $('chat-submit').disabled = !canSend;
