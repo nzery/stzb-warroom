@@ -517,7 +517,11 @@ function noticeTable(t, gone, key = '') {
   const shown = (i) => !MINI || !MINI_LEAVES_OUT.has(t.columns[i]);
   return `<div class="vtable"><table class="${MINI ? 'auto' : 'fit'}">${cols}<thead><tr>${t.columns.map((h, i) => (shown(i) ? `<th>${esc(h)}</th>` : '')).join('')}</tr></thead>
     <tbody>${kept.map(([row, r]) => {
-      const cells = row.map((c, i) => (shown(i) ? cellOf(c, i, r) : '')).join('');
+      // 复制 (`copy`, the server's: the row as the phone banner says it) at the end of the last cell,
+      // shown on hovering the row (2026-11-13 player: the phone could copy it to tell the alliance, the PC not).
+      const line = Array.isArray(t.copy) && typeof t.copy[r] === 'string' && t.copy[r] ? t.copy[r] : '';
+      const button = line ? `<button class="row-copy" data-copy-row="${esc(line)}" title="${esc(line)}">复制</button>` : '';
+      const cells = row.map((c, i) => (shown(i) ? cellOf(c, i, r) : '')).join('').replace(/<\/td>$/, `${button}</td>`);
       const detail = Array.isArray(t.details) && Array.isArray(t.details[r]) && t.details[r].length ? t.details[r] : null;
       if (!detail || !key) return `<tr>${cells}</tr>`;
       const id = `${key}:${r}`, open = S.openRows.has(id);
@@ -1666,6 +1670,12 @@ document.addEventListener('click', async (event) => {
   }
   const view = event.target.closest('[data-chat-view]');
   if (view) return chatViewer(view.dataset.chatView);
+  const copyRow = event.target.closest('[data-copy-row]');
+  if (copyRow) {
+    try { await navigator.clipboard.writeText(copyRow.dataset.copyRow); toast('已复制'); }
+    catch { toast('复制失败', true); }
+    return;
+  }
   const army = event.target.closest('tr[data-detail]');
   if (army) {
     const id = army.dataset.detail;

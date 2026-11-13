@@ -229,6 +229,11 @@ async function main() {
   const fixed = vm.runInContext(`noticeTable({ columns: ['玩家', '阵容'], widths: [3, 1], rows: [['甲', '庞统/程昱/刘备']] })`, context)
     .match(/data-w="([\d.]+)"/g).map((w) => parseFloat(w.slice(8)));
   assert.deepEqual(fixed, [75, 25]);
+  // 复制 at the end of the last cell of a row the server gave a line for; none without one
+  const copied = vm.runInContext(`noticeTable({ columns: ['玩家', '阵容'], rows: [['甲', '曹操'], ['乙', '刘备']],
+    copy: ['甲 曹操 "8红"，推荐无', null] })`, context);
+  assert.match(copied, /<td title="曹操">曹操<button class="row-copy" data-copy-row="甲 曹操 &quot;8红&quot;，推荐无"[^>]*>复制<\/button><\/td><\/tr>/);
+  assert.equal(copied.match(/row-copy/g).length, 1);
   // when each army lands counts down in its row, not a line of its own
   const later = Math.floor(Date.now() / 1000) + 600;
   const rows = vm.runInContext(`noticeTable({ columns: ['到达', '阵容'], key: 1,

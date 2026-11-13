@@ -195,6 +195,13 @@ nav { display: grid; gap: 4px; }
 .notice .body.view .vtable tr.has-detail.open td.key::before { content: '▾ '; }
 .notice .body.view .vtable tr.detail td { white-space: normal; max-width: none; padding: 4px 10px 6px 22px; color: var(--text);
   background: var(--panel2); line-height: 1.6; }
+/* 复制 at the end of a row, over its last cell while the row is hovered (noticeTable). */
+.notice .body.view .vtable td:last-child { position: relative; }
+.notice .body.view .vtable .row-copy { display: none; position: absolute; right: 4px; top: 50%; transform: translateY(-50%);
+  padding: 0 8px; height: 20px; line-height: 18px; font-size: 12px; font-weight: 400; border-radius: 4px; cursor: pointer;
+  border: 1px solid var(--line); background: var(--panel); color: var(--text); }
+.notice .body.view .vtable tr:hover .row-copy { display: block; }
+.notice .body.view .vtable .row-copy:hover { color: var(--gold); border-color: var(--gold); }
 .notice .who { color: var(--gold); font-weight: 400; margin-right: 6px; }
 
 /* accounts */
