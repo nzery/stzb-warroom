@@ -239,6 +239,11 @@ class Uploader:
 
     def __init__(self, queue, server, tokens, log=None):
         self.queue, self.server, self.tokens = queue, server, tokens
+        # The upload's own connection to the server, kept open between batches (api.Connection).
+        self.http = server.connection() if hasattr(server, "connection") else server
+        # Set when a row is queued: the upload thread, waiting on an empty queue, sends it at once
+        # (it looked again only every second, which added up to a second to what a click shows).
+        self.queued = threading.Event()
         self.log = log or (lambda **fields: print(json.dumps(fields, ensure_ascii=False), flush=True))
         dropped = queue.bind(server.origin, tokens)
         if dropped:
@@ -258,6 +263,7 @@ class Uploader:
         self.heard_at = time.monotonic()  # the last packet captured
         self.heard = False  # any packet at all since the start
         self.moved_at = None  # when the computer changed network while a game was being captured
+        self.moved = False  # the network changed since the upload's last request
         # Called when the server names a stream's role the first time (a login just claimed it, or
         # a waiting token was approved): the window looks at the accounts at once instead of
         # showing "waiting" for up to a minute (2026-10-23: a player removed the token just
@@ -274,6 +280,7 @@ class Uploader:
         now = time.monotonic()
         if self.heard and now - self.heard_at <= PLAYING_WITHIN:
             self.moved_at = now
+        self.moved = True  # the upload's connection went by the old network: open it again
 
     def lost_after_move(self):
         """A game was being captured, the computer changed network and nothing was captured since.
@@ -321,7 +328,10 @@ class Uploader:
         if not reports:
             return
         link = self.stream(ends)
-        link[1] += self.queue.add_reports(self.roles.get(link[0]), link[0], link[1] + 1, at, channel, reports)
+        added = self.queue.add_reports(self.roles.get(link[0]), link[0], link[1] + 1, at, channel, reports)
+        link[1] += added
+        if added:
+            self.queued.set()
 
     def connections(self, within=300):
         """Open game connections seen in the last `within` seconds (a closed one, as after
@@ -342,6 +352,7 @@ class Uploader:
         link = self.stream(ends)
         if self.queue.add(link[0], link[1] + 1, row):
             link[1] += 1
+            self.queued.set()
 
     # upload thread ------------------------------------------------------------------
 
@@ -352,8 +363,11 @@ class Uploader:
         if batch is None:
             return False
         stream_id, start, rows = batch
+        if self.moved and hasattr(self.http, "close"):
+            self.moved = False
+            self.http.close()
         try:
-            result = self.server.json(PATH, self.tokens, {"stream_id": stream_id, "start_seq": start,
+            result = self.http.json(PATH, self.tokens, {"stream_id": stream_id, "start_seq": start,
                                                           "frames": rows}, compress=True, timeout=30)
         except HTTPError as exc:
             if exc.code == 503 and _reply(exc).get("retry") == "stream":
@@ -409,7 +423,12 @@ class Uploader:
                 if summary != last_error:
                     print(f"upload deferred: {summary}", file=sys.stderr, flush=True)
                     last_error = summary
-            self.stop.wait(0.1 if busy else 1 if last_error is None else 10)
+            if busy or last_error is not None:
+                self.stop.wait(0.1 if busy else 10)
+            elif self.queued.wait(1):  # the queue was empty: go as soon as a row comes
+                self.queued.clear()
+        if hasattr(self.http, "close"):
+            self.http.close()
 
 
 def _reply(exc):

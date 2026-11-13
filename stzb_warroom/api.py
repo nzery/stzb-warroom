@@ -2,11 +2,14 @@
 and joining an alliance with an invitation code (which gives a token)."""
 
 import gzip
+import http.client
+import io
 import json
 import os
 import re
 import ssl
 import sys
+import time
 from pathlib import Path
 from urllib import request
 from urllib.error import HTTPError
@@ -125,6 +128,18 @@ def client_tokens(value=None):
     return tokens
 
 
+def request_body(tokens, body=None, compress=False):
+    """(data, headers) of a request naming `tokens` (one, or a list) and carrying `body` as JSON."""
+    headers = {"Authorization": "Bearer " + (tokens if isinstance(tokens, str) else ",".join(tokens))}
+    data = None
+    if body is not None:
+        data = json.dumps(body, ensure_ascii=False, allow_nan=False).encode()
+        headers["Content-Type"] = "application/json"
+        if compress:
+            data, headers["Content-Encoding"] = gzip.compress(data), "gzip"
+    return data, headers
+
+
 class Server:
     """Requests to the server, never through a local proxy."""
 
@@ -135,8 +150,8 @@ class Server:
                 or (parsed.scheme == "http" and parsed.hostname not in ("127.0.0.1", "localhost"))):
             raise SystemExit("server must be an HTTPS origin (or loopback HTTP)")
         self.origin = origin.rstrip("/")
-        self.opener = request.build_opener(request.ProxyHandler({}), request.HTTPSHandler(
-            context=tls_context(ca)))
+        self.context = tls_context(ca)
+        self.opener = request.build_opener(request.ProxyHandler({}), request.HTTPSHandler(context=self.context))
         self.opener.addheaders = list(CLIENT_HEADERS)
         self.outdated = None  # called when the server answers 426: it no longer serves this version
 
@@ -150,14 +165,12 @@ class Server:
 
     def open(self, path, tokens, body=None, compress=False, timeout=45, method=None):
         """`tokens`: one token, or a list (the capture upload names all of them)."""
-        headers = {"Authorization": "Bearer " + (tokens if isinstance(tokens, str) else ",".join(tokens))}
-        data = None
-        if body is not None:
-            data = json.dumps(body, ensure_ascii=False, allow_nan=False).encode()
-            headers["Content-Type"] = "application/json"
-            if compress:
-                data, headers["Content-Encoding"] = gzip.compress(data), "gzip"
+        data, headers = request_body(tokens, body, compress)
         return self._send(request.Request(self.origin + path, data=data, headers=headers, method=method), timeout)
+
+    def connection(self):
+        """A connection kept open between requests, for one thread (the upload's)."""
+        return Connection(self)
 
     def post_bytes(self, path, token, data, kind, timeout=45):
         """POST `data` as it is (a chat image), typed `kind`."""
@@ -193,3 +206,73 @@ class Server:
         if not isinstance(reply, dict) or not str(reply.get("token") or "").startswith("sta_"):
             raise ValueError("服务器的回复不对，请稍后再试")
         return reply
+
+
+class Connection:
+    """Requests over one connection kept open between them (`Server.connection`), for one thread.
+
+    Each request of `Server` opens its own connection: a TCP and a TLS handshake, two round trips more,
+    before the request goes, and a handshake packet lost on the way waits a second or more to be sent
+    again. The upload sends a batch every second or so while a game is played, each after the one
+    before is answered: on a slow line in the evening (2026-11-13: a player's frames took 1–5 s to
+    arrive and what he clicked showed 10 s late) the handshakes were most of the wait.
+    A connection left idle is not trusted (the server closes it, a router may drop it silently, the
+    computer may have changed network): it is opened again, so a request never waits out its timeout
+    on a dead one. One that the server closed while it was in use is retried once on a new one: the
+    server takes the same rows again without harm (it acknowledges by sequence number).
+    """
+
+    IDLE = 20  # seconds; the server keeps an idle connection for longer than this
+
+    def __init__(self, server):
+        self.server, self.conn, self.used_at = server, None, 0.0
+        parsed = urlsplit(server.origin)
+        self.https, self.host, self.port = parsed.scheme == "https", parsed.hostname, parsed.port
+
+    def close(self):
+        if self.conn is not None:
+            self.conn.close()
+            self.conn = None
+
+    def _open(self, timeout):
+        if self.https:
+            return http.client.HTTPSConnection(self.host, self.port, timeout=timeout, context=self.server.context)
+        return http.client.HTTPConnection(self.host, self.port, timeout=timeout)
+
+    def json(self, path, tokens, body=None, compress=False, timeout=45):
+        data, headers = request_body(tokens, body, compress)
+        headers.update(dict(self.server.opener.addheaders))
+        if time.monotonic() - self.used_at > self.IDLE:
+            self.close()
+        while True:
+            reused = self.conn is not None
+            if not reused:
+                self.conn = self._open(timeout)
+            elif self.conn.sock is not None:
+                self.conn.sock.settimeout(timeout)
+            try:
+                self.conn.request("GET" if data is None else "POST", path, body=data, headers=headers)
+                response = self.conn.getresponse()
+                payload = response.read()
+            except (ConnectionResetError, ConnectionAbortedError, BrokenPipeError,
+                    http.client.RemoteDisconnected) as exc:
+                self.close()
+                if reused:
+                    continue  # the server closed it between requests: once more on a new one
+                raise ConnectionError(f"{type(exc).__name__}: {exc}") from exc
+            except http.client.HTTPException as exc:  # not an OSError: the upload counts it as one
+                self.close()
+                raise ConnectionError(f"{type(exc).__name__}: {exc}") from exc
+            except BaseException:
+                self.close()
+                raise
+            break
+        self.used_at = time.monotonic()
+        if response.will_close:
+            self.close()
+        if response.status >= 300:
+            if response.status == 426 and self.server.outdated:
+                self.server.outdated()
+            raise HTTPError(self.server.origin + path, response.status, response.reason, response.headers,
+                            io.BytesIO(payload))
+        return json.loads(payload)

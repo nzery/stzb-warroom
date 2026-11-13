@@ -177,6 +177,23 @@ class UploadTests(unittest.TestCase):
         self.assertNotEqual(stream, first)
         self.assertEqual(start, 1)
 
+    def test_a_row_queued_while_idle_goes_at_once(self):
+        sent = threading.Event()
+
+        def answer(body):
+            sent.set()
+            return accept()(body)
+        uploader = self.uploader(answer)
+        thread = threading.Thread(target=uploader.run, daemon=True)
+        thread.start()
+        self.addCleanup(thread.join, 5)
+        self.addCleanup(uploader.stop.set)
+        time.sleep(0.3)  # the thread found the queue empty and waits
+        started = time.monotonic()
+        self.feed(uploader, (server_frame(9, [1]), False))
+        self.assertTrue(sent.wait(2))
+        self.assertLess(time.monotonic() - started, 0.5)  # not after the second it waited before
+
     def test_transient_failures_keep_the_queue_and_401_stops(self):
         uploader = self.uploader(refuse(503), refuse(401))
         self.feed(uploader, (server_frame(9, [1]), False))
@@ -287,6 +304,105 @@ class UploadTests(unittest.TestCase):
             self.queue.full_logged = 0
             self.assertEqual(self.queue.add_reports(7, "stream", 1, 1.0, "personal", [report(5)]), 0)
             self.assertEqual(printed.call_count, 2)
+
+
+class KeptConnectionTests(unittest.TestCase):
+    """api.Connection against a real local HTTP/1.1 server."""
+
+    def setUp(self):
+        import http.server
+        seen = self.seen = []  # (client port, path) of every request
+        self.close_next = []  # paths whose answer closes the connection
+        test = self
+
+        class Handler(http.server.BaseHTTPRequestHandler):
+            protocol_version = "HTTP/1.1"
+
+            def log_message(self, *_args):
+                pass
+
+            def do_POST(self):
+                length = int(self.headers.get("Content-Length") or 0)
+                data = json.loads(self.rfile.read(length) or b"{}")
+                seen.append((self.client_address[1], self.path, self.headers.get("User-Agent")))
+                code = data.get("status", 200)
+                reply = json.dumps({"got": data, **({"error": "x"} if code != 200 else {})}).encode()
+                self.send_response(code)
+                self.send_header("Content-Type", "application/json")
+                self.send_header("Content-Length", str(len(reply)))
+                if self.path in test.close_next:
+                    self.send_header("Connection", "close")
+                    self.close_connection = True
+                self.end_headers()
+                self.wfile.write(reply)
+
+        self.httpd = http.server.ThreadingHTTPServer(("127.0.0.1", 0), Handler)
+        self.httpd.daemon_threads = True
+        threading.Thread(target=self.httpd.serve_forever, daemon=True).start()
+        self.addCleanup(self.httpd.server_close)
+        self.addCleanup(self.httpd.shutdown)
+        self.server = api.Server(f"http://127.0.0.1:{self.httpd.server_address[1]}")
+        self.conn = self.server.connection()
+        self.addCleanup(self.conn.close)
+
+    def test_requests_share_one_connection(self):
+        for index in range(3):
+            self.assertEqual(self.conn.json("/a", ["t1", "t2"], {"n": index}, compress=False)["got"], {"n": index})
+        self.assertEqual(len({port for port, _path, _agent in self.seen}), 1)
+        self.assertTrue(self.seen[0][2].startswith("stzb-warroom/"))  # the client's headers go along
+
+    def test_a_connection_the_server_closed_or_left_idle_is_opened_again(self):
+        self.close_next.append("/bye")
+        self.conn.json("/bye", "t", {})
+        self.conn.json("/a", "t", {})
+        self.conn.json("/b", "t", {})
+        self.conn.used_at -= api.Connection.IDLE + 1  # idle too long: not trusted
+        self.conn.json("/c", "t", {})
+        ports = [port for port, _path, _agent in self.seen]
+        self.assertNotEqual(ports[0], ports[1])
+        self.assertEqual(ports[1], ports[2])
+        self.assertNotEqual(ports[2], ports[3])
+
+    def test_a_connection_dropped_between_requests_is_retried_once_on_a_new_one(self):
+        self.conn.json("/a", "t", {})
+        self.conn.conn.sock.shutdown(2)  # gone without the client knowing, as after a silent close
+        self.assertEqual(self.conn.json("/b", "t", {"n": 1})["got"], {"n": 1})
+        self.assertEqual([path for _port, path, _agent in self.seen], ["/a", "/b"])
+
+    def test_errors_are_http_errors_with_their_reply_and_426_tells_the_app(self):
+        told = []
+        self.server.outdated = lambda: told.append(True)
+        with self.assertRaises(HTTPError) as caught:
+            self.conn.json("/a", "t", {"status": 503})
+        self.assertEqual(caught.exception.code, 503)
+        self.assertEqual(json.loads(caught.exception.read())["error"], "x")
+        with self.assertRaises(HTTPError):
+            self.conn.json("/a", "t", {"status": 426})
+        self.assertEqual(told, [True])
+        self.assertEqual(self.conn.json("/a", "t", {})["got"], {})  # still usable after an error answer
+        self.assertEqual(len({port for port, _path, _agent in self.seen}), 1)
+
+    def test_an_unreachable_server_is_an_os_error(self):
+        self.httpd.shutdown()
+        self.httpd.server_close()
+        with self.assertRaises(OSError):
+            self.conn.json("/a", "t", {}, timeout=2)
+
+    def test_the_upload_uses_it_and_opens_it_again_after_the_network_changed(self):
+        folder = tempfile.TemporaryDirectory()
+        self.addCleanup(folder.cleanup)
+        queue = Queue(Path(folder.name) / "queue.sqlite")
+        self.addCleanup(queue.close)
+        uploader = Uploader(queue, self.server, ["t"], log=lambda **_: None)
+        calls = []
+        uploader.http = type("Spy", (), {"json": lambda _self, *a, **k: calls.append("json") or accept()(a[2]),
+                                         "close": lambda _self: calls.append("close")})()
+        uploader.on_packet(1.0, 1, packet(server_frame(9, [1]), 100))
+        uploader.upload_once()
+        uploader.network_moved()
+        uploader.on_packet(2.0, 1, packet(server_frame(9, [2]), 100 + len(server_frame(9, [1]))))
+        uploader.upload_once()
+        self.assertEqual(calls, ["json", "close", "json"])
 
 
 class NotifyTests(unittest.TestCase):
