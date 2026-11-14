@@ -144,6 +144,19 @@ class AppTests(unittest.TestCase):
                 app.accounts[GOOD] = value
                 self.assertEqual(ready(), expected)
 
+    def test_the_roles_to_follow_are_those_the_server_lists(self):
+        from stzb_warroom import notify
+        app = self.app(saved=GOOD)
+        self.assertIs(app.notify_roles(GOOD), notify.UNKNOWN)  # not checked yet
+        for value, expected in (({"state": "ok", "approved": True, "role": {"id": 7}}, None),  # an older server
+                                ({"state": "ok", "role": {"id": 9}, "roles": [{"id": 9, "name": "甲（二服）"},
+                                                                             {"id": 7, "name": "甲（一服）"}]}, [9, 7]),
+                                ({"state": "pending", "approved": False, "roles": []}, []),
+                                ({"state": "offline", "roles": [{"id": 9}]}, [9])):  # the last answer stands
+            with self.subTest(value=value):
+                app.accounts[GOOD] = value
+                self.assertEqual(app.notify_roles(GOOD), expected)
+
     def test_tokens_are_checked_before_they_are_kept(self):
         app = self.app()
         for text in ("", "hello", "sta_short"):

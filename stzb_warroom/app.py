@@ -853,6 +853,19 @@ class App:
             return value.get("state") in ("offline", "invalid") or bool(value.get("approved") and value.get("role"))
         return ready
 
+    def notify_roles(self, token):
+        """The role keys whose notifications to follow for the token: what the server listed (its current
+        role and any other it plays now, 2026-11-14), None from a server that lists none (the current one
+        only), notify.UNKNOWN until the account check has answered."""
+        with self.lock:
+            value = self.accounts.get(token)
+        if value is None or value.get("state") == "checking":
+            return notify.UNKNOWN
+        roles = value.get("roles")
+        if not isinstance(roles, list):
+            return None
+        return [r.get("id") for r in roles if isinstance(r, dict)]
+
     def prompt_for(self, token):
         def show(text, ask):  # only hints now; nothing is ever asked
             with self.lock:
@@ -927,7 +940,8 @@ class App:
                                                  daemon=True)
             session["thread"].start()
         notify.start(self.server, session["tokens"], self.state_dir, stop, prompt_for=self.prompt_for,
-                     ready_for=self.notify_ready, show=self.on_notice, warn=lambda text: self.log(text, "warn"))
+                     ready_for=self.notify_ready, roles_for=self.notify_roles, show=self.on_notice,
+                     warn=lambda text: self.log(text, "warn"))
         if self.settings["phone_exit"]:
             self._start_exits(session)  # the phone's connections are reported by this capture
         self.touch()

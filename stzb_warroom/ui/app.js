@@ -220,7 +220,14 @@ function duration(seconds) {
   return h ? `${h} 小时 ${m} 分` : m ? `${m} 分钟` : `${s} 秒`;
 }
 const roleName = (label) => String(label || '').split(' · ')[0];
+// A token may play two roles at once (one NetEase account on two servers): the server's `roles` name
+// each with its server, as one name may be on both.
+const playsSeveral = () => (S.data?.tokens || []).some((a) => (a.roles || []).length > 1);
 function roleOf(notice) {
+  for (const a of S.data?.tokens || []) {
+    const played = (a.roles || []).find((r) => r && r.id === notice.role);
+    if (played && (a.roles.length > 1 || !a.role)) return String(played.name || roleName(played.label));
+  }
   const account = (S.data?.tokens || []).find((a) => a.role && a.role.id === notice.role);
   return account ? roleName(account.role.label) : (notice.role ? `角色 ${notice.role}` : '');
 }
@@ -633,7 +640,7 @@ function renderNotices() {
     const when = at && !countsDown(n) ? `<span class="when countdown" data-at="${at}" title="${clock(at)} 到"></span>`
       : `<span class="when" title="${clock(n.time, true)}">${clock(n.time)}</span>`;
     return `<article class="notice ${esc(n.level)}${at ? ' coming' : ''}"><span class="tag ${esc(n.level)}">${esc(n.tag || '通知')}</span>
-      <div class="title">${who && S.data.tokens.length > 1 ? `<span class="who">${esc(who)}</span>` : ''}${esc(n.title)}</div>
+      <div class="title">${who && (S.data.tokens.length > 1 || playsSeveral()) ? `<span class="who">${esc(who)}</span>` : ''}${esc(n.title)}</div>
       ${when}
       ${noticeBody(n, gone)}</article>`;
   };

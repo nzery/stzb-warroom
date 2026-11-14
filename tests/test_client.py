@@ -1,4 +1,5 @@
 import base64
+import hashlib
 import io
 import json
 import os
@@ -18,7 +19,7 @@ from stzb_warroom import capture as capturemod
 from stzb_warroom.capture import Capture, command_folder, find_dumpcap
 from stzb_warroom.frames import Splitter, body
 from stzb_warroom.pcap import tcp_segment
-from stzb_warroom.notify import Follower, follow_prompts, render
+from stzb_warroom.notify import UNKNOWN, Follower, follow_prompts, follow_roles, render
 from stzb_warroom.runner import lock
 from stzb_warroom.upload import Queue, Uploader, battle_reports, saved_totals
 
@@ -494,6 +495,109 @@ class NotifyTests(unittest.TestCase):
             return len(checks) > 2
         Follower(Server(), "t", Path(folder.name) / "c.json", warn=lambda _text: None, ready=ready).follow(stop)
         self.assertEqual((len(checks), asked), (3, ["/v1/state/events?after=latest"]))
+
+    def test_each_role_the_server_lists_is_followed_on_its_own_cursor(self):
+        # 2026-11-14: one token on two servers at once; the server lists the roles it plays now.
+        folder = tempfile.TemporaryDirectory()
+        self.addCleanup(folder.cleanup)
+        state = Path(folder.name)
+        key = hashlib.sha256(b"t").hexdigest()[:8]
+        (state / f"notify-{key}.json").write_text(json.dumps({"epoch": "old", "after": 40}))
+        opened, closed = [], []
+
+        class Stream:  # open, with a keepalive now and then, until its follower stops
+            def __init__(self, path):
+                self.path = path
+
+            def __iter__(self):
+                yield from (b"event: ready\n", b'data: {"event_epoch": "e"}\n', b"\n")
+                while True:
+                    time.sleep(0.005)
+                    yield b": keepalive\n"
+
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *_):
+                closed.append(self.path)
+                return False
+
+        class Server:
+            def json(self, path, token):
+                return {"event_epoch": "e", "next_id": 10}
+
+            def open(self, path, token, timeout):
+                opened.append(path)
+                return Stream(path)
+
+        def wait_for(check):
+            deadline = time.monotonic() + 3
+            while not check() and time.monotonic() < deadline:
+                time.sleep(0.01)
+
+        listed, stop = [UNKNOWN], threading.Event()
+        runner = threading.Thread(target=follow_roles, args=(Server(), "t", state, stop, lambda _t: listed[0],
+                                                             False, None, {"warn": lambda _t: None}, 0.01))
+        runner.start()
+        time.sleep(0.1)
+        self.assertEqual(opened, [])  # the roles not known yet: nothing asked
+        listed[0] = [7, 9]
+        wait_for(lambda: len(opened) >= 2)
+        self.assertCountEqual([p.rsplit("role=", 1)[1] for p in opened], ["7", "9"])
+        # the current role goes on from the cursor kept before (the server resets it if it was another role's)
+        self.assertIn("after=40", next(p for p in opened if p.endswith("role=7")))
+        self.assertIn("after=10", next(p for p in opened if p.endswith("role=9")))
+        listed[0] = [7]  # 9 no longer played: its stream stops, 7's goes on
+        wait_for(lambda: closed)
+        self.assertEqual([p.rsplit("role=", 1)[1] for p in closed], ["9"])
+        stop.set()
+        runner.join(3)
+        self.assertFalse(runner.is_alive())
+        wait_for(lambda: len(closed) == 2)
+        self.assertEqual(len(closed), 2)
+        self.assertEqual(json.loads((state / f"notify-{key}-9.json").read_text()), {"epoch": "e", "after": 10})
+
+    def test_a_server_listing_no_roles_is_followed_as_before(self):
+        folder = tempfile.TemporaryDirectory()
+        self.addCleanup(folder.cleanup)
+        stop = threading.Event()
+        opened = []
+
+        class Server:
+            def json(self, path, token):
+                opened.append(path)
+                return {"event_epoch": "e", "next_id": 10}
+
+            def open(self, path, token, timeout):
+                opened.append(path)
+                raise refuse(401)
+        follow_roles(Server(), "t", Path(folder.name), stop, lambda _t: None, False, None,
+                     {"warn": lambda _t: None}, 0.01)  # returns: the token was refused
+        self.assertEqual(opened, ["/v1/state/events?after=latest", "/v1/state/stream?after=10&notify=1&epoch=e"])
+
+    def test_a_role_stream_refused_stops_until_the_role_is_listed_anew(self):
+        folder = tempfile.TemporaryDirectory()
+        self.addCleanup(folder.cleanup)
+        stop = threading.Event()
+        opened, rounds = [], []
+        listed = [9]
+
+        class Server:
+            def json(self, path, token):
+                opened.append(path)
+                raise refuse(403)
+
+        def roles(_token):
+            rounds.append(1)
+            if len(rounds) == 20:
+                listed.clear()  # dropped from the list, then back
+            if len(rounds) == 40:
+                listed.append(9)
+            if len(rounds) == 60:
+                stop.set()
+            return list(listed)
+        follow_roles(Server(), "t", Path(folder.name), stop, roles, False, None, {"warn": lambda _t: None}, 0.001)
+        self.assertEqual(opened, ["/v1/state/events?after=latest&role=9"] * 2)
 
     def test_prompts_are_shown_and_answered(self):
         stop = threading.Event()

@@ -78,7 +78,10 @@ def ask_terminal(text, ask):
 
 
 class Follower:
-    """One token's notifications; its cursor {"epoch", "after"} kept in `path`.
+    """One token's notifications; its cursor {"epoch", "after"} kept in `path`. `role` (a role key the
+    server listed in /v1/client/status ``roles``): that role's notifications, though another may be the
+    token's current one (one NetEase account on two servers at once); None: the token's current role.
+    `seed`: a cursor file read when `path` has none yet (the one kept before roles were followed apart).
 
     `show(notice)` displays one (default: printed, coloured when `color`); `warn(text)` reports
     a problem with the stream, and that it is over once the stream opens again (default: stderr).
@@ -86,14 +89,21 @@ class Follower:
     check); until then the stream is not asked, it would only be refused (403). None: always ask.
     """
 
-    def __init__(self, server, token, path, color=False, label=False, show=None, warn=say, ready=None):
+    def __init__(self, server, token, path, color=False, label=False, show=None, warn=say, ready=None, role=None,
+                 seed=None):
         self.server, self.token, self.path, self.color, self.label = server, token, Path(path), color, label
-        self.show, self.warn, self.ready = show or self.print, warn, ready
+        self.show, self.warn, self.ready, self.role = show or self.print, warn, ready, role
         self.problem = None  # the last problem reported, until the stream opens again
-        try:
-            value = json.loads(self.path.read_text())
-        except (OSError, ValueError):
-            value = {}
+        self.rejected = False  # the token was refused (401)
+        value = {}
+        for source in (self.path, seed):
+            if source is None:
+                continue
+            try:
+                value = json.loads(Path(source).read_text())
+                break
+            except (OSError, ValueError):
+                value = {}
         if not isinstance(value, dict):
             value = {}
         self.epoch, self.after = value.get("epoch"), value.get("after")
@@ -111,11 +121,12 @@ class Follower:
         temporary.replace(self.path)
 
     def follow_once(self, stop):
+        role = {"role": self.role} if self.role is not None else {}
         if self.after is None:
-            latest = self.server.json("/v1/state/events?after=latest", self.token)
+            latest = self.server.json("/v1/state/events?" + urlencode({"after": "latest", **role}), self.token)
             self.epoch, self.after = latest.get("event_epoch"), int(latest.get("next_id") or 0)
             self.save()
-        query = urlencode({"after": self.after, "notify": 1, **({"epoch": self.epoch} if self.epoch else {})})
+        query = urlencode({"after": self.after, "notify": 1, **({"epoch": self.epoch} if self.epoch else {}), **role})
         with self.server.open("/v1/state/stream?" + query, self.token, timeout=60) as stream:
             for kind, event_id, data in events(stream, stop):
                 if kind == "ready":
@@ -148,6 +159,9 @@ class Follower:
             except HTTPError as exc:
                 if exc.code == 401:
                     self.warn("a token was rejected (HTTP 401); its notifications stop")
+                    self.rejected = True
+                    return
+                if exc.code == 403 and self.role is not None:  # no longer played: start() follows it again if it is
                     return
                 # 403: the token has no approved role yet.
                 summary, delay = f"HTTP {exc.code}", 60 if exc.code == 403 else 10
@@ -200,20 +214,56 @@ def follow_prompts(server, token, stop, show=ask_terminal):
         stop.wait(2 if prompt_id and value.get("ask") else 60)
 
 
+UNKNOWN = object()  # roles_for: the token's roles not known yet
+ROLES_EVERY = 5  # seconds between two looks at the roles to follow (the window checks the server every minute)
+
+
+def follow_roles(server, token, state_dir, stop, roles_for, label, ready, options, every=ROLES_EVERY):
+    """Follow each role `roles_for(token)` lists (the server's ``roles``: the token's current role and
+    any other it plays now), one Follower each, started and stopped as the list changes; when it is
+    None (a server without ``roles``), the token's current role only, as before. UNKNOWN: waits."""
+    key = hashlib.sha256(token.encode()).hexdigest()[:8]
+    legacy = Path(state_dir) / f"notify-{key}.json"
+    running = {}  # role key (None: the current one) -> (its stop, its thread)
+    try:
+        while not stop.is_set():
+            roles = roles_for(token)
+            if roles is not UNKNOWN:
+                wanted = [None] if roles is None else [r for r in roles if type(r) is int and r > 0][:8]
+                if any(follower.rejected for _own, follower in running.values()):
+                    return  # the token was refused (401): its notifications stop, as with one follower
+                # A follower stopped (403: the role no longer played) stays until the list drops the role:
+                # it starts again only when listed anew, not every few seconds meanwhile.
+                for role in [r for r in running if r not in wanted]:
+                    running.pop(role)[0].set()
+                for index, role in enumerate(wanted):
+                    if role in running:
+                        continue
+                    path = legacy if role is None else Path(state_dir) / f"notify-{key}-{role}.json"
+                    follower = Follower(server, token, path, label=label, ready=ready, role=role,
+                                        seed=legacy if role is not None and index == 0 else None, **options)
+                    own = threading.Event()
+                    running[role] = (own, follower)
+                    threading.Thread(target=follower.follow, args=(own,), daemon=True).start()
+            stop.wait(every)
+    finally:
+        for own, _follower in running.values():
+            own.set()
+
+
 def start(server, tokens, state_dir, stop, prompt_for=lambda _token: ask_terminal, ready_for=lambda _token: None,
-          **options):
+          roles_for=lambda _token: None, **options):
     """Follow every token's notifications and prompts until `stop`; the notification threads.
 
     `prompt_for(token)`: follow_prompts's `show` for that token; `ready_for(token)`: its
-    Follower's `ready`. The prompts are asked from the start: they say why a token's capture is
-    not uploaded before it is approved. `options`: Follower's color, show and warn.
+    Follower's `ready`; `roles_for(token)`: the roles to follow (follow_roles). The prompts are asked
+    from the start: they say why a token's capture is not uploaded before it is approved.
+    `options`: Follower's color, show and warn.
     """
     threads = []
     for token in tokens:
-        key = hashlib.sha256(token.encode()).hexdigest()[:8]
-        follower = Follower(server, token, Path(state_dir) / f"notify-{key}.json", label=len(tokens) > 1,
-                            ready=ready_for(token), **options)
-        threads.append(threading.Thread(target=follower.follow, args=(stop,), daemon=True))
+        threads.append(threading.Thread(target=follow_roles, daemon=True, args=(
+            server, token, state_dir, stop, roles_for, len(tokens) > 1, ready_for(token), options)))
         threading.Thread(target=follow_prompts, args=(server, token, stop, prompt_for(token)), daemon=True).start()
     for thread in threads:
         thread.start()
