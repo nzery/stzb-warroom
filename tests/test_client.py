@@ -203,6 +203,60 @@ class UploadTests(unittest.TestCase):
         self.assertIsNotNone(self.queue.batch())
         self.assertIn("401", str(uploader.error))
 
+    def test_a_stalled_upload_is_sent_again_at_once_with_a_growing_limit(self):
+        # 2026-11-14 evening: one connection stalled for 35-70 s while new ones went through.
+        uploader = self.uploader(TimeoutError("timed out"), TimeoutError("timed out"),
+                                 TimeoutError("timed out"), accept())
+        limits, waits, logged = [], [], []
+        json_call = uploader.server.json
+        uploader.server.json = lambda *a, timeout=45, **k: limits.append(timeout) or json_call(*a, **k)
+        uploader.log = lambda **fields: logged.append(fields)
+        self.feed(uploader, (server_frame(9, [1]), False))
+
+        def wait(delay):
+            waits.append(delay)
+            if uploader.queue.batch() is None:
+                uploader.stop.set()
+            return uploader.stop.is_set()
+        uploader.stop.wait = wait
+        uploader.queued.wait = lambda _delay: uploader.stop.set()
+        uploader.run()
+        self.assertEqual(limits, [4, 4, 6, 8])
+        self.assertEqual(waits[:3], [0, 0, 0.5])
+        self.assertEqual([f["event"] for f in logged], ["upload_failed"] * 3 + ["upload_recovered"])
+        self.assertEqual(uploader.failures, 0)
+        self.assertIsNone(self.queue.batch())
+
+    def test_an_unanswered_handshake_is_tried_again_at_once_without_raising_the_limit(self):
+        from stzb_warroom.api import ConnectTimeout
+        uploader = self.uploader(ConnectTimeout("x"), ConnectTimeout("x"), accept())
+        limits, waits, logged = [], [], []
+        json_call = uploader.server.json
+        uploader.server.json = lambda *a, timeout=45, **k: limits.append(timeout) or json_call(*a, **k)
+        uploader.log = lambda **fields: logged.append(fields)
+        self.feed(uploader, (server_frame(9, [1]), False))
+        uploader.stop.wait = lambda delay: waits.append(delay) or uploader.stop.is_set()
+        uploader.queued.wait = lambda _delay: uploader.stop.set()
+        uploader.run()
+        self.assertEqual(limits, [4, 4, 4])
+        self.assertEqual(waits, [0.1])  # only the pause after the batch went
+        self.assertEqual([f["event"] for f in logged], ["upload_failed", "upload_recovered"])
+        self.assertEqual(logged[1]["unanswered"], 2)
+
+    def test_a_connection_handshake_has_its_own_short_limit(self):
+        import socket
+        from stzb_warroom.api import Connection, ConnectTimeout, Server
+        server = Server("https://example.test")
+        conn = Connection(server)._open(30)
+        self.assertEqual((conn.connect_timeout, conn.timeout), (Connection.CONNECT, 30))
+        real = socket.create_connection
+        socket.create_connection = lambda *_a, **_k: (_ for _ in ()).throw(TimeoutError("timed out"))
+        try:
+            with self.assertRaises(ConnectTimeout):
+                conn.connect()
+        finally:
+            socket.create_connection = real
+
     def test_a_stream_held_back_waits_alone_while_the_others_go_on(self):
         uploader = self.uploader(refuse(503, retry="stream"), accept(role=8), accept(role=7))
         self.feed(uploader, (server_frame(9, [1]), False), port=50000)

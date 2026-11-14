@@ -45,6 +45,12 @@ def render(notice, color, label=False):
     return ("\a" if level == "alarm" else "") + "\n".join(lines)
 
 
+# The server sends a keep-alive at least every 15 s on its event streams: a stream silent this long
+# (seconds) is dead (a lossy line in the evening), dropped and opened again at once, not after a minute.
+STREAM_TIMEOUT = 25
+RECONNECT_FIRST, RECONNECT_MAX = 0.5, 10  # seconds before opening a stream again, doubling on failures
+
+
 def events(stream, stop):
     """(kind, id, data) of each server-sent event."""
     kind, event_id, data = None, None, []
@@ -127,7 +133,7 @@ class Follower:
             self.epoch, self.after = latest.get("event_epoch"), int(latest.get("next_id") or 0)
             self.save()
         query = urlencode({"after": self.after, "notify": 1, **({"epoch": self.epoch} if self.epoch else {}), **role})
-        with self.server.open("/v1/state/stream?" + query, self.token, timeout=60) as stream:
+        with self.server.open("/v1/state/stream?" + query, self.token, timeout=STREAM_TIMEOUT) as stream:
             for kind, event_id, data in events(stream, stop):
                 if kind == "ready":
                     self.epoch = data.get("event_epoch")
@@ -148,14 +154,14 @@ class Follower:
                     raise ConnectionError("no game login captured for this token yet")
 
     def follow(self, stop):
-        delay = 2
+        delay = RECONNECT_FIRST
         while not stop.is_set():
             if self.ready and not self.ready():
                 stop.wait(5)
                 continue
             try:
                 self.follow_once(stop)
-                delay = 2
+                delay = RECONNECT_FIRST
             except HTTPError as exc:
                 if exc.code == 401:
                     self.warn("a token was rejected (HTTP 401); its notifications stop")
@@ -169,7 +175,7 @@ class Follower:
                     self.warn(f"notifications unavailable: {summary}")
                     self.problem = summary
             except (OSError, ValueError) as exc:
-                summary, delay = f"{type(exc).__name__}: {exc}", min(delay * 2, 60)
+                summary, delay = f"{type(exc).__name__}: {exc}", min(delay * 2, RECONNECT_MAX)
                 if summary != self.problem:
                     self.warn(f"notifications interrupted: {summary}")
                     self.problem = summary

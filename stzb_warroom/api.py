@@ -7,7 +7,9 @@ import io
 import json
 import os
 import re
+import socket
 import ssl
+import struct
 import sys
 import time
 from pathlib import Path
@@ -208,6 +210,32 @@ class Server:
         return reply
 
 
+class ConnectTimeout(TimeoutError):
+    """No answer to the TCP handshake within Connection.CONNECT seconds."""
+
+
+class _Quick:
+    """http.client connections whose TCP handshake has its own short limit (Connection.CONNECT)."""
+
+    def connect(self):
+        try:
+            self.sock = socket.create_connection((self.host, self.port), self.connect_timeout)
+        except TimeoutError as exc:
+            raise ConnectTimeout(f"no answer to connect within {self.connect_timeout} s") from exc
+        self.sock.setsockopt(socket.IPPROTO_TCP, socket.TCP_NODELAY, 1)
+        self.sock.settimeout(self.timeout)
+        if isinstance(self, http.client.HTTPSConnection):
+            self.sock = self._context.wrap_socket(self.sock, server_hostname=self.host)
+
+
+class _QuickHTTPS(_Quick, http.client.HTTPSConnection):
+    pass
+
+
+class _QuickHTTP(_Quick, http.client.HTTPConnection):
+    pass
+
+
 class Connection:
     """Requests over one connection kept open between them (`Server.connection`), for one thread.
 
@@ -223,21 +251,36 @@ class Connection:
     """
 
     IDLE = 20  # seconds; the server keeps an idle connection for longer than this
+    # The handshake is one small round trip (about 0.2 s to the server). A SYN lost goes again after
+    # 1 s, then 2, 4, 8 s (2026-11-14 22:19: 11 s without an answer on a lossy evening line): after
+    # this many seconds a new connection, from another port, starts over instead.
+    CONNECT = 2
 
     def __init__(self, server):
         self.server, self.conn, self.used_at = server, None, 0.0
         parsed = urlsplit(server.origin)
         self.https, self.host, self.port = parsed.scheme == "https", parsed.hostname, parsed.port
 
-    def close(self):
+    def close(self, abort=False):
+        """`abort`: reset the connection, dropping what is still unsent. A stalled one closed as
+        usual kept sending its data again for most of a minute (2026-11-14 22:19), in the way of
+        the new connection on the same lossy line; the server takes the batch again by sequence."""
         if self.conn is not None:
+            if abort and self.conn.sock is not None:
+                try:
+                    self.conn.sock.setsockopt(socket.SOL_SOCKET, socket.SO_LINGER, struct.pack("HH" if sys.platform == "win32" else "ii", 1, 0))
+                except OSError:
+                    pass
             self.conn.close()
             self.conn = None
 
     def _open(self, timeout):
         if self.https:
-            return http.client.HTTPSConnection(self.host, self.port, timeout=timeout, context=self.server.context)
-        return http.client.HTTPConnection(self.host, self.port, timeout=timeout)
+            conn = _QuickHTTPS(self.host, self.port, timeout=timeout, context=self.server.context)
+        else:
+            conn = _QuickHTTP(self.host, self.port, timeout=timeout)
+        conn.connect_timeout = min(self.CONNECT, timeout)
+        return conn
 
     def json(self, path, tokens, body=None, compress=False, timeout=45):
         data, headers = request_body(tokens, body, compress)
@@ -263,6 +306,9 @@ class Connection:
             except http.client.HTTPException as exc:  # not an OSError: the upload counts it as one
                 self.close()
                 raise ConnectionError(f"{type(exc).__name__}: {exc}") from exc
+            except TimeoutError:
+                self.close(abort=True)
+                raise
             except BaseException:
                 self.close()
                 raise

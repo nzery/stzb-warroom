@@ -36,7 +36,7 @@ from pathlib import Path
 from urllib.error import HTTPError
 from urllib.parse import urlencode
 
-from .notify import events
+from .notify import RECONNECT_FIRST, RECONNECT_MAX, STREAM_TIMEOUT, events
 
 STREAM = "/v1/chat/stream"
 SEND = "/v1/chat/send"
@@ -470,7 +470,7 @@ class Chat:
         # Looked at on every line (the keep-alives too), not only on a message: a switch is not
         # left waiting for someone to speak.
         gone = Either(stop, lambda: self.token() != token)
-        with self.server.open(f"{STREAM}?after={after}&recall=1", token, timeout=60) as stream:
+        with self.server.open(f"{STREAM}?after={after}&recall=1", token, timeout=STREAM_TIMEOUT) as stream:
             with self.lock:
                 self.stream = stream
             try:
@@ -505,7 +505,7 @@ class Chat:
                 self._keep(message, streamed=True)
 
     def run(self, stop):
-        delay = 2
+        delay = RECONNECT_FIRST
         while not stop.is_set():
             token = self.token()
             if token is None:
@@ -515,18 +515,18 @@ class Chat:
             wait = None
             try:
                 self.follow_once(token, stop)
-                delay = 2
+                delay = RECONNECT_FIRST
             except HTTPError as exc:
                 # 403: not approved after all (the account check will say); 503: the chat is full.
                 wait = 60 if exc.code == 403 else 30
                 self._set(state="offline", conn=None, error=server_error(exc))
             except (OSError, ValueError) as exc:
                 if self.token() == token:  # not the stream cut by a switch
-                    delay = min(delay * 2, 60)
+                    delay = min(delay * 2, RECONNECT_MAX)
                     self._set(state="offline", conn=None, error=f"连不上群聊：{type(exc).__name__}")
             if self.token() != token:  # another account chosen (or this one removed): connect with it now
                 self._set(state="connecting", conn=None, online=None, error=None)
-                delay = 2
+                delay = RECONNECT_FIRST
                 continue
             # The stream ended (the server restarted): connect again.
             self._set(conn=None, **({"state": "connecting"} if self.state in ("online", "unavailable") else {}))

@@ -19,6 +19,7 @@ import uuid
 from pathlib import Path
 from urllib.error import HTTPError
 
+from .api import ConnectTimeout
 from .frames import Splitter, body, message_id
 
 PATH = "/v2/capture/frames"
@@ -36,6 +37,15 @@ PLAYING_WITHIN = 300  # a packet this recent when the network changed: a game wa
 LOST_AFTER = 60  # seconds after the change with nothing captured before the window says so
 LOST_FOR = 600  # and until when: by then the game was more likely closed
 WAIT_FIRST, WAIT_MAX = 15, 300  # a held-back stream is tried again after this, doubling up to the max
+# A batch is answered in milliseconds once it has arrived. In the evening the line to the server
+# loses packets and one connection now and then stalls outright while new ones go through
+# (2026-11-14 20:40-21:30: about 20 players' uploads waited 35-70 s each, notifications 30-80 s
+# late): with nothing moving for this long (seconds) the batch is sent again at once on a new
+# connection. The limit grows with failures in a row so that a slow but working line still gets
+# a large batch through.
+STALL_AFTER = (4, 4, 6, 8, 10)
+RETRY_AFTER = (0, 0, 0.5, 1, 2)  # seconds before the next try, by failures in a row
+SLOW_BATCH = 3  # a batch taking longer than this is logged
 
 
 def battle_reports(value):
@@ -258,6 +268,8 @@ class Uploader:
         self.swept = time.monotonic()
         self.stop = threading.Event()
         self.error = None
+        self.failures, self.failed_at = 0, 0.0  # network failures in a row, since when
+        self.unanswered = 0  # handshakes unanswered meanwhile (api.ConnectTimeout)
         # Battle reports the server took from this computer, all launches together, and when the last went.
         self.uploaded, self.uploaded_at = queue.totals()
         self.heard_at = time.monotonic()  # the last packet captured
@@ -367,8 +379,13 @@ class Uploader:
             self.moved = False
             self.http.close()
         try:
+            started = time.monotonic()
             result = self.http.json(PATH, self.tokens, {"stream_id": stream_id, "start_seq": start,
-                                                          "frames": rows}, compress=True, timeout=30)
+                                                          "frames": rows}, compress=True,
+                                    timeout=STALL_AFTER[min(self.failures, len(STALL_AFTER) - 1)])
+            took = time.monotonic() - started
+            if took > SLOW_BATCH:
+                self.log(event="upload_slow", seconds=round(took, 1), rows=len(rows))
         except HTTPError as exc:
             if exc.code == 503 and _reply(exc).get("retry") == "stream":
                 # Only this stream waits (its token awaits approval): the others go on meanwhile.
@@ -408,6 +425,10 @@ class Uploader:
             try:
                 busy = self.upload_once()
                 last_error = None
+                if self.failures or self.unanswered:
+                    self.log(event="upload_recovered", failures=self.failures, unanswered=self.unanswered,
+                             seconds=round(time.monotonic() - self.failed_at, 1))
+                    self.failures = self.unanswered = 0
             except HTTPError as exc:
                 if exc.code == 401:
                     self.error = RuntimeError("every token was rejected (HTTP 401)")
@@ -418,11 +439,24 @@ class Uploader:
                     # 503 includes a new token waiting for approval: the queue keeps its rows.
                     print(f"upload deferred: {summary}", file=sys.stderr, flush=True)
                     last_error = summary
+            except ConnectTimeout:
+                # No answer to the handshake: at once from another port, the stall limit as it was.
+                if not (self.failures or self.unanswered):
+                    self.failed_at = time.monotonic()
+                self.unanswered += 1
+                if self.unanswered == 1:
+                    self.log(event="upload_failed", error="connect timed out", failures=self.failures)
+                last_error = "connect timed out"
+                continue
             except (OSError, ValueError) as exc:
-                busy, summary = False, f"{type(exc).__name__}: {exc}"
-                if summary != last_error:
-                    print(f"upload deferred: {summary}", file=sys.stderr, flush=True)
-                    last_error = summary
+                # A stalled or broken connection (Connection.json closed it): again on a new one.
+                if not (self.failures or self.unanswered):
+                    self.failed_at = time.monotonic()
+                self.failures += 1
+                busy, last_error = False, f"{type(exc).__name__}: {exc}"
+                self.log(event="upload_failed", error=last_error[:120], failures=self.failures)
+                self.stop.wait(RETRY_AFTER[min(self.failures - 1, len(RETRY_AFTER) - 1)])
+                continue
             if busy or last_error is not None:
                 self.stop.wait(0.1 if busy else 10)
             elif self.queued.wait(1):  # the queue was empty: go as soon as a row comes
