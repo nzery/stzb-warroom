@@ -635,12 +635,20 @@ class App:
             raise ValueError("服务器的回复不对")
         return value
 
+    EXPORTS = {"players": "玩家信息.xlsx", "attendance": "考勤表.xlsx"}
+
     def export_players(self, index):
-        """The 玩家信息 page's 导出玩家信息: the server's workbook (the enemy players of our alliance's
-        reports this season) saved in Downloads, the folder opened -> {"path", "players"}."""
+        return self.export(index, "players")
+
+    def export(self, index, kind="players"):
+        """The 查询 page's exports: 导出玩家信息 (the enemy players of our alliance's reports this season),
+        导出考勤表 (`kind` attendance: the alliance's siege attendance), the server's workbook saved in
+        Downloads, the folder opened -> {"path", "players"}."""
         token = self._token(index)
+        if kind not in self.EXPORTS:
+            raise ValueError("不支持的导出")
         try:
-            value = self.server.json(PERSONAL + "export", token, timeout=90)
+            value = self.server.json(PERSONAL + "export" + ("" if kind == "players" else f"?kind={kind}"), token, timeout=90)
         except HTTPError as exc:
             if exc.code == 404:
                 raise ValueError("服务器还不支持导出")
@@ -655,7 +663,7 @@ class App:
             raise ValueError("服务器的回复不对")
         data = base64.b64decode(value["xlsx"])
         name = "".join("_" if ch in '\\/:*?"<>|' or ord(ch) < 32 else ch
-                       for ch in str(value.get("filename") or "玩家信息.xlsx"))[:120]
+                       for ch in str(value.get("filename") or self.EXPORTS[kind]))[:120]
         if not name.lower().endswith(".xlsx"):
             name += ".xlsx"
         folder = Path.home() / "Downloads"

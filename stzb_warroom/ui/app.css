@@ -462,7 +462,7 @@ input[type=text]:focus, input[type=password]:focus { border-color: var(--gold2);
 /* 查询: a short name box (2026-11-13 user); 刷新 and 导出玩家信息 on the right. */
 .vtoolbar .vfilters { flex: 1; }
 .vsearch { width: auto; flex: none; }
-.vsearch input { width: 200px; min-width: 0; flex: none; }
+.vsearch input { width: calc(14em + 28px); min-width: 0; flex: none; }  /* the placeholder whole (13 characters), no wider */
 .vtoolbar .vactions { display: flex; align-items: center; gap: 8px; flex: none; }
 
 /* 提醒: a setting a line, its help one line under its name, its switch or choices beside it. */

@@ -109,6 +109,13 @@ const S = {
   clock: 0,  // how far the game's clock is ahead of this computer's (gameNow)
 };
 const PERSONAL = new Set(['players']);
+// 查询 before anything was asked (2026-11-14 user: opening the page asks the server nothing): the box and
+// the export buttons as the server last gave them, these until it has.
+const PERSONAL_SEARCH = { key: 'name', placeholder: '输入玩家名字，可以只输一部分' };
+const PERSONAL_EXPORTS = [{ kind: 'players', label: '导出玩家信息' }, { kind: 'attendance', label: '导出考勤表' }];
+const PERSONAL_EMPTY = '输入玩家名字查他的信息和队伍（我方、敌方都能查）。';
+// Whether the page has something asked (a name typed): only then is the server read.
+const personalAsked = (view) => Boolean(String(view.query?.name ?? '').trim());
 // The game's time, epoch seconds: the server's times (an army's landing, a notice's expiry) go by
 // it. This computer's clock as the game's time sync set it (the program's clock.offset), which may
 // be off by itself (2026-11-11 players: countdowns not right).
@@ -282,7 +289,7 @@ function render() {
   if (PERSONAL.has(S.page)) {
     // Opened before the accounts were known, or its account changed: read it now.
     const view = S.personal[S.page], account = personalAccount();
-    if (account && !view.loading && !view.error && view.role !== account.a.role.id) loadPersonal(S.page);
+    if (account && personalAsked(view) && !view.loading && !view.error && view.role !== account.a.role.id) loadPersonal(S.page);
     else renderPersonal(S.page);
   }
   if (S.page === 'phone') renderPhone(d);
@@ -777,21 +784,23 @@ function renderPersonal(page) {
     `<button class="chip${a.role.id === account.a.role.id ? ' active' : ''}" data-prole="${esc(a.role.id)}">${esc(roleName(a.role.label))}</button>`).join('')}</div></div>` : '';
   const filters = (d?.filters || []).map((f) => `<div class="vfilter"><span>${esc(f.label)}</span><div class="chips">${f.options.map((o) =>
     `<button class="chip${o.value === f.value ? ' active' : ''}" data-pfilter="${esc(f.key)}" data-value="${esc(o.value)}">${esc(o.label)}</button>`).join('')}</div></div>`).join('');
-  const refresh = `<button class="btn ghost small" data-prefresh="1"${view.loading ? ' disabled' : ''}>${view.loading ? '<span class="spin"></span>读取中' : `${icon('refresh').replace('<svg', '<svg width="14" height="14"')}刷新`}</button>`;
+  const asked = personalAsked(view);
+  const refresh = !asked ? '' : `<button class="btn ghost small" data-prefresh="1"${view.loading ? ' disabled' : ''}>${view.loading ? '<span class="spin"></span>读取中' : `${icon('refresh').replace('<svg', '<svg width="14" height="14"')}刷新`}</button>`;
   // A page with a box to type in (玩家信息: the name); what is typed goes as the server's `search.key`.
-  const search = d?.search || view.search;
-  if (search) view.search = search;
+  const search = d?.search || view.search || store.get('personalSearch', null) || PERSONAL_SEARCH;
+  if (d?.search) { view.search = d.search; store.set('personalSearch', { key: d.search.key, placeholder: d.search.placeholder }); }
   const box2 = search ? `<form class="inline-form vsearch" data-psearch="${esc(search.key)}"><input type="text" autocomplete="off" spellcheck="false"
     maxlength="40" value="${esc(view.query[search.key] ?? search.value ?? '')}" placeholder="${esc(search.placeholder || '')}">
     <button class="btn primary" type="submit"${view.loading ? ' disabled' : ''}>查询</button></form>` : '';
-  // 导出玩家信息 (the server offers it on 玩家信息): an Excel file of the enemy players, saved in Downloads.
-  const exportLabel = d?.export?.label || view.exportLabel;
-  if (exportLabel) view.exportLabel = exportLabel;
-  const exporting = S.exporting === page;
-  const exportBtn = exportLabel ? `<button class="btn small" data-pexport="1"${exporting ? ' disabled' : ''}>${exporting ? '<span class="spin"></span>正在导出' : esc(exportLabel)}</button>` : '';
+  // The exports the server offers (导出玩家信息, 导出考勤表): Excel files saved in Downloads.
+  if (Array.isArray(d?.exports)) store.set('personalExports', d.exports);
+  const exports = (Array.isArray(d?.exports) ? d.exports : null) || store.get('personalExports', null) || PERSONAL_EXPORTS;
+  const exportBtn = exports.map((e) => `<button class="btn small" data-pexport="${esc(e.kind)}"${S.exporting ? ' disabled' : ''}>${
+    S.exporting === e.kind ? '<span class="spin"></span>正在导出' : esc(e.label)}</button>`).join('');
   const toolbar = `<div class="vtoolbar"><div class="vfilters">${box2}${who}${filters}</div><div class="vactions">${refresh}${exportBtn}</div></div>`;
   let body;
   if (view.error) body = banner('warn', 'info', esc(view.error));
+  else if (!d && !asked) body = `<div class="card empty">${PERSONAL_EMPTY}</div>`;
   else if (!d) body = '<div class="card empty">正在读取…</div>';
   else body = (d.note ? `<p class="muted prefs-note">${esc(d.note)}</p>` : '')
     // layout 'grid': the cards side by side as the width allows (玩家信息: five armies at a glance);
@@ -804,14 +813,15 @@ function renderPersonal(page) {
   box.innerHTML = toolbar + body;
 }
 
-async function exportPlayers(page) {
+async function exportFile(page, kind) {
   const account = personalAccount();
   if (!account || S.exporting) return;
-  S.exporting = page;
+  S.exporting = kind;
   renderPersonal(page);
   try {
-    const done = await act('export_players', { index: account.index }, { quiet: true });
-    toast(`已导出${done.players != null ? ` ${done.players} 名玩家` : ''}，保存在：${done.path}`);
+    const done = await act('export', { index: account.index, kind }, { quiet: true });
+    const who = kind === 'attendance' ? '名成员' : '名玩家';
+    toast(`已导出${done.players != null ? ` ${done.players} ${who}` : ''}，保存在：${done.path}`);
   } catch (error) {
     toast(error.message || String(error), true);
   } finally {
@@ -826,8 +836,9 @@ function personalClick(event) {
   const role = event.target.closest('[data-prole]');
   const filter = event.target.closest('[data-pfilter]');
   const pager = event.target.closest('[data-ppage]');
-  if (event.target.closest('[data-pexport]')) {
-    exportPlayers(S.page);
+  const exporter = event.target.closest('[data-pexport]');
+  if (exporter) {
+    exportFile(S.page, exporter.dataset.pexport);
     return true;
   }
   if (role) {
@@ -841,7 +852,8 @@ function personalClick(event) {
   } else if (!event.target.closest('[data-prefresh]')) {
     return false;
   }
-  loadPersonal(S.page);
+  if (personalAsked(S.personal[S.page])) loadPersonal(S.page);
+  else renderPersonal(S.page);
   return true;
 }
 
@@ -1643,7 +1655,11 @@ function show(page) {
   render();
   if (page === 'diagnostics') $('log').scrollTop = $('log').scrollHeight;
   if (page === 'chat') { S.chat.bottom = true; S.chat.key = ''; render(); $('chat-text').focus(); }
-  if (PERSONAL.has(page)) loadPersonal(page);  // read again each time it is opened
+  // Shown as it was left; read only when a name was asked for another account meanwhile.
+  if (PERSONAL.has(page)) {
+    const view = S.personal[page], account = personalAccount();
+    if (account && personalAsked(view) && !view.loading && view.role !== account.a.role.id) loadPersonal(page);
+  }
 }
 
 const MESSAGES = {
@@ -1734,7 +1750,8 @@ document.addEventListener('submit', async (event) => {
     if (!view) return;
     const { show } = view.query;
     view.query = { [form.dataset.psearch]: form.querySelector('input').value.trim(), page: 1, ...(show ? { show } : {}) };
-    loadPersonal(S.page);
+    if (personalAsked(view)) loadPersonal(S.page);
+    else { view.seq = (view.seq || 0) + 1; view.data = null; view.error = null; view.loading = false; renderPersonal(S.page); }
   } else if (form.dataset.allyForm !== undefined) {
     await allyAdd(form.querySelector('button[type="submit"]'), { address: form.querySelector('[data-ally-address]').value });
   } else if (form.dataset.barkForm !== undefined) {

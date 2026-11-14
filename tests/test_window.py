@@ -58,7 +58,7 @@ class FakeServer:
             self.calls.append(("GET", path, token, None))
             if token == NEW:
                 raise HTTPError(path, 403, "forbidden", {}, io.BytesIO(b'{"error": "account not bound to token"}'))
-            if path.endswith("/export"):
+            if path.endswith("/export") or path.endswith("/export?kind=attendance"):
                 return {"filename": "率土战局-敌对玩家-风/云.xlsx", "xlsx": "UEsFBg==", "players": 3}
             return {"note": "说明", "filters": [], "cards": [{"title": "曹操队"}], "empty": None, "page": None}
         if token == NEW:
@@ -406,6 +406,10 @@ class AppTests(unittest.TestCase):
             self.assertEqual(Path(first["path"]).read_bytes(), b"PK\x05\x06")
             self.assertEqual(first["players"], 3)
             opened.assert_called_with(Path(home) / "Downloads")
+            app.export(0, "attendance")  # 导出考勤表
+            self.assertEqual(self.server.calls[-1][:2], ("GET", "/v1/client/personal/export?kind=attendance"))
+            with self.assertRaisesRegex(ValueError, "不支持"):
+                app.export(0, "../x")
 
     def test_the_phone_page_is_the_servers_and_never_logged(self):
         app = self.app(saved=f"{GOOD},{NEW}")
