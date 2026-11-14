@@ -46,6 +46,11 @@ WAIT_FIRST, WAIT_MAX = 15, 300  # a held-back stream is tried again after this, 
 STALL_AFTER = (4, 4, 6, 8, 10)
 RETRY_AFTER = (0, 0, 0.5, 1, 2)  # seconds before the next try, by failures in a row
 SLOW_BATCH = 3  # a batch taking longer than this is logged
+# This run of the program, in each batch's `timing`: the server measures how late a batch is from
+# this program's monotonic clock (not the computer's, which may be off or be set meanwhile), and a
+# new run's clock starts elsewhere.
+RUN = uuid.uuid4().hex[:16]
+MAX_STALLS = 20  # interruptions told to the server at most, the newest
 
 
 def battle_reports(value):
@@ -269,6 +274,11 @@ class Uploader:
         self.stop = threading.Event()
         self.error = None
         self.failures, self.failed_at = 0, 0.0  # network failures in a row, since when
+        # stream id -> [[seq, monotonic time it was queued]]: how long a batch's oldest row waited
+        self.queued_at = {}
+        self.queued_lock = threading.Lock()
+        self.stalls = []  # interruptions not yet told to the server: [seconds, failures, unanswered, ended]
+        self.told = False  # the last batch taken told the interruption going on
         self.unanswered = 0  # handshakes unanswered meanwhile (api.ConnectTimeout)
         # Battle reports the server took from this computer, all launches together, and when the last went.
         self.uploaded, self.uploaded_at = queue.totals()
@@ -341,6 +351,8 @@ class Uploader:
             return
         link = self.stream(ends)
         added = self.queue.add_reports(self.roles.get(link[0]), link[0], link[1] + 1, at, channel, reports)
+        if added:
+            self._queued(link[0], range(link[1] + 1, link[1] + added + 1))
         link[1] += added
         if added:
             self.queued.set()
@@ -364,7 +376,47 @@ class Uploader:
         link = self.stream(ends)
         if self.queue.add(link[0], link[1] + 1, row):
             link[1] += 1
+            self._queued(link[0], (link[1],))
             self.queued.set()
+
+    def _queued(self, stream_id, seqs):
+        now = time.monotonic()
+        with self.queued_lock:
+            times = self.queued_at.setdefault(stream_id, [])
+            times.extend([seq, now] for seq in seqs)
+            if len(times) > MAX_QUEUED:
+                del times[:len(times) - MAX_QUEUED]
+
+    def _waited(self, stream_id, start, now):
+        """Seconds the row `start` of the stream has waited (None: queued by an earlier run)."""
+        with self.queued_lock:
+            for seq, at in self.queued_at.get(stream_id, ()):
+                if seq == start:
+                    return now - at
+                if seq > start:
+                    break
+        return None
+
+    def _acknowledged(self, stream_id, cursor):
+        with self.queued_lock:
+            times = self.queued_at.get(stream_id)
+            if times is not None:
+                keep = next((i for i, (seq, _at) in enumerate(times) if seq > cursor), len(times))
+                del times[:keep]
+                if not times:
+                    del self.queued_at[stream_id]
+
+    def _report(self, now):
+        """What the batch says besides its rows: its timing and the interruptions to tell."""
+        extra = {"timing": {"sent": round(now, 3), "run": RUN}}
+        stalls = [{"seconds": round(seconds, 1), "failures": failures, "unanswered": unanswered,
+                   "ago": round(now - ended, 1)} for seconds, failures, unanswered, ended in self.stalls]
+        if self.failures or self.unanswered:  # this one, should it go through now
+            stalls.append({"seconds": round(now - self.failed_at, 1), "failures": self.failures,
+                           "unanswered": self.unanswered, "ago": 0.0})
+        if stalls:
+            extra["stalls"] = stalls[-MAX_STALLS:]
+        return extra
 
     # upload thread ------------------------------------------------------------------
 
@@ -378,10 +430,14 @@ class Uploader:
         if self.moved and hasattr(self.http, "close"):
             self.moved = False
             self.http.close()
+        started = time.monotonic()
+        extra = self._report(started)
+        waited = self._waited(stream_id, start, started)
+        if waited is not None:
+            extra["timing"]["age"] = round(waited, 3)
         try:
-            started = time.monotonic()
             result = self.http.json(PATH, self.tokens, {"stream_id": stream_id, "start_seq": start,
-                                                          "frames": rows}, compress=True,
+                                                          "frames": rows, **extra}, compress=True,
                                     timeout=STALL_AFTER[min(self.failures, len(STALL_AFTER) - 1)])
             took = time.monotonic() - started
             if took > SLOW_BATCH:
@@ -405,6 +461,9 @@ class Uploader:
         if result.get("stream_id") != stream_id or type(result.get("cursor")) is not int:
             raise ValueError("server did not acknowledge the batch")
         self.queue.acknowledge(stream_id, result["cursor"])
+        self._acknowledged(stream_id, result["cursor"])
+        self.stalls = []  # told
+        self.told = bool(self.failures or self.unanswered)  # the one going on too
         self.waiting.pop(stream_id, None)
         self.uploaded, self.uploaded_at = self.queue.totals()
         if type(result.get("role")) is int:
@@ -426,9 +485,13 @@ class Uploader:
                 busy = self.upload_once()
                 last_error = None
                 if self.failures or self.unanswered:
+                    now = time.monotonic()
                     self.log(event="upload_recovered", failures=self.failures, unanswered=self.unanswered,
-                             seconds=round(time.monotonic() - self.failed_at, 1))
+                             seconds=round(now - self.failed_at, 1))
+                    if not self.told:  # the batch that went was not taken (held back, refused): next time
+                        self.stalls = (self.stalls + [[now - self.failed_at, self.failures, self.unanswered, now]])[-MAX_STALLS:]
                     self.failures = self.unanswered = 0
+                self.told = False
             except HTTPError as exc:
                 if exc.code == 401:
                     self.error = RuntimeError("every token was rejected (HTTP 401)")

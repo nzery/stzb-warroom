@@ -21,6 +21,8 @@ from stzb_warroom.frames import Splitter, body
 from stzb_warroom.pcap import tcp_segment
 from stzb_warroom.notify import UNKNOWN, Follower, follow_prompts, follow_roles, render
 from stzb_warroom.runner import lock
+from stzb_warroom import upload
+from stzb_warroom.api import ConnectTimeout
 from stzb_warroom.upload import Queue, Uploader, battle_reports, saved_totals
 
 CLIENT, SERVER = "192.168.1.2", "1.2.3.4"
@@ -226,6 +228,39 @@ class UploadTests(unittest.TestCase):
         self.assertEqual([f["event"] for f in logged], ["upload_failed"] * 3 + ["upload_recovered"])
         self.assertEqual(uploader.failures, 0)
         self.assertIsNone(self.queue.batch())
+
+    def test_each_batch_tells_its_timing_by_the_monotonic_clock(self):
+        uploader = self.uploader(accept(), accept())
+        self.feed(uploader, (server_frame(9, [1]), False))
+        uploader.upload_once()
+        timing = uploader.server.requests[0][2]["timing"]
+        self.assertEqual(timing["run"], upload.RUN)
+        self.assertGreaterEqual(timing["age"], 0)
+        self.assertLess(timing["age"], 5)
+        self.assertNotIn("stalls", uploader.server.requests[0][2])
+        self.assertEqual(uploader.queued_at, {})  # acknowledged: forgotten
+        uploader.queue.add("old", 1, {"frame": "x"})  # queued by an earlier run: no age
+        uploader.upload_once()
+        self.assertNotIn("age", uploader.server.requests[1][2]["timing"])
+
+    def test_the_interruption_goes_with_the_batch_that_gets_through(self):
+        uploader = self.uploader(TimeoutError("timed out"), ConnectTimeout("x"), accept(), accept())
+        uploader.log = lambda **_: None
+        self.feed(uploader, (server_frame(9, [1]), False))
+        sent = []
+        uploader.stop.wait = lambda _delay: uploader.stop.is_set()
+
+        def queued_wait(_delay):
+            if len(uploader.server.requests) >= 3:
+                uploader.stop.set()
+        uploader.queued.wait = queued_wait
+        uploader.run()
+        stalls = uploader.server.requests[2][2]["stalls"]
+        self.assertEqual([(s["failures"], s["unanswered"], s["ago"]) for s in stalls], [(1, 1, 0.0)])
+        self.assertEqual(uploader.stalls, [])  # told
+        self.feed(uploader, (server_frame(9, [2]), False), skip=len(server_frame(9, [1])))
+        uploader.upload_once()
+        self.assertNotIn("stalls", uploader.server.requests[3][2])
 
     def test_an_unanswered_handshake_is_tried_again_at_once_without_raising_the_limit(self):
         from stzb_warroom.api import ConnectTimeout
