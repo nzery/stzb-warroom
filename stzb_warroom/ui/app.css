@@ -355,6 +355,8 @@ input[type=text]:focus, input[type=password]:focus { border-color: var(--gold2);
 .chat-head b { font-size: 13px; font-weight: 400; color: var(--muted); }
 .chat-head small { color: var(--faint); font-size: 12px; }
 .chat-head small.err { color: var(--red); }
+.chat-pinned { padding: 8px 28px; border-bottom: 1px solid #f0e2bd; background: #fff8e6; color: #5c4a1f; font-size: 13px; line-height: 1.5; }
+.chat-pinned[hidden] { display: none; }
 .chat-me { font-size: 13px; color: var(--muted); }
 .chat-me strong { color: var(--gold); font-weight: 600; }
 .chat-who { margin-left: auto; display: flex; align-items: center; gap: 8px; font-size: 12px; color: var(--faint); }

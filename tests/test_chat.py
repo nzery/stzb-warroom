@@ -94,13 +94,14 @@ class ChatTests(unittest.TestCase):
                          {"ring2": "#ffffff"})
 
     def test_the_stream_keeps_messages_and_follows_the_count(self):
-        stream = sse(("hello", {"conn": "c1", "name": "沉稳的赤兔", "online": 3}), ("msg", {"bad": 1}),
+        stream = sse(("hello", {"conn": "c1", "name": "沉稳的赤兔", "online": 3, "pinned": " 有建议说\x07 "}), ("msg", {"bad": 1}),
                      ("msg", {"id": 1, "name": "机灵的白马", "text": "集合", "time": 100}),
                      ("online", {"online": 2}), ("online", {"online": "x"}))
         room = self.chat(Server(stream))
         room.follow_once(TOKEN, threading.Event())
         view = room.view()
         self.assertEqual((view["state"], view["name"], view["online"]), ("online", "沉稳的赤兔", 2))
+        self.assertEqual(view["pinned"], "有建议说")  # the server's note above the messages
         self.assertEqual([(m["name"], m["text"], m["mine"]) for m in view["messages"]], [("机灵的白马", "集合", False)])
         self.assertEqual(room.conn, "c1")
 

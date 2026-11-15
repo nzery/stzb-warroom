@@ -163,6 +163,7 @@ class Chat:
         self.state, self.name, self.online, self.error = "connecting", None, None, None
         self.admin, self.recall_seconds = False, 0  # what the server said in hello
         self.mention_push, self.phone = None, False  # another player's @ pushed too; a phone bound to push to
+        self.pinned = None  # the note the server pins above the room's messages (hello)
         self.conn = None  # this client's stream, named when sending
         self.stream = None  # the response being read, cut when the player switches accounts
         first = token()
@@ -183,7 +184,7 @@ class Chat:
                 return
             if self.key is not None:  # the other account's stream and name are not this one's
                 self.conn, self.name, self.online, self.admin, self.recall_seconds = None, None, None, False, 0
-                self.mention_push, self.phone = None, False
+                self.mention_push, self.phone, self.pinned = None, False, None
             self.key, self.path = key, self.dir / f"chat-{key}.jsonl"
             self.messages.clear()
             self.seq = self.after = 0
@@ -298,7 +299,7 @@ class Chat:
             return {"account": self.key, "state": self.state, "name": self.name, "online": self.online, "error": self.error,
                     "messages": messages, "oldest": self.messages[0]["seq"] if self.messages else None,
                     "admin": self.admin, "recall": self.recall_seconds,
-                    "mention_push": self.mention_push, "phone": self.phone,
+                    "mention_push": self.mention_push, "phone": self.phone, "pinned": self.pinned,
                     # those the page has already: shown recalled in place
                     "recalled": [m["seq"] for m in self.messages if m.get("recalled")]}
 
@@ -493,7 +494,7 @@ class Chat:
                       online=data.get("online") if type(data.get("online")) is int else None, error=None,
                       admin=data.get("admin") is True, recall_seconds=recall if type(recall) is int and recall > 0 else 0,
                       mention_push=data["mention_push"] if isinstance(data.get("mention_push"), bool) else None,
-                      phone=data.get("phone") is True)
+                      phone=data.get("phone") is True, pinned=text_of(data.get("pinned"), 300) or None)
         elif kind == "online" and type(data.get("online")) is int:
             self._set(online=data["online"])
         # `mine`: this account's own, sent from another computer or the console (server 2026-10-31)

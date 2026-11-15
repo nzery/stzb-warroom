@@ -1341,6 +1341,10 @@ function renderChat(d) {
   // theirs: it was a line above the oldest message, scrolled away as the chat opens at the newest).
   const me = c.name ? `我在群里叫 <strong>${esc(c.name)}</strong>` : '';
   if ($('chat-me').innerHTML !== me) $('chat-me').innerHTML = me;
+  // The note the server pins above the room's messages (2026-11-15: how to give feedback).
+  const pinned = c.pinned ? `📌 ${c.pinned}` : '';
+  if ($('chat-pinned').textContent !== pinned) $('chat-pinned').textContent = pinned;
+  $('chat-pinned').hidden = !pinned;
   // Which account speaks (2026-10-31 user: testing with another account without removing one).
   const choices = (c.choices || []).filter((index) => d.tokens[index]);
   const whoKey = JSON.stringify([choices, c.using, choices.map((index) => d.tokens[index].role?.label || d.tokens[index].name || '')]);
