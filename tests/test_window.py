@@ -1007,6 +1007,19 @@ class PageServerTests(unittest.TestCase):
         status, _, data = self.request("GET", "/api/ui", self.cookie())
         self.assertEqual((status, json.loads(data)), (200, {"sound": False}))
 
+    def test_page_files_keep_their_types_whatever_the_computer_says(self):
+        # Windows software can map .js to text/plain in the registry; with nosniff
+        # the page then never ran and stayed on "正在连接…"
+        import mimetypes
+        with unittest.mock.patch.object(mimetypes, "guess_type", return_value=("text/plain", None)):
+            for name, kind in (("app.js", "text/javascript"), ("app.css", "text/css"),
+                               ("icon.ico", "image/x-icon")):
+                status, headers, _ = self.request("GET", "/ui/" + name, self.cookie())
+                self.assertEqual(status, 200, name)
+                self.assertEqual(headers["Content-Type"].split(";")[0], kind)
+            status, headers, _ = self.request("GET", "/", self.cookie())
+            self.assertEqual(headers["Content-Type"].split(";")[0], "text/html")
+
     def test_other_hosts_and_sites_are_refused(self):
         self.assertEqual(self.request("GET", "/", {"Host": "evil.test", **self.cookie()})[0], 403)
         action = json.dumps({"action": "refresh_accounts"})

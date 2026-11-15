@@ -17,7 +17,6 @@ in the notification area shows the window again or quits.
 
 import hmac
 import json
-import mimetypes
 import secrets
 import shutil
 import sys
@@ -28,6 +27,16 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import parse_qs, urlsplit
 from urllib.request import ProxyHandler, Request, build_opener
+
+# Fixed types for the page's own files. Not mimetypes: on Windows it reads the
+# registry, and some installed software maps .js to text/plain, so the script was
+# served as text and (with nosniff) the window stayed on "正在连接…" forever.
+STATIC_TYPES = {
+    ".html": "text/html; charset=utf-8",
+    ".js": "text/javascript; charset=utf-8",
+    ".css": "text/css; charset=utf-8",
+    ".ico": "image/x-icon",
+}
 
 from . import __version__, winsys
 from .app import App
@@ -143,9 +152,7 @@ class Handler(BaseHTTPRequestHandler):
         path = (UI / name).resolve()
         if UI not in path.parents or not path.is_file():
             return self.send(404, {"error": "not found"})
-        kind = mimetypes.guess_type(path.name)[0] or "application/octet-stream"
-        if kind.startswith("text/") or kind.endswith("javascript"):
-            kind += "; charset=utf-8"
+        kind = STATIC_TYPES.get(path.suffix.lower(), "application/octet-stream")
         headers = (("Content-Security-Policy", "default-src 'self'; img-src 'self' data: blob:; "
                     "style-src 'self'; script-src 'self'; connect-src 'self'; frame-ancestors 'none'"),)
         self.send(200, path.read_bytes(), kind, headers)
