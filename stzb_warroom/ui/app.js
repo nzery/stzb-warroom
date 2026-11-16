@@ -673,8 +673,10 @@ function renderAccounts(d) {
     else if (a.state === 'pending') problem = '<div class="account-problem warn">这个 Token 需要管理员审批，审批后才能看到这个账号的通知和推送。可以先联系管理员。</div>';
     else if (a.state === 'no_role') problem = '<div class="account-problem warn">还没收到这个账号的游戏登录。' + LOGIN_STEPS + '。</div>';
     // A new device of this account asks whether it is the player's (the server's words, 2026-11-12).
+    // A new computer joining may be an internet cafe's (the server's `temp`): 是我，临时用.
     if (a.confirm) problem = `<div class="account-problem warn"><b>${esc(a.confirm.title)}</b><br>${esc(a.confirm.text)}
-      <div class="row-actions"><button class="btn primary small" data-action="rejoin_answer" data-index="${index}" data-answer="yes" data-confirm="确定是你本人？这个账号会换到新设备，这台电脑停止上传。">是我</button>
+      <div class="row-actions"><button class="btn primary small" data-action="rejoin_answer" data-index="${index}" data-answer="yes" data-confirm="确定是你本人？">是我</button>
+      ${a.confirm.temp ? `<button class="btn ghost small" data-action="rejoin_answer" data-index="${index}" data-answer="temp" data-confirm="确定是你本人在网吧等别人的电脑上用？那台电脑 12 小时不用就自动失效。">是我，临时用（网吧）</button>` : ''}
       <button class="btn ghost small danger-text" data-action="rejoin_answer" data-index="${index}" data-answer="no">不是我</button></div></div>` + problem;
     else if (a.state === 'offline') problem = `<div class="account-problem warn">暂时连不上服务器（${esc(a.error || '')}），稍后会自动重试。</div>`;
     // The name and state first, what it is next, then what can be done with it (2026-11-07 user:
@@ -682,13 +684,22 @@ function renderAccounts(d) {
     const site = a.state !== 'invalid' && /^https:\/\//.test(a.site || '')
       ? `<a class="btn primary small" href="${esc(a.site)}" target="_blank" rel="noopener">打开网站</a>
         <button class="btn ghost small" data-copy-site="${index}" type="button">复制网站链接</button><span class="muted hint">链接只发给自己人</span>` : '';
+    // The account's computers (the server's words, 2026-11-17): shown once it has more than one.
+    const computers = Array.isArray(a.computers) && a.computers.length > 1
+      ? `<div class="computers"><div class="computers-head">这个账号的电脑</div>${a.computers.map((c) => `<div class="computer">
+          <span><b>${esc(c.label)}${c.this ? '<span class="state ok">这台</span>' : ''}</b><small>${esc(c.text)}</small></span>
+          ${c.stop && !c.this ? `<button class="btn ghost small danger-text" data-action="stop_computer" data-index="${index}" data-device="${esc(c.id)}"
+            data-confirm="停用这台电脑？那台电脑上的本程序马上不能再用这个账号。">停用</button>` : ''}</div>`).join('')}</div>` : '';
+    const temporary = a.computer && a.computer.kind === 'temp'
+      ? '<div class="account-problem warn">这是临时电脑：关掉本程序时自动删除这个账号，12 小时不用也会自动失效。</div>' : '';
     const facts = [role ? role.split(' · ').slice(1).join(' · ') : '还没有角色信息', a.name, `<span class="token-text">${esc(a.token)}</span>`]
       .filter(Boolean).map((f, i, all) => (i === all.length - 1 ? f : esc(f))).join(' · ');
     return `<div class="card account ${a.state === 'invalid' ? 'invalid' : ''}">
       <div class="account-head"><span class="avatar">${esc(title.slice(0, 1))}</span>
         <div class="who"><b>${esc(title)}<span class="state ${cls}">${label}</span></b><small>${facts}</small></div></div>
-      ${problem}
-      <div class="account-actions">${site}${a.removable ? `<button class="btn ghost small danger-text" data-action="remove_token" data-index="${index}" data-confirm="删除这个 Token？">删除账号</button>` : ''}</div></div>`;
+      ${problem}${temporary}${computers}
+      <div class="account-actions">${site}${a.removable ? `<button class="btn ghost small danger-text" data-action="remove_token" data-index="${index}" data-confirm="${
+        a.computer && a.computer.kind !== 'own' ? '在这台电脑上删除这个账号？这台电脑会停用，别的电脑照常。' : '删除这个 Token？'}">删除账号</button>` : ''}</div></div>`;
   }).join('') || '<div class="card empty">还没有账号。在下面添加管理员发给你的 Token。</div>';
 }
 
@@ -1732,11 +1743,13 @@ document.addEventListener('click', async (event) => {
   const action = button.dataset.action;
   const extra = button.dataset.index !== undefined ? { index: Number(button.dataset.index) } : {};
   if (button.dataset.answer) extra.answer = button.dataset.answer;
+  if (button.dataset.device) extra.device = Number(button.dataset.device);
   try {
     const result = await withBusy(button, '', () => act(action, extra));
     if (MESSAGES[action]) toast(MESSAGES[action]);
     if (action === 'join_public') toast((result && result.joined) || '已生成账号');
     if (action === 'rejoin_answer') { toast((result && result.text) || '已回答'); S.accountsKey = ''; }
+    if (action === 'stop_computer') { toast((result && result.text) || '已停用'); S.accountsKey = ''; }
     if (action === 'remove_token' || action === 'join_public') S.accountsKey = '';
   } catch { /* shown */ }
 });

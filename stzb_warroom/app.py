@@ -377,17 +377,75 @@ class App:
         account = self.accounts.get(token) or {}
         return account.get("state") == "invalid" or account.get("removable") is True
 
-    def remove_token(self, index):
+    def other_computer(self, token):
+        """Whether this computer is one the account was added on later (the server's
+        ``computer``): deleting the account here stops it on the server too."""
+        computer = (self.accounts.get(token) or {}).get("computer")
+        return isinstance(computer, dict) and computer.get("kind") in ("pc", "temp")
+
+    def remove_token(self, index, restart=True):
         with self.lock:
             token = self._token(index)
             if not self.removable(token):
                 raise ValueError("这个账号已认领角色，不能删除；有问题请联系管理员")
-            self.tokens.pop(index)
+            stop = self.other_computer(token)
+        if stop:
+            # Its key stops on the server as well: nobody using this computer later can use the account.
+            try:
+                self.server.json("/v1/client/devices", token, {"stop": "this"}, timeout=10)
+            except HTTPError as exc:
+                if exc.code not in (401, 403, 404):  # already gone
+                    self.log(f"服务器没停用这台电脑（HTTP {exc.code}），它会按时自动失效")
+            except (OSError, ValueError) as exc:
+                self.log(f"连不上服务器，没停用这台电脑（{type(exc).__name__}），它会按时自动失效")
+        with self.lock:
+            if token not in self.tokens:
+                return
+            self.tokens.remove(token)
             self.accounts.pop(token, None)
             self.hints.pop(token, None)
             self._save_tokens()
         self.log(f"已删除 Token {mask(token)}")
-        self.restart()
+        if restart:
+            self.restart()
+
+    def forget_temporary(self):
+        """At closing: an internet cafe's account (the server's ``computer`` kind "temp") is deleted
+        here and stopped there, so that the computer's next user cannot use it."""
+        with self.lock:
+            temporary = [token for token in self.tokens
+                         if ((self.accounts.get(token) or {}).get("computer") or {}).get("kind") == "temp"]
+        for token in temporary:
+            with self.lock:
+                if token not in self.tokens:
+                    continue
+                index = self.tokens.index(token)
+            try:
+                self.remove_token(index, restart=False)
+            except ValueError:
+                pass
+
+    def stop_computer(self, index, device):
+        """Another computer of the account stops (one added after this one; the server decides)."""
+        if type(device) is not int:
+            raise ValueError("没有这台电脑")
+        token = self._token(index)
+        try:
+            value = self.server.json("/v1/client/devices", token, {"stop": device}, timeout=20)
+        except HTTPError as exc:
+            try:
+                message = json.loads(exc.read() or b"{}").get("error")
+            except (OSError, ValueError):
+                message = None
+            raise ValueError(message or f"服务器返回 HTTP {exc.code}")
+        except OSError as exc:
+            raise ValueError(f"连不上服务器：{exc}")
+        with self.lock:
+            if token in self.accounts and isinstance(value.get("computers"), list):
+                self.accounts[token]["computers"] = value["computers"]
+        self.log("已停用另一台电脑")
+        self.touch()
+        return {"text": "已停用那台电脑"}
 
     def _token(self, index):
         with self.lock:
@@ -554,7 +612,7 @@ class App:
     def rejoin_answer(self, index, answer):
         """Whether the new device asking for this account (/v1/client/status ``confirm``) is the
         player's: the server replaces this token with it ("yes") or turns it away ("no")."""
-        if answer not in ("yes", "no"):
+        if answer not in ("yes", "temp", "no"):  # "temp": yes, an internet cafe's computer
             raise ValueError("回答无效")
         token = self._token(index)
         try:
@@ -1190,6 +1248,7 @@ class App:
     def shutdown(self):
         # dumpcap is gone within a second; an upload still under way is kept in the queue for next time.
         self.stop(wait=True, timeout=5)
+        self.forget_temporary()
         self.quit.set()
         self.poke.set()
         self.touch()

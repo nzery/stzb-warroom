@@ -246,6 +246,44 @@ class AppTests(unittest.TestCase):
         self.assertEqual(sent, [{"answer": "no"}])
         self.server.json = real
 
+    def test_another_computer_of_the_account_stops_others_and_itself(self):
+        app = self.app(saved=f"{GOOD},{NEW}")
+        real = self.server.json
+        sent = []
+
+        def json_(path, token, body=None, timeout=45):
+            if path == "/v1/client/devices":
+                sent.append((token, body))
+                return {"computers": [{"id": "own"}]}
+            return real(path, token, body, timeout)
+        self.server.json = json_
+        app.accounts[GOOD] = {"state": "ok", "removable": False, "computer": {"kind": "own"}, "computers": []}
+        app.accounts[NEW] = {"state": "ok", "removable": True, "computer": {"kind": "temp"}}
+        with self.assertRaises(ValueError):
+            app.stop_computer(0, "3")
+        self.assertEqual(app.stop_computer(0, 3), {"text": "已停用那台电脑"})
+        self.assertEqual(app.accounts[GOOD]["computers"], [{"id": "own"}])
+        # At closing an internet cafe's account goes, here and on the server; the own one stays.
+        app.forget_temporary()
+        self.assertEqual(app.tokens, [GOOD])
+        self.assertEqual(sent, [(GOOD, {"stop": 3}), (NEW, {"stop": "this"})])
+        self.server.json = real
+
+    def test_a_temporary_answer_is_sent_as_it_is(self):
+        app = self.app(saved=GOOD)
+        real = self.server.json
+        sent = []
+
+        def json_(path, token, body=None, timeout=45):
+            if path == "/v1/client/rejoin":
+                sent.append(body)
+                return {"done": True, "text": "已加为临时电脑"}
+            return real(path, token, body, timeout)
+        self.server.json = json_
+        self.assertEqual(app.rejoin_answer(0, "temp"), {"text": "已加为临时电脑"})
+        self.assertEqual(sent, [{"answer": "temp"}])
+        self.server.json = real
+
     def test_capture_setup_failure_stops_notification_workers(self):
         app = self.app(saved=GOOD)
         session = app.session = {"stop": threading.Event(), "uploader": None, "tokens": app.tokens}

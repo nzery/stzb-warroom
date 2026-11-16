@@ -283,7 +283,7 @@ class Window(ThreadingHTTPServer):
     def act(self, action, body):
         app = self.app
         index = body.get("index")
-        if action in ("remove_token", "chat_use", "bark_bind", "ntfy_bind", "bark_unbind", "bark_test", "bark_ally", "personal", "export_players", "export", "phone", "phone_status", "rejoin_answer") and type(index) is not int:
+        if action in ("remove_token", "chat_use", "bark_bind", "ntfy_bind", "bark_unbind", "bark_test", "bark_ally", "personal", "export_players", "export", "phone", "phone_status", "rejoin_answer", "stop_computer") and type(index) is not int:
             raise ValueError("没有这个账号")
         actions = {
             "start": app.start,
@@ -300,6 +300,7 @@ class Window(ThreadingHTTPServer):
             "bark_unbind": lambda: app.bark_unbind(int(index)),
             "bark_test": lambda: app.bark_test(int(index)),
             "rejoin_answer": lambda: app.rejoin_answer(int(index), body.get("answer")),
+            "stop_computer": lambda: app.stop_computer(int(index), body.get("device")),
             "bark_ally": lambda: app.bark_ally(int(index), body.get("op"), body.get("id"), body.get("name"),
                                                body.get("address"), body.get("kind")),
             "set_setting": lambda: app.set_setting(body.get("name"), body.get("value")),

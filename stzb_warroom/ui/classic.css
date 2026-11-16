@@ -217,6 +217,14 @@ nav { display: grid; gap: 4px; }
 .account-problem { margin: 0 20px 14px; padding: 10px 12px; border-radius: 8px; background: #3a2321; border: 1px solid #7f463e;
   color: #ffd2ca; font-size: 13px; line-height: 1.6; }
 .account-problem.warn { background: #33301f; border-color: #6e5d33; color: #f1dfac; }
+/* The account's computers (one line each, 2026-11-17). */
+.computers { margin: 0 20px 14px; border-top: 1px solid var(--line); padding-top: 8px; }
+.computers-head { font-size: 12px; color: var(--muted); margin-bottom: 4px; }
+.computer { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 4px 0; }
+.computer span { min-width: 0; }
+.computer b { font-size: 13px; font-weight: 600; }
+.computer b .state { margin-left: 6px; }
+.computer small { display: block; color: var(--muted); font-size: 12px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .inline-form { display: flex; gap: 8px; flex: 1; min-width: 0; }
 input[type=text], input[type=password] { flex: 1; min-width: 0; padding: 9px 12px; border-radius: 8px;
   border: 1px solid var(--line2); background: #0d1716; outline: none; transition: border-color .15s, box-shadow .15s; }
