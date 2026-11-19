@@ -12,7 +12,8 @@ computer with the same token) is followed, not undone.
 
 The 玩家信息 page (any player, looked up by name: union, main city, armies) is the server's too
 (``/v1/client/personal/players``): asked for when the player opens it, passed to the window
-as it comes, the name typed, the page's filters and page number passed along unread.
+as it comes, the name typed, the page's filters and page number passed along unread. So is the 推荐 page
+(``/v1/client/personal/recommend``: lineups to build, read when it is opened).
 
 The 群聊 page (chat.py) runs from the start to the end of the program, captured or not, with
 the account chosen on that page, else the first whose role is approved, else the first the
@@ -43,7 +44,7 @@ ACCOUNT_EVERY = 60  # seconds between two looks at the accounts' status
 INVALID_EVERY = 1800  # a token the server rejected (401) is looked at again this rarely, unless asked
 PREFS = "/v1/client/notice-prefs"
 PERSONAL = "/v1/client/personal/"
-PERSONAL_PAGES = ("players",)
+PERSONAL_PAGES = ("players", "recommend")
 PHONE = "/v1/client/phone"
 PHONE_PARTS = ("guide", "node", "rules", "sub")  # what the phone page asks for at a time
 DIAGNOSTICS = "/v1/client/diagnostics"

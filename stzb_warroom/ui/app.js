@@ -70,6 +70,7 @@ const PAGES = {
   notices: ['通知', '服务器发来的通知'],
   chat: ['群聊', '所有开着本程序的人都在这里；消息只存在各自电脑上，没开程序时的消息收不到'],
   players: ['查询', '按名字查询'],
+  recommend: ['推荐', '照本赛季的战报推荐你能组的队伍'],
   prefs: ['提醒设置', '要哪些通知、推送哪些到手机'],
   phone: ['手机', '用手机玩游戏、收推送：一步一步照着做'],
   accounts: ['账号', '这台电脑上报的游戏账号'],
@@ -94,7 +95,7 @@ const S = {
   closeAt: {},  // banners closing by themselves: when (banner)
   seenNotices: store.get('seenNotices', 0), loaded: false, accountsKey: '', prefsKey: '', busy: new Set(),
   // The server's pages (玩家信息), as it gave them: {query, data, error, loading, key} each.
-  personal: { players: { query: {} } },
+  personal: { players: { query: {} }, recommend: { query: {} } },
   personalRole: store.get('personalRole', null),
   // The server's phone page for the chosen account: {data, error, loading, role, key}.
   phone: {},
@@ -108,14 +109,14 @@ const S = {
   openRows: new Set(),  // the notice rows opened to their lineups (noticeTable)
   clock: 0,  // how far the game's clock is ahead of this computer's (gameNow)
 };
-const PERSONAL = new Set(['players']);
+const PERSONAL = new Set(['players', 'recommend']);
 // 查询 before anything was asked (2026-11-14 user: opening the page asks the server nothing): the box and
-// the export buttons as the server last gave them, these until it has.
+// the export buttons as the server last gave them, these until it has. 推荐 has neither and is read when opened.
 const PERSONAL_SEARCH = { key: 'name', placeholder: '输入玩家名字，可以只输一部分' };
 const PERSONAL_EXPORTS = [{ kind: 'players', label: '导出玩家信息' }, { kind: 'attendance', label: '导出考勤表' }];
 const PERSONAL_EMPTY = '输入玩家名字查他的信息和队伍（我方、敌方都能查）。';
 // Whether the page has something asked (a name typed): only then is the server read.
-const personalAsked = (view) => Boolean(String(view.query?.name ?? '').trim());
+const personalAsked = (view) => view === S.personal.recommend || Boolean(String(view.query?.name ?? '').trim());
 // The game's time, epoch seconds: the server's times (an army's landing, a notice's expiry) go by
 // it. This computer's clock as the game's time sync set it (the program's clock.offset), which may
 // be off by itself (2026-11-11 players: countdowns not right).
@@ -805,14 +806,14 @@ function renderPersonal(page) {
   const asked = personalAsked(view);
   const refresh = !asked ? '' : `<button class="btn ghost small" data-prefresh="1"${view.loading ? ' disabled' : ''}>${view.loading ? '<span class="spin"></span>读取中' : `${icon('refresh').replace('<svg', '<svg width="14" height="14"')}刷新`}</button>`;
   // A page with a box to type in (玩家信息: the name); what is typed goes as the server's `search.key`.
-  const search = d?.search || view.search || store.get('personalSearch', null) || PERSONAL_SEARCH;
-  if (d?.search) { view.search = d.search; store.set('personalSearch', { key: d.search.key, placeholder: d.search.placeholder }); }
+  const search = page !== 'players' ? d?.search : d?.search || view.search || store.get('personalSearch', null) || PERSONAL_SEARCH;
+  if (page === 'players' && d?.search) { view.search = d.search; store.set('personalSearch', { key: d.search.key, placeholder: d.search.placeholder }); }
   const box2 = search ? `<form class="inline-form vsearch" data-psearch="${esc(search.key)}"><input type="text" autocomplete="off" spellcheck="false"
     maxlength="40" value="${esc(view.query[search.key] ?? search.value ?? '')}" placeholder="${esc(search.placeholder || '')}">
     <button class="btn primary" type="submit"${view.loading ? ' disabled' : ''}>查询</button></form>` : '';
   // The exports the server offers (导出玩家信息, 导出考勤表): Excel files saved in Downloads.
-  if (Array.isArray(d?.exports)) store.set('personalExports', d.exports);
-  const exports = (Array.isArray(d?.exports) ? d.exports : null) || store.get('personalExports', null) || PERSONAL_EXPORTS;
+  if (page === 'players' && Array.isArray(d?.exports)) store.set('personalExports', d.exports);
+  const exports = page !== 'players' ? [] : (Array.isArray(d?.exports) ? d.exports : null) || store.get('personalExports', null) || PERSONAL_EXPORTS;
   const exportBtn = exports.map((e) => `<button class="btn small" data-pexport="${esc(e.kind)}"${S.exporting ? ' disabled' : ''}>${
     S.exporting === e.kind ? '<span class="spin"></span>正在导出' : esc(e.label)}</button>`).join('');
   const toolbar = `<div class="vtoolbar"><div class="vfilters">${box2}${who}${filters}</div><div class="vactions">${refresh}${exportBtn}</div></div>`;
