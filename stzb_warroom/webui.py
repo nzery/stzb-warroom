@@ -36,6 +36,7 @@ STATIC_TYPES = {
     ".js": "text/javascript; charset=utf-8",
     ".css": "text/css; charset=utf-8",
     ".ico": "image/x-icon",
+    ".webp": "image/webp",
 }
 
 from . import __version__, winsys

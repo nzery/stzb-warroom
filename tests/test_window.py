@@ -1051,7 +1051,7 @@ class PageServerTests(unittest.TestCase):
         import mimetypes
         with unittest.mock.patch.object(mimetypes, "guess_type", return_value=("text/plain", None)):
             for name, kind in (("app.js", "text/javascript"), ("app.css", "text/css"),
-                               ("icon.ico", "image/x-icon")):
+                               ("icon.ico", "image/x-icon"), ("phone/sr-scan.webp", "image/webp")):
                 status, headers, _ = self.request("GET", "/ui/" + name, self.cookie())
                 self.assertEqual(status, 200, name)
                 self.assertEqual(headers["Content-Type"].split(";")[0], kind)

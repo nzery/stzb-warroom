@@ -517,6 +517,11 @@ input[type=text]:focus, input[type=password]:focus { border-color: var(--gold2);
   color: var(--bg); font-size: 13px; }
 .phone-step-text > p { margin: 0 0 12px; line-height: 1.8; }
 .phone-step-text .row-actions { margin-top: 10px; align-items: center; }
+/* the step's screenshots (red boxes on what to tap), small; a click shows one over the window */
+.phone-pics { display: flex; flex-wrap: wrap; align-items: flex-end; gap: 12px; margin: 4px 0 12px; }
+.phone-pics img { display: block; height: 220px; width: auto; border-radius: 8px; border: 1px solid var(--line); cursor: zoom-in; background: #fff; }
+.phone-pics .small-note { flex-basis: 100%; margin: 0; }
+@container (max-height: 300px) { .phone-pics img { height: 150px; } }
 .phone-check { font-weight: 600; }
 .phone-check.ok { color: var(--green); }
 .phone-check.bad { color: var(--red); }

@@ -947,8 +947,8 @@ function pushBlock(a, index, os) {
   if (a.bark.bound) {
     const phone = a.bark.kind === 'ntfy' ? '安卓手机' : 'iPhone';
     const ntfy = a.bark.kind === 'ntfy' ? a.bark.android : null;
-    const sub = ntfy ? `<p class="phone-sub">ntfy 里扫左边的码订阅；不能扫码时手动添加：服务器 <code>${esc(ntfy.server)}</code> ${copyLink(ntfy.server, '复制')}，
-      主题 <code>${esc(ntfy.topic)}</code> ${copyLink(ntfy.topic, '复制')}</p>` : '';
+    const sub = ntfy ? `<p class="phone-sub">在 ntfy 里点右下角“+”手动添加：主题 <code>${esc(ntfy.topic)}</code> ${copyLink(ntfy.topic, '复制')}，
+      勾选“使用其他服务器”填 <code>${esc(ntfy.server)}</code> ${copyLink(ntfy.server, '复制')}</p>` : '';
     return `${sub}<div class="row-actions"><span class="token-text">已绑定 ${esc(a.bark.address)}</span></div>
       <div class="row-actions"><button class="btn ghost small" data-action="bark_test" data-index="${index}">发测试推送</button>
       <button class="btn ghost small" data-action="bark_unbind" data-index="${index}" data-confirm="解绑后这台${phone}不再收到推送，确定吗？">解绑</button></div>
@@ -960,11 +960,12 @@ function pushBlock(a, index, os) {
       <button class="btn primary" type="submit">绑定</button></form>`;
 }
 // An ally's phones (no computer of their own): the server's texts, one line each, a form to add one.
-// The QR code of an Android one is what the last add / show gave (the status each minute has none).
+// An Android one is subscribed by hand in ntfy: its server and topic (no QR code: 2026-11-22 players,
+// ntfy has nowhere to scan one).
 function allyCard(a, index) {
   const bark = a.bark;
   if (!bark || !bark.ally_help) {
-    return { media: '', html: '<p class="muted">服务器还不支持盟友手机，请稍后再试。</p>' };
+    return { html: '<p class="muted">服务器还不支持盟友手机，请稍后再试。</p>' };
   }
   const allies = bark.allies || [];
   const help = bark.ally_help;
@@ -978,10 +979,9 @@ function allyCard(a, index) {
       <span class="ally-actions">${x.kind === 'ntfy' ? `<button class="link" data-ally-op="show" data-ally-id="${esc(x.id)}">订阅方法</button>` : ''}
         <button class="link" data-ally-op="test" data-ally-id="${esc(x.id)}">发测试推送</button>
         <button class="link" data-ally-op="remove" data-ally-id="${esc(x.id)}" data-confirm="删掉后这台手机不再收到你的推送，确定吗？">删除</button></span></div>`).join('');
-  let media = '', how = '';
+  let how = '';
   if (shown) {
     const n = S.allyShown.android || shown.android || {};
-    if (n.qr) media = `<img class="qr" alt="盟友的 ntfy 订阅二维码" src="${svgImage(n.qr)}">`;
     how = `<div class="ally-how"><b>${esc(shown.name || '这台安卓手机')}的订阅方法</b><ol>${(n.steps || []).map((t) => `<li>${esc(t)}</li>`).join('')}</ol>
       <p class="phone-sub">服务器 <code>${esc(n.server || '')}</code> ${copyLink(n.server || '', '复制')}，主题 <code>${esc(n.topic || '')}</code> ${copyLink(n.topic || '', '复制')}</p>
       ${n.note ? `<p class="small-note muted">${esc(n.note)}</p>` : ''}</div>`;
@@ -994,10 +994,20 @@ function allyCard(a, index) {
         <button class="btn" type="button" data-ally-ntfy="${index}">添加安卓手机</button></form>
       <p class="small-note muted">${esc(help.bark || '')}<br>${esc(help.ntfy || '')}</p>`;
   return {
-    media,
     html: `<h3>盟友手机（${allies.length}/${max}）</h3><p>${esc(help.text || '')}</p>
       ${rows ? `<div class="ally-list">${rows}</div>` : ''}${how}${form}`,
   };
+}
+
+// The step's screenshots (the server's `pics`), the window's own files: only the names it has, so
+// nothing the server sends becomes an address. Each marks in red what to tap; a click shows it big.
+const PHONE_PICS = new Set(['bark-home', 'bark-copy', 'sr-scan', 'sr-config', 'sr-connect', 'ntfy-add', 'ntfy-subscribe',
+  'ntfy-autostart', 'ntfy-battery', 'v2-scan', 'v2-start']);
+function phonePics(step) {
+  const names = (Array.isArray(step.pics) ? step.pics : []).filter((name) => PHONE_PICS.has(name));
+  if (!names.length) return '';
+  return `<div class="phone-pics">${names.map((name) => `<img src="/ui/phone/${name}.webp" alt="图示" title="点击看大图" data-phone-pic="/ui/phone/${name}.webp">`).join('')}
+    <p class="small-note muted">照红框点，图上的数字是先后顺序；点图看大图。</p></div>`;
 }
 
 // Which step of the phone's guide the player is on, per phone (kept, so the page opens where they were).
@@ -1093,8 +1103,7 @@ function renderPhone(d) {
   let body;
   if (os === 'ally') {
     const card = allyCard(account.a, account.index);
-    body = `<div class="card phone-step${card.media ? '' : ' single'}"><div class="phone-step-body">
-      ${card.media ? `<div class="phone-step-media">${card.media}</div>` : ''}<div class="phone-step-text">${card.html}</div></div></div>`;
+    body = `<div class="card phone-step single"><div class="phone-step-body"><div class="phone-step-text">${card.html}</div></div></div>`;
   } else if (view.error) body = banner('warn', 'info', `${esc(view.error)}`, '<button class="btn" data-phone-retry="1">重试</button>');
   else if (view.problem) body = banner('warn', 'info', esc(view.problem));
   else if (!view.guide) body = '<div class="card empty">正在读取…</div>';
@@ -1108,15 +1117,11 @@ function renderPhone(d) {
         : part ? '<div class="qr-none">服务器没给二维码，复制下面的地址到手机上导入</div>' : '<div class="qr-none"><span class="spin dark"></span></div>';
       extra = part ? `<p class="phone-links">${copyLink(PHONE_QR[qrPart].link(part), PHONE_QR[qrPart].copy)}（手机上扫不了码时用）${PHONE_QR[qrPart].keyed
         ? '<span class="sep">·</span>二维码外泄了？<button class="link" data-phone-reset="1">换新的</button>' : ''}</p>` : '';
-    } else if (step.show === 'push') {
-      const ntfy = account.a.bark?.bound && account.a.bark.kind === 'ntfy' ? account.a.bark.android : null;
-      if (ntfy?.qr) media = `<img class="qr" alt="ntfy 订阅二维码" src="${svgImage(ntfy.qr)}">`;
-      extra = pushBlock(account.a, account.index, os);
-    }
+    } else if (step.show === 'push') extra = pushBlock(account.a, account.index, os);
     body = `<div class="card phone-step${media ? '' : ' single'}">
       <div class="phone-step-body">${media ? `<div class="phone-step-media">${media}</div>` : ''}
         <div class="phone-step-text"><h3><span class="step-no">${at + 1}</span>${esc(step.title)}</h3><p>${esc(step.text)}</p>
-          ${phoneCheck(step, account, pipes)}${extra}</div></div>
+          ${phoneCheck(step, account, pipes)}${extra}${phonePics(step)}</div></div>
       <div class="phone-step-nav"><button class="btn ghost" data-phone-step="${at - 1}"${at ? '' : ' disabled'}>上一步</button>
         <span class="muted">第 ${at + 1} / ${steps.length} 步</span>
         <button class="btn primary${at < steps.length - 1 ? '' : ' invisible'}" data-phone-step="${at + 1}">下一步</button></div></div>`;
@@ -1145,7 +1150,7 @@ async function allyAdd(button, payload) {
     const added = (reply && reply.allies || []).find((x) => !before.has(x.id));
     allyShow(account, reply, added && added.id);
     document.querySelectorAll('#phone-box [data-ally-name], #phone-box [data-ally-address]').forEach((input) => { input.value = ''; });
-    toast(payload.kind === 'ntfy' ? '已添加，让盟友用 ntfy 扫码或手动订阅' : '已添加，盟友手机应该收到了一条测试通知');
+    toast(payload.kind === 'ntfy' ? '已添加，把主题和服务器地址发给盟友，在 ntfy 里手动订阅' : '已添加，盟友手机应该收到了一条测试通知');
     renderPhone(S.data);
   } catch { /* act said why */ }
 }
@@ -1159,6 +1164,8 @@ async function phoneClick(event) {
     catch { toast('复制失败', true); }
     return true;
   }
+  const pic = event.target.closest('[data-phone-pic]');
+  if (pic) { chatViewer(pic.dataset.phonePic); return true; }
   const stepButton = event.target.closest('[data-phone-step]');
   if (stepButton && !stepButton.disabled) {
     S.phoneStep = { ...(S.phoneStep || {}), [S.phoneOs]: Math.max(0, Number(stepButton.dataset.phoneStep)) };

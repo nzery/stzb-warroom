@@ -106,7 +106,7 @@ async function main() {
       rules: { link: 'https://api.example/v1/phone/r.conf', qr: '<svg xmlns="http://www.w3.org/2000/svg"></svg>', steps: [] },
       sub: { sub: 'https://api.example/v1/phone/sub?k=<x>', qr: '<svg xmlns="http://www.w3.org/2000/svg"></svg>', steps: [] } },
       guide: { iphone: [{ title: '<通知>', text: 'Bark', show: 'push', check: 'push' }, { title: '装', text: '装好', show: null, check: null },
-                        { title: '扫节点', text: '首页', show: 'node', check: null }, { title: '扫规则', text: '配置页', show: 'rules', check: null },
+                        { title: '扫节点', text: '首页', show: 'node', check: null, pics: ['sr-scan', '../x" onerror="alert(1)'] }, { title: '扫规则', text: '配置页', show: 'rules', check: null },
                         { title: '打开连接', text: '测速', show: 'exit', check: 'connect' }],
                android: [{ title: '通知', text: 'ntfy', show: 'push', check: 'push' }, { title: '扫订阅', text: 'v2rayNG', show: 'sub', check: null },
                          { title: '启动', text: '进游戏', show: 'exit', check: 'connect' }] } };
@@ -125,6 +125,8 @@ async function main() {
   assert.ok(phone.includes('扫节点') && phone.includes('alt="节点的二维码"') && (phone.match(/<img class="qr"/g) || []).length === 1, phone);
   assert.ok(phone.includes('src="data:image/svg+xml;base64,') && !phone.includes('<svg xmlns') && !phone.includes('<script>'), 'the server\'s SVG is never inlined');
   assert.ok(phone.includes('data-copy-text="vless://k@relay.example:443?type=ws#x"') && phone.includes('data-phone-reset'));
+  // the step's screenshots: the window's own files, only the names it has
+  assert.ok(phone.includes('src="/ui/phone/sr-scan.webp"') && (phone.match(/data-phone-pic=/g) || []).length === 1 && !phone.includes('onerror'), phone);
   phone = at(3);
   assert.ok(phone.includes('alt="规则的二维码"') && !phone.includes('节点的二维码'), phone);
   assert.ok(!phone.includes('data-phone-reset'), 'the rules are the same for everyone: nothing to reset');
@@ -146,7 +148,12 @@ async function main() {
   assert.ok(phone.includes('data-copy-text="https://api.example/v1/phone/sub?k=&lt;x&gt;"') && phone.includes('data-phone-reset'), phone);
   phone = at(9);
   assert.ok(phone.includes('第 3 / 3 步'), 'a step past the end is the last');
-  // an ally's phones: the server's texts, names escaped, the QR code only of the one shown
+  // a bound Android phone: the topic and server to add by hand, no QR code (an older server still sends one)
+  vm.runInContext(`S.data.tokens.forEach((t) => { t.bark = { bound: true, kind: 'ntfy', address: 'https://ntfy.example/abcd…',
+    android: { server: 'https://ntfy.example', topic: 'abcd1234', qr: '<svg xmlns="http://www.w3.org/2000/svg"></svg>' } }; });`, context);
+  phone = at(0);
+  assert.ok(!phone.includes('<img') && phone.includes('data-copy-text="abcd1234"') && phone.includes('右下角“+”'), phone);
+  // an ally's phones: the server's texts, names escaped; an Android one subscribed by hand (no QR code)
   vm.runInContext(`S.data.tokens.forEach((t) => { t.bark = { bound: false, ally_max: 3,
       ally_help: { text: '帮<盟友>', bark: 'iPhone：', ntfy: '安卓：' },
       allies: [{ id: 'a1', name: '<b>老王</b>', kind: 'bark', address: 'https://api.day.app/ABCD…', error: 'down' },
@@ -158,7 +165,7 @@ async function main() {
   assert.ok(phone.includes('data-ally-form') && phone.includes('data-ally-ntfy') && !phone.includes('<img') && !phone.includes('ally-how'), phone);
   vm.runInContext(`S.allyShown = { role: 7, id: 'a2', android: { ...S.data.tokens[0].bark.allies[1].android, qr: '<svg xmlns="http://www.w3.org/2000/svg"></svg>' } }; renderPhone(S.data);`, context);
   phone = nodes.get('phone-box').innerHTML;
-  assert.ok(phone.includes('alt="盟友的 ntfy 订阅二维码"') && phone.includes('装 &lt;ntfy&gt;') && phone.includes('data-copy-text="abcd1234"'), phone);
+  assert.ok(!phone.includes('<img') && phone.includes('装 &lt;ntfy&gt;') && phone.includes('data-copy-text="abcd1234"'), phone);
   vm.runInContext(`S.data.tokens.forEach((t) => { t.bark.allies.push({ id: 'a3', name: '三', kind: 'bark', address: 'x' }); }); renderPhone(S.data);`, context);
   assert.ok(!nodes.get('phone-box').innerHTML.includes('data-ally-form'), 'three at most: no form');
   vm.runInContext(`S.phoneOs = 'android'; S.allyShown = null; S.data.tokens.forEach((t) => { t.bark = { bound: false }; }); renderPhone(S.data);`, context);
