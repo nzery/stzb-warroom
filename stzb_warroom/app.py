@@ -780,7 +780,8 @@ class App:
 
     def _phone_status(self):
         session = self.session
-        exits = (session or {}).get("exits") or []
+        exits = list((session or {}).get("exits") or [])
+        exits.extend(running for _, running in ((session or {}).get("node_exits") or {}).values())
         uploader = (session or {}).get("uploader")
         return {"enabled": self.settings["phone_exit"], "running": session is not None,
                 "blind": bool(uploader and time.monotonic() - uploader.heard_at >= BLIND_AFTER
@@ -800,7 +801,7 @@ class App:
 
         def run():
             while live():
-                problem = "服务器还没给中转（账号要先审批通过）"
+                problem = "暂时没有可用的手机线路"
                 try:
                     wanted = {}
                     origins = relay.relays_of(self.server, session["tokens"], wanted)
@@ -817,7 +818,7 @@ class App:
                         if not exits:
                             self.log("手机经本机连接游戏：已开启")
                 # Asking takes up to 20 s a token: this run may have been replaced meanwhile.
-                if not origins and not exits and live():
+                if not origins and not exits and not wanted and live():
                     self.log(f"手机经本机连接游戏：{problem}，稍后再试", "warn")
                 self.touch()
                 session["stop"].wait(30 if session.get("node_exits") else RELAYS_REFRESH if session.get("exits") else RELAYS_EVERY)

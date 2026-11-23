@@ -955,14 +955,14 @@ const copyLink = (text, label) => `<button class="link" data-copy-text="${esc(te
 
 // Problems of the exits, at the top of the page (nothing while all is well).
 const EXIT_PROBLEMS = {
-  refused: '中转不接受这台电脑的账号：账号可能还没审批通过，或已被停用。',
+  refused: '这台电脑暂时无法接入手机线路，请稍后再试。',
   busy: '另一台电脑正在用这个账号转发手机的游戏连接：手机会经那台电脑出去。要用这台，先关掉那台电脑上的本程序。',
   unreachable: '连不上中转，正在重试；手机暂时连不上游戏。',
 };
 
 function phoneProblems(p) {
   if (!p.running) return [banner('warn', 'info', '上报没有运行，手机现在连不上游戏；到“概览”看原因。')];
-  if (p.waiting) return [banner('info', 'info', '正在向服务器要中转……账号审批通过后才有。')];
+  if (p.waiting) return [banner('info', 'info', '正在等待手机线路。')];
   return p.exits.filter((e) => EXIT_PROBLEMS[e.state]).map((e) => banner('warn', 'info', esc(EXIT_PROBLEMS[e.state])));
 }
 
@@ -1110,7 +1110,7 @@ function renderPhone(d) {
   const box = $('phone-box');
   if (!account) {
     view.key = key;
-    box.innerHTML = `<div class="card empty">${(d.tokens || []).length ? '还没有能用手机玩的账号：Token 审批通过（先在这台电脑上登录一次游戏）后就有。' : '先到“账号”添加账号。'}</div>`;
+    box.innerHTML = `<div class="card empty">${(d.tokens || []).length ? '暂无可用账号，请到“账号”页查看角色和账号状态。' : '先到“账号”添加账号。'}</div>`;
     return;
   }
   if (view.role !== account.a.role.id || (!view.guide && view.problem === undefined && !view.error && !view.loading)) { loadPhone(); return; }

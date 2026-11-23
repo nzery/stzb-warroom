@@ -496,6 +496,15 @@ class AppTests(unittest.TestCase):
             self.assertEqual(app._phone_status()["blind"], blind)
         app.session = None
 
+    def test_phone_status_with_only_a_node_exit(self):
+        app = self.app(saved=GOOD)
+        running = unittest.mock.Mock(state="online", since=1.0, open_pipes=2)
+        app.session = {"exits": [], "node_exits": {"https://r.example": ([], running)}}
+        status = app._phone_status()
+        self.assertFalse(status["waiting"])
+        self.assertEqual(status["exits"], [{"state": "online", "since": 1.0, "pipes": 2}])
+        app.session = None
+
     def test_a_game_lost_after_the_network_changed_shows(self):
         app = self.app(saved=GOOD)
         self.assertFalse(app.snapshot()["capture"]["lost"])  # not capturing
@@ -599,7 +608,7 @@ class AppTests(unittest.TestCase):
                 thread.join(5)
         return [line["text"] for line in app.logs if "手机经本机" in line["text"]]
 
-    def test_the_exits_tell_no_answer_from_not_approved(self):
+    def test_the_exits_tell_no_answer_from_no_routes(self):
         def no_answer(*_):
             raise ConnectionError("timed out")
 
@@ -612,7 +621,7 @@ class AppTests(unittest.TestCase):
         app = self.app(saved=GOOD)
         texts = self.ask_relays_once(app, {"stop": threading.Event(), "tokens": [GOOD], "exits": []}, lambda *_: [])
         self.assertEqual(len(texts), 1)
-        self.assertIn("审批", texts[0])
+        self.assertIn("暂时没有可用的手机线路", texts[0])
 
     def test_a_stopped_session_says_nothing_of_its_late_answer(self):
         app = self.app(saved=GOOD)

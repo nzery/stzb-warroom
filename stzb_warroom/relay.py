@@ -698,7 +698,7 @@ def run(server, tokens, stop, log=None, origins=None):
     except ConnectionError as exc:
         raise SystemExit(f"连不上服务器：{exc}")
     if not origins and not scoped:
-        raise SystemExit("服务器没有给出中转：Token 要先审批通过")
+        raise SystemExit("暂时没有可用的手机线路")
     exits = start(origins, tokens, log=log)
     try:
         if explicit:
