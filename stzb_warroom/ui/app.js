@@ -956,6 +956,7 @@ const copyLink = (text, label) => `<button class="link" data-copy-text="${esc(te
 // Problems of the exits, at the top of the page (nothing while all is well).
 const EXIT_PROBLEMS = {
   refused: '这台电脑暂时无法接入手机线路，请稍后再试。',
+  busy: '另一台电脑正在用这个账号转发手机的游戏连接：手机会经那台电脑出去。要用这台，先关掉那台电脑上的本程序。',
   unreachable: '连不上中转，正在重试；手机暂时连不上游戏。',
 };
 
