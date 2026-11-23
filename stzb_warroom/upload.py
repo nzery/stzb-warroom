@@ -20,6 +20,7 @@ from pathlib import Path
 from urllib.error import HTTPError
 
 from .api import ConnectTimeout
+from . import privacy
 from .frames import Splitter, body, message_id
 
 PATH = "/v2/capture/frames"
@@ -90,6 +91,8 @@ class Queue:
         # rows (2026-11-13 user), and keeps the count across launches in meta.
         if "reports" not in {column[1] for column in self.db.execute("PRAGMA table_info(rows)")}:
             self.db.execute("ALTER TABLE rows ADD COLUMN reports INTEGER NOT NULL DEFAULT 0")
+        if "sanitized" not in {column[1] for column in self.db.execute("PRAGMA table_info(rows)")}:
+            self.db.execute("ALTER TABLE rows ADD COLUMN sanitized INTEGER NOT NULL DEFAULT 0")
         self.db.commit()
         self.lock = threading.Lock()
         self.full_logged = 0
@@ -114,7 +117,7 @@ class Queue:
     def add(self, stream_id, seq, row):
         with self.lock:
             if self._room(1):
-                self.db.execute("INSERT INTO rows (stream_id, seq, row) VALUES (?,?,?)",
+                self.db.execute("INSERT INTO rows (stream_id, seq, row, sanitized) VALUES (?,?,?,1)",
                                 (stream_id, seq, json.dumps(row)))
                 self.db.commit()
                 return True
@@ -175,13 +178,17 @@ class Queue:
                 first = self.db.execute("SELECT stream_id FROM rows ORDER BY rowid LIMIT 1").fetchone()
             if first is None:
                 return None
-            rows = self.db.execute("SELECT seq,row FROM rows WHERE stream_id=? ORDER BY seq LIMIT ?",
+            rows = self.db.execute("SELECT seq,row,sanitized FROM rows WHERE stream_id=? ORDER BY seq LIMIT ?",
                                    (first[0], MAX_ROWS)).fetchall()
         start, items, size = rows[0][0], [], 0
-        for seq, text in rows:
+        for seq, text, sanitized in rows:
             if seq != start + len(items) or (items and size + len(text) > MAX_BODY):
                 break
-            items.append(json.loads(text))
+            row = json.loads(text)
+            if not sanitized and "frame" in row and (row["client"] or row["message_id"] in privacy.FILTER_SERVER):
+                raw = base64.b64decode(row["frame"]) + bytes(row.get("pad", 0))
+                row = frame_row(row["captured_at"], row["client"], raw)
+            items.append(row)
             size += len(text)
         return first[0], start, items
 
@@ -240,9 +247,11 @@ def saved_totals(path):
         return 0, None
 
 
-def frame_row(captured_at, client, frame):
+def frame_row(captured_at, client, frame, schema=None):
+    command = message_id(frame, client)
+    frame = privacy.for_upload(frame, client, schema if schema is not None else {})
     trimmed = frame.rstrip(b"\0")  # some messages pad their body with NULs to a buffer size
-    row = {"captured_at": captured_at, "client": client, "message_id": message_id(frame, client),
+    row = {"captured_at": captured_at, "client": client, "message_id": command,
            "frame": base64.b64encode(trimmed).decode("ascii")}
     if len(trimmed) < len(frame):
         row["pad"] = len(frame) - len(trimmed)
@@ -265,6 +274,7 @@ class Uploader:
             self.log(event="queue_reset", reason="server or tokens changed", rows=dropped)
         self.splitter = Splitter()
         self.links = {}  # connection -> [stream id, last seq, last seen]
+        self.columns = {}  # sensitive column positions, from each connection's own login
         self.roles = {}  # stream id -> role, as the server said
         self.dead = set()  # streams the server refused: their connection starts a new one
         self.drop = {"client": set(), "server": set()}  # message ids the server does not want
@@ -329,6 +339,7 @@ class Uploader:
             for ends, link in list(self.links.items()):
                 if now - link[2] > LINK_IDLE:
                     del self.links[ends]
+                    self.columns.pop(ends, None)
                     self.splitter.forget(ends)
 
     def game_clock(self, at, frame):
@@ -343,7 +354,7 @@ class Uploader:
     def add_frame(self, ends, at, client, frame):
         channel = None if client else BATTLE_LISTS.get(message_id(frame, client))
         if channel is None or message_id(frame, client) in self.whole:
-            self.add(ends, frame_row(at, client, frame))
+            self.add(ends, frame_row(at, client, frame, self.columns.setdefault(ends, {})))
         if channel is None:
             return
         reports = battle_reports(body(frame, client)[1])

@@ -169,6 +169,49 @@ class UploadTests(unittest.TestCase):
         self.assertEqual([(row["channel"], [r["battle_id"] for r in row["reports"]]) for row in rows],
                          [("personal", [5, 6]), ("alliance", [5, 6])])
 
+    def test_credentials_are_removed_before_queueing_and_on_old_queue_retries(self):
+        uploader = self.uploader(accept())
+        digest = hashlib.sha256(b"session:" + SESSION).digest()
+        for seq, (command, client) in enumerate([(99991, True), (98888, False), (90008, True),
+                                                  (1436, False), (3928, False), (7, True)], 1):
+            raw = (client_frame if client else server_frame)(command, ["private"])
+            row = upload.frame_row(1, client, raw)
+            clean = base64.b64decode(row["frame"]) + bytes(row.get("pad", 0))
+            if client:
+                self.assertEqual(clean[4:44], b"STW-H256" + digest)
+            if command == 7:
+                self.assertEqual(body(clean, True)[1], ["private"])
+            else:
+                self.assertEqual(len(clean), 57 if client else 12)
+            self.assertEqual(int.from_bytes(clean[:4], "big"), len(clean) - 4)
+            self.queue.add("a", seq, row)
+            legacy = dict(row, frame=base64.b64encode(raw).decode(), pad=0)
+            with self.queue.db:
+                self.queue.db.execute("INSERT INTO rows(stream_id,seq,row) VALUES(?,?,?)",
+                                      ("b", seq, json.dumps(legacy)))
+        current = self.queue.batch()[2]
+        self.queue.acknowledge("a", 6)
+        self.assertTrue(uploader.upload_once())
+        self.assertEqual(uploader.server.requests[0][2]["frames"], current)
+
+    def test_snapshot_and_incremental_updates_remove_credentials_by_column(self):
+        schema = {}
+        def roundtrip(command, value):
+            row = upload.frame_row(1, False, server_frame(command, value, encoding=3), schema)
+            return body(base64.b64decode(row["frame"]) + bytes(row.get("pad", 0)), False)[1]
+
+        table = "Tb_user_stuff"
+        update = [[2, table, [0, 7, 2, "private", 1, 42]], [1, table, [8, 41, "private"]]]
+        self.assertEqual(roundtrip(90005, update), [])
+        snapshot = ["Tb_user_stuff,userid,now_run_server_id,safe_lock_password",
+                    [table, [[7, 42, "private"]]]]
+        value = [1, [7], 0, 0, [snapshot]]
+        self.assertEqual(roundtrip(99991, value)[4][0][1][1], [[7, 42, None]])
+        self.assertEqual(roundtrip(90005, update),
+                         [[2, table, [0, 7, 2, None, 1, 42]], [1, table, [8, 41, None]]])
+        self.assertIsNone(roundtrip(99991, []))
+        self.assertEqual(roundtrip(90005, update), [])
+
     def test_a_refused_stream_is_dropped_and_its_connection_starts_another(self):
         uploader = self.uploader(refuse(409), accept())
         self.feed(uploader, (server_frame(9, [1]), False))
