@@ -963,7 +963,8 @@ const EXIT_PROBLEMS = {
 function phoneProblems(p) {
   if (!p.running) return [banner('warn', 'info', '上报没有运行，手机现在连不上游戏；到“概览”看原因。')];
   if (p.waiting) return [banner('info', 'info', '正在等待手机线路。')];
-  return p.exits.filter((e) => EXIT_PROBLEMS[e.state]).map((e) => banner('warn', 'info', esc(EXIT_PROBLEMS[e.state])));
+  const messages = new Set(p.exits.map((e) => EXIT_PROBLEMS[e.state]).filter(Boolean));
+  return Array.from(messages, (message) => banner('warn', 'info', esc(message)));
 }
 
 // The push binding of one account (Bark on an iPhone, ntfy on Android), under the step's text.
