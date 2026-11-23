@@ -899,7 +899,7 @@ function takePhone(view, data) {
 
 // `part`: 'guide' (the steps) or a step's QR code ('node', 'rules', 'sub'); `reset` a new key first
 // (the whole page comes back).
-async function loadPhone(part = 'guide', reset = false) {
+async function loadPhone(part = 'guide', reset = false, manual = false) {
   const account = personalAccount();
   if (!account) { S.phone = {}; renderPhone(S.data); return; }
   const role = account.a.role.id;
@@ -907,24 +907,44 @@ async function loadPhone(part = 'guide', reset = false) {
   const view = S.phone;
   const call = ++phoneCall;
   view.loading = part;
+  view.feedback = null;
+  if (manual) view.progress = reset ? '正在更换钥匙…' : '正在刷新二维码…';
+  if (reset) {
+    view.revoke = false;
+    delete view.parts?.node;
+    delete view.parts?.sub;
+  }
   renderPhone(S.data);
+  let rotated = false;
   try {
-    const data = await act('phone', reset ? { index: account.index, reset } : { index: account.index, part }, { quiet: true });
+    if (reset) {
+      const reply = await act('phone', { index: account.index, reset: true }, { quiet: true });
+      if (call !== phoneCall || S.phone !== view) return;
+      if (reply.problem) throw new Error(reply.problem);
+      takePhone(view, { guide: reply.guide, problem: null });
+      rotated = true;
+      view.progress = '已更换钥匙，正在读取新二维码…';
+      renderPhone(S.data);
+    }
+    const data = await act('phone', { index: account.index, part }, { quiet: true });
     if (call !== phoneCall || S.phone !== view) return;
-    if (reset) view.parts = {};
     takePhone(view, data);
     if (data.selection && view.parts[part]) view.parts[part].selection = data.selection;
-    if (reset) { delete view.parts.node; delete view.parts.sub; }
+    if (manual && !data.problem) {
+      if (!view.parts[part]) throw new Error('暂时取不到二维码，请重试');
+      view.feedback = { part, text: reset ? '新二维码已生成，请在手机上重新导入。' : '二维码已刷新。' };
+    }
     view.error = null;
-    if (reset) toast('已换新的二维码：手机要删掉旧的、重新扫码，旧的 30 秒内失效');
   } catch (error) {
     if (call === phoneCall && S.phone === view) {
-      if (view.parts?.[part]) toast(error.message || String(error));
-      else view.error = error.message || String(error);
+      const message = (rotated ? '钥匙已更换，获取新二维码失败：' : '') + (error.message || String(error));
+      if (view.parts?.[part]) view.feedback = { part, text: message };
+      else view.error = message;
     }
   } finally {
     if (call === phoneCall && S.phone === view) {
       view.loading = null;
+      view.progress = null;
       renderPhone(S.data);
     }
   }
@@ -1120,9 +1140,15 @@ function renderPhone(d) {
       const part = view.parts[qrPart];
       media = part && part.qr ? `<img class="qr" alt="${PHONE_QR[qrPart].alt}" src="${svgImage(part.qr)}">`
         : part ? '<div class="qr-none">服务器没给二维码，复制下面的地址到手机上导入</div>' : '<div class="qr-none"><span class="spin dark"></span></div>';
-      extra = part ? `<p class="phone-links">${copyLink(PHONE_QR[qrPart].link(part), PHONE_QR[qrPart].copy)}（手机上扫不了码时用）${PHONE_QR[qrPart].keyed
-        ? '<span class="sep">·</span>二维码外泄了？<button class="link" data-phone-reset="1">换新的</button>' : ''}</p>` : '';
-      if (part?.selection) extra += `<p class="muted">本机测速 ${esc(part.selection.host)} · ${esc(part.selection.ms)} ms <button class="link" data-phone-refresh="${qrPart}">刷新二维码</button></p>`;
+      extra = part ? `<p class="phone-links">${copyLink(PHONE_QR[qrPart].link(part), PHONE_QR[qrPart].copy)}（手机上扫不了码时用）</p>` : '';
+      if (part?.selection) extra += `<p class="muted">本机测速 ${esc(part.selection.host)} · ${esc(part.selection.ms)} ms</p>`;
+      if (PHONE_QR[qrPart].keyed && (part || view.progress)) {
+        const disabled = view.loading ? ' disabled' : '';
+        extra += `<p><button class="btn" data-phone-refresh="${qrPart}"${disabled}>刷新二维码</button>
+          <label><input type="checkbox" data-phone-revoke${view.revoke ? ' checked' : ''}${disabled}> 让旧码失效</label></p>`;
+        if (view.progress) extra += `<p role="status"><span class="spin dark"></span> ${esc(view.progress)}</p>`;
+        else if (view.feedback?.part === qrPart) extra += `<p role="status">${esc(view.feedback.text)}</p>`;
+      }
     } else if (step.show === 'push') extra = pushBlock(account.a, account.index, os);
     body = `<div class="card phone-step${media ? '' : ' single'}">
       <div class="phone-step-body">${media ? `<div class="phone-step-media">${media}</div>` : ''}
@@ -1195,13 +1221,15 @@ async function phoneClick(event) {
     loadPhone();
     return true;
   }
+  const revoke = event.target.closest('[data-phone-revoke]');
+  if (revoke) { S.phone.revoke = revoke.checked; return true; }
   const refresh = event.target.closest('[data-phone-refresh]');
   if (refresh) {
-    if (!S.phone.loading) loadPhone(refresh.dataset.phoneRefresh);
-    return true;
-  }
-  if (event.target.closest('[data-phone-reset]')) {
-    if (!S.phone.loading && confirm('换新的二维码？旧的 30 秒内失效，手机上要删掉旧节点、重新扫码。')) loadPhone('guide', true);
+    if (S.phone.loading) return true;
+    const reset = Boolean(S.phone.revoke);
+    if (!reset || confirm('让这个账号原有的手机节点和订阅失效？已导入的手机需要重新扫码。')) {
+      loadPhone(refresh.dataset.phoneRefresh, reset, true);
+    }
     return true;
   }
   const allyNtfy = event.target.closest('[data-ally-ntfy]');

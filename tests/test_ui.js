@@ -124,12 +124,12 @@ async function main() {
   phone = at(2);
   assert.ok(phone.includes('扫节点') && phone.includes('alt="节点的二维码"') && (phone.match(/<img class="qr"/g) || []).length === 1, phone);
   assert.ok(phone.includes('src="data:image/svg+xml;base64,') && !phone.includes('<svg xmlns') && !phone.includes('<script>'), 'the server\'s SVG is never inlined');
-  assert.ok(phone.includes('data-copy-text="vless://k@relay.example:443?type=ws#x"') && phone.includes('data-phone-reset'));
+  assert.ok(phone.includes('data-copy-text="vless://k@relay.example:443?type=ws#x"') && phone.includes('data-phone-revoke'));
   // the step's screenshots: the window's own files, only the names it has
   assert.ok(phone.includes('src="/ui/phone/sr-scan.webp"') && (phone.match(/data-phone-pic=/g) || []).length === 1 && !phone.includes('onerror'), phone);
   phone = at(3);
   assert.ok(phone.includes('alt="规则的二维码"') && !phone.includes('节点的二维码'), phone);
-  assert.ok(!phone.includes('data-phone-reset'), 'the rules are the same for everyone: nothing to reset');
+  assert.ok(!phone.includes('data-phone-revoke'), 'the rules are the same for everyone: nothing to reset');
   // the connect step's check: what the relays saw of the phone
   const check = (seen, pipes = 0) => {
     vm.runInContext(`S.phoneSeen = ${seen === undefined ? 'null' : JSON.stringify({ role: 7, status: seen })}; S.data.phone.exits[0].pipes = ${pipes};`, context);
@@ -145,7 +145,7 @@ async function main() {
   assert.ok(check(null, 2).includes('正在经这台电脑转发 2 条'));
   vm.runInContext(`S.phoneOs = 'android';`, context);
   phone = at(1);
-  assert.ok(phone.includes('data-copy-text="https://api.example/v1/phone/sub?k=&lt;x&gt;"') && phone.includes('data-phone-reset'), phone);
+  assert.ok(phone.includes('data-copy-text="https://api.example/v1/phone/sub?k=&lt;x&gt;"') && phone.includes('data-phone-revoke'), phone);
   phone = at(9);
   assert.ok(phone.includes('第 3 / 3 步'), 'a step past the end is the last');
   // a bound Android phone: the topic and server to add by hand, no QR code (an older server still sends one)
@@ -209,16 +209,17 @@ async function main() {
     context.act = (name, extra) => new Promise((resolve) => replies.push({ resolve, reset: extra.reset }));
     vm.runInContext(`S.phone = { role: 7 };`, context);
     const read = vm.runInContext(`loadPhone('node')`, context);
-    const reset = vm.runInContext(`loadPhone('guide', true)`, context);
+    const reset = vm.runInContext(`loadPhone('node', true, true)`, context);
     assert.ok(replies[1].reset);
     replies[1].resolve({ problem: null, guide: {}, nodes: [{ link: 'new', qr: '' }] });
-    await reset;
+    await new Promise(setImmediate);
     replies[0].resolve({ problem: null, nodes: [{ link: 'old', qr: '' }] });
     await read;
-    assert.strictEqual(vm.runInContext('S.phone.parts.node', context), undefined);
-    const refresh = vm.runInContext(`loadPhone('node')`, context);
+    assert.strictEqual(vm.runInContext('S.phone.parts?.node', context), undefined);
+    assert.strictEqual(vm.runInContext('S.phone.progress', context), '已更换钥匙，正在读取新二维码…');
     replies[2].resolve({ nodes: [{ link: 'selected', qr: '' }], selection: { host: 'one.example', ms: 42 } });
-    await refresh;
+    await reset;
+    assert.ok(vm.runInContext('S.phone.feedback.text', context).includes('重新导入'));
     assert.strictEqual(vm.runInContext('S.phone.parts.node.link', context), 'selected');
     assert.strictEqual(vm.runInContext('S.phone.parts.node.selection.ms', context), 42);
     assert.strictEqual(vm.runInContext('S.phone.loading', context), null);
