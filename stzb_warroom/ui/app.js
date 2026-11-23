@@ -1141,7 +1141,7 @@ function renderPhone(d) {
       media = part && part.qr ? `<img class="qr" alt="${PHONE_QR[qrPart].alt}" src="${svgImage(part.qr)}">`
         : part ? '<div class="qr-none">服务器没给二维码，复制下面的地址到手机上导入</div>' : '<div class="qr-none"><span class="spin dark"></span></div>';
       extra = part ? `<p class="phone-links">${copyLink(PHONE_QR[qrPart].link(part), PHONE_QR[qrPart].copy)}（手机上扫不了码时用）</p>` : '';
-      if (part?.selection) extra += `<p class="muted">本机测速 ${esc(part.selection.host)} · ${esc(part.selection.ms)} ms</p>`;
+      if (part?.selection) extra += `<p class="muted">本机测速 ${esc(part.selection.ms)} ms</p>`;
       if (PHONE_QR[qrPart].keyed && (part || view.progress)) {
         const disabled = view.loading ? ' disabled' : '';
         extra += `<p><button class="btn" data-phone-refresh="${qrPart}"${disabled}>刷新二维码</button>

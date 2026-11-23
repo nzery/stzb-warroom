@@ -773,7 +773,7 @@ class App:
             from .node_selection import candidates, choose
             elapsed, host = choose(candidates(value))
             value = self.server.json(PHONE + "?" + urlencode({"only": only, "node": host}), token, timeout=15)
-            value["selection"] = {"host": host, "ms": round(elapsed * 1000)}
+            value["selection"] = {"ms": round(elapsed * 1000)}
         if reset:
             self.log("已重置手机节点：旧的二维码 30 秒内失效，手机要重新扫码")
         return value
@@ -786,7 +786,7 @@ class App:
                 "blind": bool(uploader and time.monotonic() - uploader.heard_at >= BLIND_AFTER
                               and any(e.moving_for() >= BLIND_AFTER for e in exits)),
                 "waiting": bool(session and self.settings["phone_exit"] and not exits),
-                "exits": [{"relay": e.origin.removeprefix("https://"), "state": e.state, "since": e.since,
+                "exits": [{"state": e.state, "since": e.since,
                            "pipes": e.open_pipes} for e in exits]}
 
     def _start_exits(self, session):
@@ -839,10 +839,10 @@ class App:
         """The exits' events in the window's log: what the player can act on, once per change."""
         event, host = fields.get("event"), (fields.get("relay") or "").removeprefix("https://")
         text = {
-            "relay_connected": ("info", f"手机中转：已连上 {host}"),
-            "relay_refused": ("warn", f"手机中转：{host} 不接受这台电脑的账号（要已审批的账号）"),
+            "relay_connected": ("info", "手机中转：已连接"),
+            "relay_refused": ("warn", "手机中转：暂时无法连接，请稍后再试"),
             "relay_busy": ("warn", "手机中转：这个账号的手机正经另一台电脑转发；那台关掉出口或下线后，这台自动接上"),
-            "relay_unreachable": ("warn", f"手机中转：连不上 {host}，稍后重试（{fields.get('error') or '原因不明'}）"),
+            "relay_unreachable": ("warn", "手机中转：暂时连不上，稍后重试"),
             "pipe_open": ("info", "手机的一条游戏连接经本机转出"),
             "open_refused": ("warn", f"手机中转要本机连的目标不对，已拒绝（{fields.get('reason')}）"),
             "pipe_failed": ("warn", "手机中转：数据通道没建立起来"),
@@ -1179,7 +1179,7 @@ class App:
                  f"统计：已上传战报 {snapshot['stats']['uploaded']} 份，待上传 {snapshot['stats']['pending']}，"
                  f"连接 {snapshot['stats']['connections']}",
                  "手机经本机：" + ("开" if snapshot["phone"]["enabled"] else "关") + "".join(
-                     f"；{e['relay']} {e['state']}（{e['pipes']} 条）" for e in snapshot["phone"]["exits"])]
+                     f"；{e['state']}（{e['pipes']} 条）" for e in snapshot["phone"]["exits"])]
         for number, account in enumerate(snapshot["tokens"], 1):
             role = (account.get("role") or {}).get("label") or "-"
             bark = account.get("bark") or {}

@@ -541,8 +541,8 @@ class AppTests(unittest.TestCase):
                     break
                 time.sleep(0.01)
             status = app.snapshot()["phone"]
-            self.assertEqual(status["exits"], [{"relay": "r.example", "state": "online", "since": 1.0, "pipes": 2}])
-            self.assertIn("r.example", app.diagnostics())
+            self.assertEqual(status["exits"], [{"state": "online", "since": 1.0, "pipes": 2}])
+            self.assertNotIn("r.example", app.diagnostics())
             app._stop_exits(session)  # the capture stopping
             self.assertTrue(made[0].closed)
             self.assertEqual(session["exits"], [])
@@ -630,7 +630,7 @@ class AppTests(unittest.TestCase):
             app._exit_log(event="relay_unreachable", relay="https://r.example", error="x")
         app._exit_log(event="game_check", ok=False)
         texts = [line["text"] for line in app.logs]
-        self.assertEqual(sum("连不上 r.example" in t for t in texts), 1)
+        self.assertEqual(sum("暂时连不上" in t for t in texts), 1)
         self.assertTrue(any("拦下" in t for t in texts))
 
     def test_bark_is_bound_through_the_server(self):

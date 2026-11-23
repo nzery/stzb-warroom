@@ -420,7 +420,7 @@ class Exit:
     def __init__(self, server, tokens, log=None, enforce_game=True):
         self.origin = server.rstrip("/")
         self.auth = "Bearer " + ",".join(tokens)
-        self.log = log or (lambda **fields: print(json.dumps(fields, ensure_ascii=False), flush=True))
+        self.log = log or self.console_log
         self.enforce_game = enforce_game
         self.own = set()  # this computer's public address, as the relay saw it
         self.pipes = threading.BoundedSemaphore(MAX_PIPES)
@@ -431,6 +431,14 @@ class Exit:
         self.control = None
         self.state, self.since = "connecting", time.time()
         self.moved_at = self.moving_since = -MOVING_GAP  # when the game last sent data, since when without a pause
+
+    def console_log(self, **fields):
+        fields.pop("relay", None)
+        if fields.get("error"):
+            host = urlsplit(self.origin).hostname
+            if host:
+                fields["error"] = fields["error"].replace(host, "手机中转")
+        print(json.dumps(fields, ensure_ascii=False), flush=True)
 
     def _state(self, state):
         if state != self.state:
