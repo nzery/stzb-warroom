@@ -171,10 +171,10 @@ async function main() {
   assert.ok(!nodes.get('phone-box').innerHTML.includes('data-ally-form'), 'three at most: no form');
   vm.runInContext(`S.phoneOs = 'android'; S.allyShown = null; S.data.tokens.forEach((t) => { t.bark = { bound: false }; }); renderPhone(S.data);`, context);
   // a problem of the exits shows at the top
-  vm.runInContext(`S.data.phone.exits = ['busy', 'busy', 'unreachable', 'online'].map((state) => ({ state })); renderPhone(S.data);`, context);
+  vm.runInContext(`S.data.phone.exits = ['busy', 'busy', 'unreachable', 'unreachable', 'online'].map((state) => ({ state })); renderPhone(S.data);`, context);
   const warnings = nodes.get('phone-status').innerHTML;
-  assert.equal((warnings.match(/另一台电脑正在用/g) || []).length, 1);
-  assert.ok(warnings.includes('连不上中转'));
+  assert.ok(!warnings.includes('另一台电脑正在用'));
+  assert.equal((warnings.match(/连不上中转/g) || []).length, 1);
   vm.runInContext(`S.data.phone = { running: false, waiting: false, exits: [] }; renderPhone(S.data);`, context);
   assert.ok(nodes.get('phone-status').innerHTML.includes('上报没有运行'));
   vm.runInContext(`S.data.phone = { running: true, waiting: false, exits: [] }; S.phone.key = null; S.page = 'overview'; watchPhone(false);`, context);
