@@ -118,6 +118,22 @@ class UploadTests(unittest.TestCase):
             uploader.on_packet(1.0, 1, packet(frame, seq[client], from_client=client, port=port))
             seq[client] += len(frame)
 
+    def test_optional_local_reply_does_not_ack_the_queue_and_old_servers_can_retry(self):
+        from unittest.mock import Mock
+        legacy = HTTPError("https://example.test", 400, "", {},
+                           io.BytesIO(b'{"error":"invalid frame batch"}'))
+        uploader = self.uploader(legacy, OSError("connection lost"), accept(7))
+        uploader.local_capture = Mock()
+        uploader.local_capture.prepare.return_value = {"offer": "sample"}
+        self.feed(uploader, (server_frame(9, [1]), False))
+        with self.assertRaises(OSError):
+            uploader.upload_once()
+        self.assertIsNotNone(self.queue.batch())
+        uploader.local_capture.prepare.return_value = None
+        self.assertTrue(uploader.upload_once())
+        self.assertIsNone(self.queue.batch())
+        self.assertEqual(len(uploader.server.requests), 3)
+
     def test_a_closed_connection_no_longer_counts(self):
         uploader = self.uploader()
         self.feed(uploader, (server_frame(9, [1]), False), port=50000)

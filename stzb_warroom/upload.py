@@ -11,6 +11,7 @@ server holds back (its token awaits approval) waits on its own while the others 
 import base64
 import hashlib
 import json
+import os
 import sqlite3
 import sys
 import threading
@@ -263,6 +264,10 @@ class Uploader:
 
     def __init__(self, queue, server, tokens, log=None):
         self.queue, self.server, self.tokens = queue, server, tokens
+        self.local_capture = None
+        if os.name == "posix" and os.environ.get("ST_CAPTURE_SOCKET"):
+            from .local_capture import LocalCapture
+            self.local_capture = LocalCapture(os.environ["ST_CAPTURE_SOCKET"])
         # The upload's own connection to the server, kept open between batches (api.Connection).
         self.http = server.connection() if hasattr(server, "connection") else server
         # Set when a row is queued: the upload thread, waiting on an empty queue, sends it at once
@@ -447,9 +452,23 @@ class Uploader:
         if waited is not None:
             extra["timing"]["age"] = round(waited, 3)
         try:
-            result = self.http.json(PATH, self.tokens, {"stream_id": stream_id, "start_seq": start,
-                                                          "frames": rows, **extra}, compress=True,
-                                    timeout=STALL_AFTER[min(self.failures, len(STALL_AFTER) - 1)])
+            payload = {"stream_id": stream_id, "start_seq": start, "frames": rows, **extra}
+            if self.local_capture:
+                envelope = self.local_capture.prepare(self.tokens, payload)
+                if envelope:
+                    payload["captureLocal"] = envelope
+            timeout = STALL_AFTER[min(self.failures, len(STALL_AFTER) - 1)]
+            try:
+                result = self.http.json(PATH, self.tokens, payload, compress=True, timeout=timeout)
+            except HTTPError as exc:
+                # An older server (or a rollback) may not know the optional envelope. Keep the
+                # same stream and sequence and let the ordinary upload decide its disposition.
+                if ("captureLocal" not in payload or
+                        not (exc.code == 413 or exc.code == 400 and _error(exc) == "invalid frame batch")):
+                    raise
+                payload.pop("captureLocal")
+                self.local_capture.unavailable_until = time.monotonic() + 60
+                result = self.http.json(PATH, self.tokens, payload, compress=True, timeout=timeout)
             took = time.monotonic() - started
             if took > SLOW_BATCH:
                 self.log(event="upload_slow", seconds=round(took, 1), rows=len(rows))
@@ -471,6 +490,8 @@ class Uploader:
             return True
         if result.get("stream_id") != stream_id or type(result.get("cursor")) is not int:
             raise ValueError("server did not acknowledge the batch")
+        if self.local_capture:
+            self.local_capture.remember(stream_id, result)
         self.queue.acknowledge(stream_id, result["cursor"])
         self._acknowledged(stream_id, result["cursor"])
         self.stalls = []  # told
