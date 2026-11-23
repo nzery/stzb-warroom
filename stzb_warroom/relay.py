@@ -641,7 +641,7 @@ def start(origins, tokens, log=None):
     return exits
 
 
-def relays_of(server, tokens):
+def relays_of(server, tokens, scoped=None):
     """The relays any of the tokens may use, as the server names them (GET /v1/client/phone?only=relays,
     asked for each token: the public domain's and a private one's differ), in the order given;
     [] when every token was answered and none has any (not approved yet). ConnectionError when there
@@ -659,6 +659,10 @@ def relays_of(server, tokens):
         except (OSError, ValueError) as exc:
             failed = exc
             continue
+        if scoped is not None and isinstance(page, dict):
+            from .node_selection import candidates
+            for row in candidates(page):
+                scoped.setdefault("https://" + row["host"], []).append(row["exit"])
         relays = page.get("relays") if isinstance(page, dict) else None
         if isinstance(relays, list):
             found += [r for r in relays if isinstance(r, str) and r.startswith("https://")]
@@ -667,15 +671,41 @@ def relays_of(server, tokens):
     return list(dict.fromkeys(found))[:4]
 
 
+def sync_scoped(exits, wanted, log=None):
+    for origin, (keys, running) in list(exits.items()):
+        if keys != wanted.get(origin):
+            running.close()
+            del exits[origin]
+    for origin, keys in wanted.items():
+        if origin not in exits:
+            exits[origin] = keys, start([origin], keys, log=log)[0]
+
+
 def run(server, tokens, stop, log=None, origins=None):
     """The `relay` command: keep the exits open until `stop` is set."""
+    scoped, running = {}, {}
+    explicit = bool(origins)
     try:
-        origins = origins or relays_of(server, tokens)
+        origins = origins or relays_of(server, tokens, scoped)
     except ConnectionError as exc:
         raise SystemExit(f"连不上服务器：{exc}")
     if not origins:
         raise SystemExit("服务器没有给出中转：Token 要先审批通过")
     exits = start(origins, tokens, log=log)
-    stop.wait()
-    for exit_ in exits:
-        exit_.close()
+    try:
+        if explicit:
+            stop.wait()
+        else:
+            while not stop.is_set():
+                sync_scoped(running, scoped, log)
+                if stop.wait(30 if running else 600):
+                    break
+                scoped = {}
+                try:
+                    relays_of(server, tokens, scoped)
+                except ConnectionError:
+                    scoped.clear()
+    finally:
+        sync_scoped(running, {})
+        for exit_ in exits:
+            exit_.close()

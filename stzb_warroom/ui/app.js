@@ -913,10 +913,15 @@ async function loadPhone(part = 'guide', reset = false) {
     if (call !== phoneCall || S.phone !== view) return;
     if (reset) view.parts = {};
     takePhone(view, data);
+    if (data.selection && view.parts[part]) view.parts[part].selection = data.selection;
+    if (reset) { delete view.parts.node; delete view.parts.sub; }
     view.error = null;
     if (reset) toast('已换新的二维码：手机要删掉旧的、重新扫码，旧的 30 秒内失效');
   } catch (error) {
-    if (call === phoneCall && S.phone === view) view.error = error.message || String(error);
+    if (call === phoneCall && S.phone === view) {
+      if (view.parts?.[part]) toast(error.message || String(error));
+      else view.error = error.message || String(error);
+    }
   } finally {
     if (call === phoneCall && S.phone === view) {
       view.loading = null;
@@ -1117,6 +1122,7 @@ function renderPhone(d) {
         : part ? '<div class="qr-none">服务器没给二维码，复制下面的地址到手机上导入</div>' : '<div class="qr-none"><span class="spin dark"></span></div>';
       extra = part ? `<p class="phone-links">${copyLink(PHONE_QR[qrPart].link(part), PHONE_QR[qrPart].copy)}（手机上扫不了码时用）${PHONE_QR[qrPart].keyed
         ? '<span class="sep">·</span>二维码外泄了？<button class="link" data-phone-reset="1">换新的</button>' : ''}</p>` : '';
+      if (part?.selection) extra += `<p class="muted">本机测速 ${esc(part.selection.host)} · ${esc(part.selection.ms)} ms <button class="link" data-phone-refresh="${qrPart}">刷新二维码</button></p>`;
     } else if (step.show === 'push') extra = pushBlock(account.a, account.index, os);
     body = `<div class="card phone-step${media ? '' : ' single'}">
       <div class="phone-step-body">${media ? `<div class="phone-step-media">${media}</div>` : ''}
@@ -1187,6 +1193,11 @@ async function phoneClick(event) {
     for (const name of PERSONAL) S.personal[name] = { query: {} };
     S.phone = {};
     loadPhone();
+    return true;
+  }
+  const refresh = event.target.closest('[data-phone-refresh]');
+  if (refresh) {
+    if (!S.phone.loading) loadPhone(refresh.dataset.phoneRefresh);
     return true;
   }
   if (event.target.closest('[data-phone-reset]')) {

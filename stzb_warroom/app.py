@@ -751,6 +751,8 @@ class App:
         token = self._token(index)
         only = "status" if status else part if part in PHONE_PARTS else None
         path = PHONE + ("/reset" if reset else f"?only={only}" if only else "")
+        if only in {"node", "sub"}:
+            path += "&pick=1"
         try:
             with self.server.open(path, token, {} if reset else None,
                                   timeout=30, method="POST" if reset else "GET") as response:
@@ -767,6 +769,11 @@ class App:
             raise ValueError(f"连不上服务器：{exc}")
         if not isinstance(value, dict):
             raise ValueError("服务器的回复不对")
+        if only in {"node", "sub"} and value.get("candidates"):
+            from .node_selection import candidates, choose
+            elapsed, host = choose(candidates(value))
+            value = self.server.json(PHONE + "?" + urlencode({"only": only, "node": host}), token, timeout=15)
+            value["selection"] = {"host": host, "ms": round(elapsed * 1000)}
         if reset:
             self.log("已重置手机节点：旧的二维码 30 秒内失效，手机要重新扫码")
         return value
@@ -795,13 +802,16 @@ class App:
             while live():
                 problem = "服务器还没给中转（账号要先审批通过）"
                 try:
-                    origins = relay.relays_of(self.server, session["tokens"])
+                    wanted = {}
+                    origins = relay.relays_of(self.server, session["tokens"], wanted)
                 except ConnectionError as exc:
                     origins, problem = [], f"暂时连不上服务器（{exc}）"
                 with self.lock:
                     exits = session.get("exits") or []
                     known = {e.origin for e in exits}
                     new = [o for o in origins if o.rstrip("/") not in known]
+                    if live():
+                        relay.sync_scoped(session.setdefault("node_exits", {}), wanted, self._exit_log)
                     if new and live():
                         session["exits"] = exits + relay.start(new, session["tokens"], log=self._exit_log)
                         if not exits:
@@ -810,7 +820,7 @@ class App:
                 if not origins and not exits and live():
                     self.log(f"手机经本机连接游戏：{problem}，稍后再试", "warn")
                 self.touch()
-                session["stop"].wait(RELAYS_REFRESH if session.get("exits") else RELAYS_EVERY)
+                session["stop"].wait(30 if session.get("node_exits") else RELAYS_REFRESH if session.get("exits") else RELAYS_EVERY)
             self.touch()
 
         threading.Thread(target=run, name="relays", daemon=True).start()
@@ -818,6 +828,8 @@ class App:
 
     def _stop_exits(self, session):
         with self.lock:
+            session["exits_run"] = None
+            relay.sync_scoped(session.get("node_exits", {}), {})
             exits, session["exits"] = session.get("exits") or [], []
         for exit_ in exits:
             exit_.close()

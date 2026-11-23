@@ -475,7 +475,7 @@ class AppTests(unittest.TestCase):
         self.assertEqual(self.server.calls[-1], ("GET", "/v1/client/phone?only=status", None))
         for part in ("guide", "node", "rules", "sub"):  # the page asks for what a step shows
             app.phone(0, part=part)
-            self.assertEqual(self.server.calls[-1], ("GET", "/v1/client/phone?only=" + part, None))
+            self.assertEqual(self.server.calls[-1], ("GET", "/v1/client/phone?only=" + part + ("&pick=1" if part in {"node", "sub"} else ""), None))
         app.phone(0, part="../x")
         self.assertEqual(self.server.calls[-1], ("GET", "/v1/client/phone", None))
         self.assertNotIn("k1", json.dumps(list(app.logs)) + app.diagnostics())
