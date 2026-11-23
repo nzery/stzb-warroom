@@ -1096,7 +1096,8 @@ function renderPhone(d) {
   const accounts = personalAccounts();
   const account = personalAccount();
   const os = S.phoneOs;
-  const problems = phoneProblems(p).join('');
+  const notice = banner('warn', 'info', '<b>手机游戏数据转发说明</b><br>通过本功能玩《率土之滨》时，手机的游戏数据会先经过我维护的中转服务器，再由连接的电脑转发给游戏服务器。中转服务器可以读取这些数据，包括用于保持登录状态的会话凭据。我会尽力保护你的数据安全。<b>通过本功能连接游戏，即表示你同意上述转发。</b>');
+  const problems = notice + phoneProblems(p).join('');
   if (S.phoneProblems !== problems) { S.phoneProblems = problems; $('phone-status').innerHTML = problems; }
   const pipes = p.exits.reduce((n, e) => n + (e.pipes || 0), 0);
   const steps = os && view.guide ? view.guide[os] || [] : [];
@@ -1150,9 +1151,11 @@ function renderPhone(d) {
         else if (view.feedback?.part === qrPart) extra += `<p role="status">${esc(view.feedback.text)}</p>`;
       }
     } else if (step.show === 'push') extra = pushBlock(account.a, account.index, os);
+    // 兼容向导首步附带的旧提示，保留后面的操作说明。
+    const stepText = at === 0 ? step.text.replace(/^中转服务器可以读取经过它的游戏流量，包括登录会话凭据。/, '') : step.text;
     body = `<div class="card phone-step${media ? '' : ' single'}">
       <div class="phone-step-body">${media ? `<div class="phone-step-media">${media}</div>` : ''}
-        <div class="phone-step-text"><h3><span class="step-no">${at + 1}</span>${esc(step.title)}</h3><p>${esc(step.text)}</p>
+        <div class="phone-step-text"><h3><span class="step-no">${at + 1}</span>${esc(step.title)}</h3><p>${esc(stepText)}</p>
           ${phoneCheck(step, account, pipes)}${extra}${phonePics(step)}</div></div>
       <div class="phone-step-nav"><button class="btn ghost" data-phone-step="${at - 1}"${at ? '' : ' disabled'}>上一步</button>
         <span class="muted">第 ${at + 1} / ${steps.length} 步</span>

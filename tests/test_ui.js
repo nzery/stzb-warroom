@@ -105,7 +105,7 @@ async function main() {
         qr: '<svg xmlns="http://www.w3.org/2000/svg"><script>alert(1)</script></svg>' },
       rules: { link: 'https://api.example/v1/phone/r.conf', qr: '<svg xmlns="http://www.w3.org/2000/svg"></svg>', steps: [] },
       sub: { sub: 'https://api.example/v1/phone/sub?k=<x>', qr: '<svg xmlns="http://www.w3.org/2000/svg"></svg>', steps: [] } },
-      guide: { iphone: [{ title: '<通知>', text: 'Bark', show: 'push', check: 'push' }, { title: '装', text: '装好', show: null, check: null },
+      guide: { iphone: [{ title: '<通知>', text: '中转服务器可以读取经过它的游戏流量，包括登录会话凭据。Bark', show: 'push', check: 'push' }, { title: '装', text: '装好', show: null, check: null },
                         { title: '扫节点', text: '首页', show: 'node', check: null, pics: ['sr-scan', '../x" onerror="alert(1)'] }, { title: '扫规则', text: '配置页', show: 'rules', check: null },
                         { title: '打开连接', text: '测速', show: 'exit', check: 'connect' }],
                android: [{ title: '通知', text: 'ntfy', show: 'push', check: 'push' }, { title: '扫订阅', text: 'v2rayNG', show: 'sub', check: null },
@@ -113,10 +113,11 @@ async function main() {
     renderPhone(S.data);`, context);
   let phone = nodes.get('phone-box').innerHTML;
   assert.ok(phone.includes('data-phone-os="iphone"') && phone.includes('data-phone-os="android"') && !phone.includes('<img'), phone);
-  assert.strictEqual(nodes.get('phone-status').innerHTML, '', 'nothing at the top while all is well');
+  assert.ok(nodes.get('phone-status').innerHTML.includes('会话凭据'), 'show the disclosure before choosing a phone');
   const at = (step) => { vm.runInContext(`S.phoneStep = { [S.phoneOs]: ${step} }; renderPhone(S.data);`, context); return nodes.get('phone-box').innerHTML; };
   vm.runInContext(`S.phoneOs = 'iphone';`, context);
   phone = at(0);
+  assert.ok(phone.includes('<p>Bark</p>') && !phone.includes('会话凭据'), phone);
   assert.ok(phone.includes('第 1 / 5 步') && phone.includes('&lt;通知&gt;') && phone.includes('data-bark-form') && phone.includes('还没绑定'), phone);
   assert.ok(phone.includes('data-phone-step="1"') && phone.includes('disabled>上一步'), 'the first step: next only');
   phone = at(1);
