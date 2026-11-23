@@ -1,7 +1,6 @@
 """Time the phone WebSocket handshake and the relay's exit-readiness check."""
-from concurrent.futures import ThreadPoolExecutor
 import re
-from statistics import median
+import threading
 import time
 import uuid
 
@@ -38,13 +37,38 @@ def latency(row):
         finally:
             if ws:
                 ws.close()
-    return median(samples)
+    return sorted(samples)[1]  # all three probes succeeded
 
 
 def choose(rows):
-    with ThreadPoolExecutor(max_workers=8) as pool:
-        times = list(pool.map(latency, rows))
-    usable = [(t, row["host"]) for t, row in zip(times, rows) if t is not None]
+    pending = iter(rows)
+    lock = threading.Lock()
+    usable = []
+    errors = []
+
+    def probe():
+        while True:
+            with lock:
+                row = next(pending, None)
+            if row is None:
+                return
+            try:
+                elapsed = latency(row)
+                if elapsed is not None:
+                    with lock:
+                        usable.append((elapsed, row["host"]))
+            except Exception as exc:
+                with lock:
+                    errors.append(exc)
+                return
+
+    workers = [threading.Thread(target=probe) for _ in range(min(8, len(rows)))]
+    for worker in workers:
+        worker.start()
+    for worker in workers:
+        worker.join()
+    if errors:
+        raise errors[0]
     if not usable:
         raise ValueError("暂时没有可用的手机线路，请确认电脑上报已开启，稍后再试")
     return min(usable)
