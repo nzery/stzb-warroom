@@ -215,7 +215,12 @@ async function main() {
     await reset;
     replies[0].resolve({ problem: null, nodes: [{ link: 'old', qr: '' }] });
     await read;
-    assert.strictEqual(vm.runInContext('S.phone.parts.node.link', context), 'new');
+    assert.strictEqual(vm.runInContext('S.phone.parts.node', context), undefined);
+    const refresh = vm.runInContext(`loadPhone('node')`, context);
+    replies[2].resolve({ nodes: [{ link: 'selected', qr: '' }], selection: { host: 'one.example', ms: 42 } });
+    await refresh;
+    assert.strictEqual(vm.runInContext('S.phone.parts.node.link', context), 'selected');
+    assert.strictEqual(vm.runInContext('S.phone.parts.node.selection.ms', context), 42);
     assert.strictEqual(vm.runInContext('S.phone.loading', context), null);
   }
   // big counts fit the top bar
