@@ -674,7 +674,7 @@ def relays_of(server, tokens, scoped=None):
         relays = page.get("relays") if isinstance(page, dict) else None
         if isinstance(relays, list):
             found += [r for r in relays if isinstance(r, str) and r.startswith("https://")]
-    if failed is not None and not found:
+    if failed is not None and not found and not scoped:
         raise ConnectionError(str(failed))
     return list(dict.fromkeys(found))[:4]
 
@@ -697,7 +697,7 @@ def run(server, tokens, stop, log=None, origins=None):
         origins = origins or relays_of(server, tokens, scoped)
     except ConnectionError as exc:
         raise SystemExit(f"连不上服务器：{exc}")
-    if not origins:
+    if not origins and not scoped:
         raise SystemExit("服务器没有给出中转：Token 要先审批通过")
     exits = start(origins, tokens, log=log)
     try:
