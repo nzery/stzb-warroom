@@ -38,7 +38,7 @@ from urllib.parse import urlencode
 from . import __version__, chat, notify, relay, update as updates, upload, vault, winsys
 from .api import client_tokens, invite_code, site, tokens_in
 from .capture import adapter_report, find_dumpcap
-from .runner import run_capture
+from .runner import run_capture, upgrade_existing_queue
 
 ACCOUNT_EVERY = 60  # seconds between two looks at the accounts' status
 INVALID_EVERY = 1800  # a token the server rejected (401) is looked at again this rarely, unless asked
@@ -136,6 +136,7 @@ class App:
         self.capture = {"state": "stopped", "error": None, "hint": None, "since": None, "dumpcap": None}
         # Battle reports uploaded from this computer, all launches together (2026-11-13 user), and when
         # the last went: from the queue's file until a capture runs, then from its uploader.
+        upgrade_existing_queue(self.state_dir)
         self.totals = upload.saved_totals(self.state_dir / "queue.sqlite")
         self.notice_prefs = {"note": None, "groups": None, "values": None, "error": None}  # as the server gave it
         # One look or save of the notice settings at a time: a minute's look still under way would

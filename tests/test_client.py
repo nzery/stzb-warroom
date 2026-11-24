@@ -210,6 +210,56 @@ class UploadTests(unittest.TestCase):
         self.assertTrue(uploader.upload_once())
         self.assertEqual(uploader.server.requests[0][2]["frames"], current)
 
+    def test_offline_upgrade_removes_old_pages_and_resumes_after_interruption(self):
+        import subprocess
+        import sys
+        from stzb_warroom.runner import upgrade_existing_queue
+
+        with tempfile.TemporaryDirectory() as folder:
+            path = Path(folder) / "queue.sqlite"
+            raw = server_frame(98888, ["legacy-sensitive-marker" * 900])
+            encoded = base64.b64encode(raw).decode()
+            marker = encoded[100:180].encode()
+            row = json.dumps(dict(captured_at=12, client=False, message_id=98888, frame=encoded))
+            with sqlite3.connect(path) as db:
+                db.execute("PRAGMA journal_mode=WAL")
+                db.execute("CREATE TABLE rows(stream_id TEXT,seq INTEGER,row TEXT,reports INTEGER DEFAULT 0,"
+                           "PRIMARY KEY(stream_id,seq))")
+                db.execute("INSERT INTO rows VALUES ('a',9,?,0)", (row,))
+                db.execute("INSERT INTO rows VALUES ('a',10,?,1)", (json.dumps({"reports": [report(123)]}),))
+                db.execute("CREATE TABLE meta(key TEXT PRIMARY KEY,value TEXT NOT NULL)")
+                db.execute("INSERT INTO meta VALUES ('uploaded',?)", ('{"reports":17,"at":2}',))
+            db.close()
+            self.assertIn(marker, path.read_bytes())
+            # A hard exit after VACUUM but before the final checkpoint leaves the WAL on disk.
+            interrupted = subprocess.run([sys.executable, "-c", """
+import os,sqlite3,sys
+from stzb_warroom.upload import Queue
+connect = sqlite3.connect
+def traced(*args, **kwargs):
+    db = connect(*args, **kwargs)
+    db.set_trace_callback(lambda sql: os._exit(75) if sql.startswith('PRAGMA wal_checkpoint') else None)
+    return db
+sqlite3.connect = traced
+Queue(sys.argv[1])
+""", str(path)], check=False, timeout=15, cwd=Path(upload.__file__).resolve().parents[1])
+            self.assertEqual(interrupted.returncode, 75)
+            self.assertTrue(path.with_name(path.name + "-wal").is_file())
+            upgrade_existing_queue(folder)
+            upgrade_existing_queue(folder)
+            queue = Queue(path)
+            try:
+                self.assertEqual(queue.totals(), (17, 2))
+                stream, start, rows = queue.batch()
+                self.assertEqual((stream, start), ("a", 9))
+                self.assertEqual(rows, [upload.frame_row(12, False, raw), {"reports": [report(123)]}])
+                self.assertEqual(queue.db.execute("SELECT seq,reports FROM rows ORDER BY seq").fetchall(),
+                                 [(9, 0), (10, 1)])
+                for file in path.parent.glob("queue.sqlite*"):
+                    self.assertNotIn(marker, file.read_bytes())
+            finally:
+                queue.close()
+
     def test_snapshot_and_incremental_updates_remove_credentials_by_column(self):
         schema = {}
         def roundtrip(command, value):

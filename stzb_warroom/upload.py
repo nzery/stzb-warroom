@@ -95,8 +95,39 @@ class Queue:
         if "sanitized" not in {column[1] for column in self.db.execute("PRAGMA table_info(rows)")}:
             self.db.execute("ALTER TABLE rows ADD COLUMN sanitized INTEGER NOT NULL DEFAULT 0")
         self.db.commit()
+        try:
+            self._clean_legacy_queue()
+        except BaseException:
+            self.db.close()
+            raise
         self.lock = threading.Lock()
         self.full_logged = 0
+
+    def _clean_legacy_queue(self):
+        if self.db.execute("PRAGMA user_version").fetchone()[0] >= 1:
+            return
+        self.db.execute("PRAGMA secure_delete=ON")
+        last = 0
+        while True:
+            ids = self.db.execute("SELECT rowid FROM rows WHERE rowid>? AND sanitized=0 "
+                                  "ORDER BY rowid LIMIT 64", (last,)).fetchall()
+            if not ids:
+                break
+            with self.db:
+                for last, in ids:
+                    text, = self.db.execute("SELECT row FROM rows WHERE rowid=?", (last,)).fetchone()
+                    row = json.loads(text)
+                    if "frame" in row:
+                        row = clean_legacy_row(row)
+                        self.db.execute("UPDATE rows SET row=?,sanitized=1 WHERE rowid=?", (json.dumps(row), last))
+                    else:
+                        self.db.execute("UPDATE rows SET sanitized=1 WHERE rowid=?", (last,))
+        # Includes free pages left by an earlier version even if it already sent every row.
+        # Publish completion only after old WAL frames and database page fragments are gone.
+        self.db.execute("VACUUM")
+        if self.db.execute("PRAGMA wal_checkpoint(TRUNCATE)").fetchone()[0]:
+            raise sqlite3.OperationalError("upload queue is still in use, retry on restart")
+        self.db.execute("PRAGMA user_version=1")
 
     def bind(self, server, tokens):
         """Keep the queued rows only for the server and the tokens they were captured for:
@@ -161,7 +192,7 @@ class Queue:
             else:
                 for offset, (name, items) in enumerate(groups.items()):
                     row = {"captured_at": captured_at, "channel": name, "reports": items}
-                    self.db.execute("INSERT INTO rows (stream_id, seq, row, reports) VALUES (?,?,?,?)",
+                    self.db.execute("INSERT INTO rows (stream_id, seq, row, reports,sanitized) VALUES (?,?,?,?,1)",
                                     (stream_id, seq + offset, json.dumps(row), len(items)))
         if full:
             self._warn_full()
@@ -186,9 +217,8 @@ class Queue:
             if seq != start + len(items) or (items and size + len(text) > MAX_BODY):
                 break
             row = json.loads(text)
-            if not sanitized and "frame" in row and (row["client"] or row["message_id"] in privacy.FILTER_SERVER):
-                raw = base64.b64decode(row["frame"]) + bytes(row.get("pad", 0))
-                row = frame_row(row["captured_at"], row["client"], raw)
+            if not sanitized and "frame" in row:
+                row = clean_legacy_row(row)
             items.append(row)
             size += len(text)
         return first[0], start, items
@@ -246,6 +276,13 @@ def saved_totals(path):
         return int(value.get("reports") or 0), (float(value["at"]) if value.get("at") else None)
     except (sqlite3.Error, ValueError, TypeError, AttributeError, OSError):
         return 0, None
+
+
+def clean_legacy_row(row):
+    raw = base64.b64decode(row["frame"]) + bytes(row.get("pad", 0))
+    if row["client"] or message_id(raw, False) in privacy.FILTER_SERVER:
+        return frame_row(row["captured_at"], row["client"], raw)
+    return row
 
 
 def frame_row(captured_at, client, frame, schema=None):
