@@ -8,7 +8,7 @@ const ui = path.join(__dirname, '../stzb_warroom/ui');
 const html = fs.readFileSync(path.join(ui, 'index.html'), 'utf8');
 const nodes = new Map([...html.matchAll(/\bid="([^"]+)"/g)].map((match) => [match[1], {
   addEventListener() {}, classList: { add() {}, remove() {}, toggle() {} },
-  attrs: {}, getAttribute(name) { return this.attrs[name] ?? null; }, setAttribute(name, value) { this.attrs[name] = value; },
+  attrs: {}, dataset: {}, getAttribute(name) { return this.attrs[name] ?? null; }, setAttribute(name, value) { this.attrs[name] = value; },
 }]));
 assert.equal(nodes.has('quit'), false);
 let resolveFetch;
@@ -142,7 +142,7 @@ async function main() {
   assert.ok(check({ checked: 30, check_ok: true, game: null, misrouted: 0 }).includes('✓ 手机已连上：连通性测试通过'));
   assert.ok(check({ checked: 30, check_ok: false, game: null, misrouted: 0 }).includes('这台电脑没连上中转'));
   assert.ok(check({ checked: 30, check_ok: true, game: null, misrouted: 9 }).includes('规则没生效'), 'misrouted wins over a passed test');
-  assert.ok(check({ checked: null, check_ok: false, game: 40, misrouted: 0 }).includes('游戏连接经这台电脑出去了'));
+  assert.ok(check({ checked: null, check_ok: false, game: 40, misrouted: 0 }).includes('最近有游戏连接经过中转'));
   assert.ok(check(null, 2).includes('正在经这台电脑转发 2 条'));
   vm.runInContext(`S.phoneOs = 'android';`, context);
   phone = at(1);
@@ -170,11 +170,19 @@ async function main() {
   vm.runInContext(`S.data.tokens.forEach((t) => { t.bark.allies.push({ id: 'a3', name: '三', kind: 'bark', address: 'x' }); }); renderPhone(S.data);`, context);
   assert.ok(!nodes.get('phone-box').innerHTML.includes('data-ally-form'), 'three at most: no form');
   vm.runInContext(`S.phoneOs = 'android'; S.allyShown = null; S.data.tokens.forEach((t) => { t.bark = { bound: false }; }); renderPhone(S.data);`, context);
-  // a problem of the exits shows at the top
+  // A waiting route must not override a game actually going through this computer.
   vm.runInContext(`S.data.phone.exits = ['busy', 'busy', 'unreachable', 'online'].map((state) => ({ state })); renderPhone(S.data);`, context);
   const warnings = nodes.get('phone-status').innerHTML;
-  assert.equal((warnings.match(/另一台电脑正在用/g) || []).length, 1);
-  assert.ok(warnings.includes('连不上中转'));
+  assert.equal((warnings.match(/部分手机线路已由另一台电脑接入/g) || []).length, 1);
+  assert.ok(warnings.includes('部分手机线路连接失败') && !warnings.includes('先关掉'));
+  vm.runInContext(`S.data.capture = {state: 'running', since: 1}; S.data.stats = {uploaded: 0, connections: 1};
+    S.data.phone.exits[3].pipes = 1; renderPhone(S.data); renderOverview(S.data);`, context);
+  const active = nodes.get('phone-status').innerHTML;
+  assert.ok(active.includes('服务端文案') && !active.includes('另一台电脑') && !active.includes('连接失败'), active);
+  assert.ok(nodes.get('ov-accounts').innerHTML.includes('手机正在经这台电脑玩：1 条游戏连接'));
+  vm.runInContext(`S.data.phone.exits = [{state:'busy'}, {state:'busy'}]; renderPhone(S.data); renderOverview(S.data);`, context);
+  assert.equal((nodes.get('phone-status').innerHTML.match(/另一台电脑正在用/g) || []).length, 1);
+  assert.ok(nodes.get('ov-accounts').innerHTML.includes('另一台电脑正在用'));
   vm.runInContext(`S.data.phone = { running: false, waiting: false, exits: [] }; renderPhone(S.data);`, context);
   assert.ok(nodes.get('phone-status').innerHTML.includes('上报没有运行'));
   vm.runInContext(`S.data.phone = { running: true, waiting: false, exits: [] }; S.phone.key = null; S.page = 'overview'; watchPhone(false);`, context);

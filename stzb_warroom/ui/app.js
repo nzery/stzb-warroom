@@ -462,8 +462,7 @@ function renderOverview(d) {
   // The accounts with their push binding, and the phone through this computer (2026-11-07 user:
   // the push's state is here, not on 账号).
   const phone = d.phone || { exits: [] };
-  const pipes = (phone.exits || []).reduce((n, e) => n + (e.pipes || 0), 0);
-  const exitProblem = (phone.exits || []).map((e) => EXIT_PROBLEMS[e.state]).find(Boolean);
+  const { pipes, problems } = phoneForwarding(phone.exits);
   const rows = d.tokens.map((a) => {
     const [label, cls] = accountState(a);
     const b = a.state !== 'invalid' && a.bark;
@@ -473,7 +472,7 @@ function renderOverview(d) {
     return `<div class="mini ov-account"><div class="main-text"><b>${esc(a.role ? roleName(a.role.label) : a.name || a.token)}</b>${push ? `<div class="sub-line">${push}</div>` : ''}</div><span class="state ${cls}">${label}</span></div>`;
   });
   if (d.tokens.length && phone.running && !phone.waiting) {
-    const [text, cls] = exitProblem ? [exitProblem, 'warn'] : pipes ? [`手机正在经这台电脑玩：${pipes} 条游戏连接`, 'ok'] : ['没有手机经这台电脑玩', ''];
+    const [text, cls] = pipes ? [`手机正在经这台电脑玩：${pipes} 条游戏连接`, 'ok'] : problems.length ? [problems[0], 'warn'] : ['没有手机经这台电脑玩', ''];
     rows.push(`<div class="mini ov-account"><div class="main-text"><b>手机</b><div class="sub-line"><span class="push ${cls}">${esc(text)}</span></div></div><button class="btn ghost small" data-goto="phone">设置</button></div>`);
   }
   const accounts = rows.join('') || '<div class="empty">还没有账号</div>';
@@ -960,11 +959,24 @@ const EXIT_PROBLEMS = {
   unreachable: '连不上中转，正在重试；手机暂时连不上游戏。',
 };
 
-function phoneProblems(p) {
+// A failure on one route only describes that route. An open game connection
+// is direct evidence that this computer is already forwarding.
+function phoneForwarding(exits = []) {
+  const pipes = exits.reduce((sum, exit) => sum + (exit.pipes || 0), 0);
+  if (pipes) return { pipes, problems: [] };
+  const states = new Set(exits.map((exit) => exit.state));
+  const messages = states.size === 1 ? EXIT_PROBLEMS : {
+    busy: '部分手机线路已由另一台电脑接入。',
+    refused: '部分手机线路暂时无法接入，请稍后再试。',
+    unreachable: '部分手机线路连接失败，正在重试。',
+  };
+  return { pipes, problems: [...states].map((state) => messages[state]).filter(Boolean) };
+}
+
+function phoneProblems(p, problems) {
   if (!p.running) return [banner('warn', 'info', '上报没有运行，手机现在连不上游戏；到“概览”看原因。')];
   if (p.waiting) return [banner('info', 'info', '正在等待手机线路。')];
-  const messages = new Set(p.exits.map((e) => EXIT_PROBLEMS[e.state]).filter(Boolean));
-  return Array.from(messages, (message) => banner('warn', 'info', esc(message)));
+  return problems.map((message) => banner('warn', 'info', esc(message)));
 }
 
 // The push binding of one account (Bark on an iPhone, ntfy on Android), under the step's text.
@@ -1054,7 +1066,7 @@ function phoneCheck(step, account, pipes) {
   if (seen === undefined) return line('wait', '正在检查手机连上了没有……');
   if (seen === null) return '';  // the server cannot tell
   if (seen.misrouted) return line('bad', '小火箭把其他应用的连接也交给了这个节点，规则没生效：回到上一步，在小火箭“配置”页点这份配置选“使用配置”；首页“全局路由”选“配置”，不要选“代理”。');
-  if (seen.game !== null && seen.game < 600) return line('ok', '手机已连上：游戏连接经这台电脑出去了。');
+  if (seen.game !== null && seen.game < 600) return line('ok', '手机已连上，最近有游戏连接经过中转。');
   if (seen.checked !== null && seen.checked < 600) {
     return seen.check_ok ? line('ok', '手机已连上：连通性测试通过，可以进游戏了。')
       : line('bad', '手机连到了中转，但这台电脑没连上中转：看这个页面顶部的提示。');
@@ -1099,9 +1111,10 @@ function renderPhone(d) {
   const os = S.phoneOs;
   const notice = view.guide?.notice;
   const disclosure = notice ? banner('warn', 'info', esc(notice)) : '';
-  const problems = disclosure + phoneProblems(p).join('');
+  const forwarding = phoneForwarding(p.exits);
+  const problems = disclosure + phoneProblems(p, forwarding.problems).join('');
   if (S.phoneProblems !== problems) { S.phoneProblems = problems; $('phone-status').innerHTML = problems; }
-  const pipes = p.exits.reduce((n, e) => n + (e.pipes || 0), 0);
+  const pipes = forwarding.pipes;
   const steps = os && view.guide ? view.guide[os] || [] : [];
   const at = Math.min(phoneStep(os), Math.max(steps.length - 1, 0));
   const step = steps[at];

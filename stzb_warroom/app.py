@@ -843,7 +843,7 @@ class App:
         text = {
             "relay_connected": ("info", "手机中转：已连接"),
             "relay_refused": ("warn", "手机中转：暂时无法连接，请稍后再试"),
-            "relay_busy": ("warn", "手机中转：这个账号的手机正经另一台电脑转发；那台关掉出口或下线后，这台自动接上"),
+            "relay_busy": ("warn", "一条手机线路已由另一台电脑接入，本机会自动重试"),
             "relay_unreachable": ("warn", "手机中转：暂时连不上，稍后重试"),
             "pipe_open": ("info", "手机的一条游戏连接经本机转出"),
             "open_refused": ("warn", f"手机中转要本机连的目标不对，已拒绝（{fields.get('reason')}）"),
