@@ -2,6 +2,7 @@
 
 import hashlib
 import json
+import re
 import zlib
 
 from .frames import CLIENT_HEADER, body, message_id
@@ -28,13 +29,72 @@ PRIVATE_COLUMNS = {
 FILTER_SERVER = PRIVATE_BODIES | {LOGIN, UPDATE}
 
 
-def _snapshot(value, schema):
+def valid_layouts(layouts):
+    """Check the whole reply before replacing a working cached layout."""
+    if not isinstance(layouts, dict) or len(layouts) > 128:
+        return False
+    for version, tables in layouts.items():
+        if not re.fullmatch(r"[0-9a-f]{32}", version) or not isinstance(tables, dict) or not tables:
+            return False
+        for name, rule in tables.items():
+            if not name.startswith("Tb_") or not isinstance(rule, dict):
+                return False
+            width, keep = rule.get("width"), rule.get("integers")
+            if (type(width) is not int or not 0 < width <= 4096 or not isinstance(keep, list)
+                    or any(type(i) is not int or not 0 <= i < width for i in keep)):
+                return False
+    return True
+
+
+def _compact_row(row, rule):
+    if len(row) != rule["width"]:
+        raise ValueError("unrecognized protected row")
+    clean = [None] * len(row)
+    for i in rule["integers"]:
+        if type(row[i]) is int:
+            clean[i] = row[i]
+    row[:] = clean
+
+
+def _compact_update(op, data, rule):
+    if op == 1:
+        for row in data if data and isinstance(data[0], list) else [data]:
+            _compact_row(row, rule)
+        return True
+    if op != 2 or len(data) < 2 or 0 not in rule["integers"] or type(data[1]) is not int:
+        return False
+    fields = [0, data[1]]
+    for i in range(2, len(data), 2):
+        if type(data[i]) is int and data[i] in rule["integers"] and type(data[i + 1]) is int:
+            fields.extend(data[i:i + 2])
+    data[:] = fields
+    return len(fields) > 2
+
+
+def _snapshot(value, schema, lookup):
     schema.clear()
     if isinstance(value[4], str):  # a new role choosing a starting state has no tables
         return False
     snapshot = value[4][0]
-    for definition in snapshot[0].split(";"):
-        table, *columns = definition.split(",")
+    definition = snapshot[0]
+    if re.fullmatch(r"[0-9a-fA-F]{32}", definition):
+        layout = lookup(definition.lower()) if lookup else None
+        if not layout or any(not isinstance(row, list) or len(row) != layout[table]["width"]
+                             for table, rows in snapshot[1:] if table in layout for row in rows or ()):
+            # Leave the version visible for diagnosis without uploading unrecognized rows.
+            del snapshot[1:]
+            schema[None] = True  # subsequent changed column numbers are unknown as well
+            return True
+        schema.update(layout)
+        for table, rows in snapshot[1:]:
+            if table in layout:
+                for row in rows or ():
+                    _compact_row(row, layout[table])
+            elif table in PRIVATE_COLUMNS and rows:
+                rows.clear()
+        return True
+    for entry in definition.split(";"):
+        table, *columns = entry.split(",")
         if table in PRIVATE_COLUMNS:
             schema[table] = {i for i, name in enumerate(columns) if name in PRIVATE_COLUMNS[table]}
     changed = False
@@ -49,15 +109,22 @@ def _snapshot(value, schema):
 
 
 def _updates(value, schema):
+    if None in schema:
+        value.clear()
+        return True
     kept = []
     changed = False
     for change in value:
         op, table, data = change
-        if table in PRIVATE_COLUMNS and op != 3:
+        if (table in PRIVATE_COLUMNS or table in schema) and op != 3:
             if table not in schema or op not in (1, 2):
                 changed = True  # a capture starting mid-session has no column definitions
                 continue
-            if op == 1:
+            if isinstance(schema[table], dict):
+                changed = True
+                if not _compact_update(op, data, schema[table]):
+                    continue
+            elif op == 1:
                 for row in data if data and isinstance(data[0], list) else [data]:
                     for i in schema[table]:
                         if i < len(row):
@@ -73,7 +140,7 @@ def _updates(value, schema):
     return changed
 
 
-def for_upload(frame, client, schema):
+def for_upload(frame, client, schema, lookup=None):
     command = message_id(frame, client)
     if command in PRIVATE_BODIES or (client and command == LOGIN):
         frame = frame[:CLIENT_HEADER if client else 12]
@@ -81,7 +148,7 @@ def for_upload(frame, client, schema):
     elif not client and command in (LOGIN, UPDATE):
         try:
             value = body(frame, False)[1]
-            changed = _snapshot(value, schema) if command == LOGIN else _updates(value, schema)
+            changed = _snapshot(value, schema, lookup) if command == LOGIN else _updates(value, schema)
             if changed:
                 payload = zlib.compress(json.dumps(value, ensure_ascii=True, separators=(",", ":")).encode(), 1)
                 frame = (len(payload) + 9).to_bytes(4, "big") + frame[4:12] + b"\x03" + payload

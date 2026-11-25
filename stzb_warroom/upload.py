@@ -10,6 +10,7 @@ server holds back (its token awaits approval) waits on its own while the others 
 
 import base64
 import hashlib
+import http.client
 import json
 import os
 import sqlite3
@@ -142,9 +143,22 @@ class Queue:
             if old is not None and (old.get("server") != server or not set(old.get("tokens") or ()) <= set(tokens)):
                 dropped = self.db.execute("DELETE FROM rows").rowcount
                 self.db.execute("DELETE FROM reports")
+                self.db.execute("DELETE FROM meta WHERE key='login_layouts'")
             self.db.execute("INSERT OR REPLACE INTO meta VALUES ('scope', ?)",
                             (json.dumps({"server": server, "tokens": tokens}),))
         return dropped
+
+    def login_layouts(self, layouts=None):
+        with self.lock, self.db:
+            if layouts is not None:
+                self.db.execute("INSERT OR REPLACE INTO meta VALUES ('login_layouts', ?)", (json.dumps(layouts),))
+                return
+            row = self.db.execute("SELECT value FROM meta WHERE key='login_layouts'").fetchone()
+        try:
+            cached = json.loads(row[0]) if row else {}
+        except ValueError:
+            return {}
+        return cached if privacy.valid_layouts(cached) else {}
 
     def add(self, stream_id, seq, row):
         with self.lock:
@@ -285,9 +299,9 @@ def clean_legacy_row(row):
     return row
 
 
-def frame_row(captured_at, client, frame, schema=None):
+def frame_row(captured_at, client, frame, schema=None, lookup=None):
     command = message_id(frame, client)
-    frame = privacy.for_upload(frame, client, schema if schema is not None else {})
+    frame = privacy.for_upload(frame, client, schema if schema is not None else {}, lookup)
     trimmed = frame.rstrip(b"\0")  # some messages pad their body with NULs to a buffer size
     row = {"captured_at": captured_at, "client": client, "message_id": command,
            "frame": base64.b64encode(trimmed).decode("ascii")}
@@ -312,6 +326,8 @@ class Uploader:
         self.queued = threading.Event()
         self.log = log or (lambda **fields: print(json.dumps(fields, ensure_ascii=False), flush=True))
         dropped = queue.bind(server.origin, tokens)
+        self.layouts = queue.login_layouts()
+        self.check_layouts_at = 0
         if dropped:
             self.log(event="queue_reset", reason="server or tokens changed", rows=dropped)
         self.splitter = Splitter()
@@ -349,6 +365,22 @@ class Uploader:
         self.on_clock = None
 
     # capture thread -----------------------------------------------------------------
+
+    def login_layout(self, version):
+        # Only compact logins reach here. Refresh on login, at most once a minute.
+        # Use a separate request from the upload thread's keep-alive connection.
+        now = time.monotonic()
+        if now >= self.check_layouts_at:
+            self.check_layouts_at = now + 60
+            try:
+                reply = self.server.json(PATH, self.tokens, {"request": "loginLayouts"}, timeout=3)
+                layouts = reply.get("loginLayouts") if isinstance(reply, dict) else None
+                if privacy.valid_layouts(layouts) and self.layouts != layouts:
+                    self.queue.login_layouts(layouts)
+                    self.layouts = layouts
+            except (OSError, ValueError, http.client.HTTPException):
+                pass  # Offline: only a previously received layout can be used.
+        return self.layouts.get(version)
 
     def network_moved(self):
         """The computer changed network; only counts when a game was being captured just before."""
@@ -397,7 +429,7 @@ class Uploader:
     def add_frame(self, ends, at, client, frame):
         channel = None if client else BATTLE_LISTS.get(message_id(frame, client))
         if channel is None or message_id(frame, client) in self.whole:
-            self.add(ends, frame_row(at, client, frame, self.columns.setdefault(ends, {})))
+            self.add(ends, frame_row(at, client, frame, self.columns.setdefault(ends, {}), self.login_layout))
         if channel is None:
             return
         reports = battle_reports(body(frame, client)[1])

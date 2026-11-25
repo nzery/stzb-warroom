@@ -288,6 +288,49 @@ Queue(sys.argv[1])
         self.assertIsNone(roundtrip(99991, []))
         self.assertEqual(roundtrip(90005, update), [])
 
+    def test_compact_login_keeps_role_and_server_and_filters_protected_updates(self):
+        schema = {}
+        version = "a" * 32
+        rules = {version: {"Tb_user_stuff": {"width": 5, "integers": [0, 3]}}}
+        uploader = self.uploader({"loginLayouts": rules})
+        def roundtrip(command, value):
+            row = upload.frame_row(1, False, server_frame(command, value, encoding=3), schema, uploader.login_layout)
+            return body(base64.b64decode(row["frame"]) + bytes(row.get("pad", 0)), False)[1]
+
+        stuff = "Tb_user_stuff"
+        private = "Tb_user_stuff_one"
+        row = [7, "private", "private", 45107, "private"]
+        snapshot = [version, [stuff, [row]], [private, [["private"]]],
+                    ["Tb_army", [[23, 7]]]]
+        frame = [1, [7], 1, 0, [snapshot]]
+        decoded = roundtrip(99991, frame)
+        self.assertNotIn("private", str(decoded))
+        tables = dict(decoded[4][0][1:])
+        filtered = [7, None, None, 45107, None]
+        self.assertEqual(tables[stuff], [filtered])
+        self.assertEqual((tables[private], tables["Tb_army"]), ([], [[23, 7]]))
+        updates = [[1, stuff, [row]], [2, stuff, [0, 7, 1, "private", 3, 45108]],
+                   [2, stuff, [0, 7, 3, "private"]], [1, private, [["private"]]]]
+        self.assertEqual(roundtrip(90005, updates),
+                         [[1, stuff, tables[stuff]], [2, stuff, [0, 7, 3, 45108]]])
+        snapshot[0] = "f" * 32
+        self.assertEqual(roundtrip(99991, frame)[4][0], ["f" * 32])
+        self.assertEqual(roundtrip(90005, updates), [])
+        self.assertEqual(len(uploader.server.requests), 1)
+        snapshot[0] = version
+        row.append("private")
+        self.assertEqual(roundtrip(99991, frame)[4][0], [version])
+        row.pop()
+
+        # A client restarted offline still recognizes its server's cached schema.
+        restarted = self.uploader(OSError("offline"))
+        self.feed(restarted, (server_frame(99991, frame, encoding=3), False))
+        queued = self.queue.batch()[2][0]
+        login = body(base64.b64decode(queued["frame"]) + bytes(queued.get("pad", 0)), False)[1]
+        self.assertEqual(dict(login[4][0][1:])[stuff], [filtered])
+        self.queue.bind("https://another.example", ["t1"])
+        self.assertEqual(self.queue.login_layouts(), {})
+
     def test_a_refused_stream_is_dropped_and_its_connection_starts_another(self):
         uploader = self.uploader(refuse(409), accept())
         self.feed(uploader, (server_frame(9, [1]), False))
