@@ -342,6 +342,7 @@ class Uploader:
         # a waiting token was approved): the window looks at the accounts at once instead of
         # showing "waiting" for up to a minute (2026-10-23: a player removed the token just
         # approved and joined again).
+        self.on_relogin = None
         self.on_role = None
         # Called with how far the game's clock is ahead of this computer's (seconds) at each of the
         # game's time syncs, on the capture thread.
@@ -527,6 +528,8 @@ class Uploader:
             return True
         if result.get("stream_id") != stream_id or type(result.get("cursor")) is not int:
             raise ValueError("server did not acknowledge the batch")
+        if self.on_relogin and "relogin" in result:
+            self.on_relogin(result["relogin"])
         if self.local_capture:
             self.local_capture.remember(stream_id, result)
         self.queue.acknowledge(stream_id, result["cursor"])

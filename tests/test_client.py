@@ -157,6 +157,16 @@ class UploadTests(unittest.TestCase):
             self.assertTrue(uploader.upload_once())
         self.assertEqual(named, [1])
 
+    def test_upload_ack_passes_login_warnings_without_an_extra_request(self):
+        states = [{"owner": "a", "revision": 1, "short": "需重登", "messages": ["请重新登录游戏"]}]
+        uploader = self.uploader(lambda body: dict(accept(role=7)(body), relogin=states))
+        heard = []
+        uploader.on_relogin = heard.append
+        self.feed(uploader, (server_frame(9, [1]), False))
+        self.assertTrue(uploader.upload_once())
+        self.assertEqual(heard, [states])
+        self.assertEqual(len(uploader.server.requests), 1)
+
     def test_frames_go_with_every_token_and_reports_are_sent_once_per_role(self):
         uploader = self.uploader(accept(role=7), accept(role=7))
         reports = server_frame(0x0A, [0, [report(5), report(6)]])

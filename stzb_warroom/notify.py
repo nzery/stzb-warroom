@@ -182,7 +182,7 @@ class Follower:
             stop.wait(delay)
 
 
-def follow_prompts(server, token, stop, show=ask_terminal):
+def follow_prompts(server, token, stop, show=ask_terminal, on_relogin=None):
     """Show the server's prompt when it changes; answer it when it asks.
 
     `show(text, ask)` displays a prompt and, when `ask` is set, returns the answer;
@@ -191,7 +191,10 @@ def follow_prompts(server, token, stop, show=ask_terminal):
     shown, start = None, True
     while not stop.is_set():
         try:
-            value = server.json("/v1/client/prompt" + ("?start=1" if start else ""), token)
+            query = (["start=1"] if start else []) + (["relogin=1"] if on_relogin else [])
+            value = server.json("/v1/client/prompt" + ("?" + "&".join(query) if query else ""), token)
+            if on_relogin and "relogin" in value:
+                on_relogin(value["relogin"])
             start = False
         except HTTPError as exc:
             if exc.code in (401, 404):
@@ -258,7 +261,7 @@ def follow_roles(server, token, state_dir, stop, roles_for, label, ready, option
 
 
 def start(server, tokens, state_dir, stop, prompt_for=lambda _token: ask_terminal, ready_for=lambda _token: None,
-          roles_for=lambda _token: None, **options):
+          roles_for=lambda _token: None, on_relogin=None, **options):
     """Follow every token's notifications and prompts until `stop`; the notification threads.
 
     `prompt_for(token)`: follow_prompts's `show` for that token; `ready_for(token)`: its
@@ -270,7 +273,7 @@ def start(server, tokens, state_dir, stop, prompt_for=lambda _token: ask_termina
     for token in tokens:
         threads.append(threading.Thread(target=follow_roles, daemon=True, args=(
             server, token, state_dir, stop, roles_for, len(tokens) > 1, ready_for(token), options)))
-        threading.Thread(target=follow_prompts, args=(server, token, stop, prompt_for(token)), daemon=True).start()
+        threading.Thread(target=follow_prompts, args=(server, token, stop, prompt_for(token), on_relogin), daemon=True).start()
     for thread in threads:
         thread.start()
     return threads

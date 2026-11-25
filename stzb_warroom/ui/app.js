@@ -335,6 +335,12 @@ function renderChrome(d) {
   $('m-last').textContent = s.uploaded_at ? ago(s.uploaded_at) : '-';
   $('m-last-at').title = s.uploaded_at ? '最近一次上传战报 ' + clock(s.uploaded_at) : (d.capture.state === 'running' ? '游戏里打开战报后上传' : '还没有上传战报');
   $('m-conn').textContent = s.connections;
+  const messages = (d.relogin?.messages || []).join('\n');
+  const detail = $('relogin-detail'), short = $('m-relogin');
+  if (detail.textContent !== messages) detail.textContent = messages;
+  short.textContent = d.relogin?.short || '';
+  short.title = messages;
+  detail.hidden = short.hidden = !messages;
   const unseen = S.notices.filter((n) => n.seq > S.seenNotices && !n.hidden).length;
   $('badge-notices').textContent = S.page === 'notices' || !unseen ? '' : unseen > 99 ? '99+' : unseen;
   const unread = S.chat.messages.filter((m) => !m.mine && m.seq > S.chat.seen).length;

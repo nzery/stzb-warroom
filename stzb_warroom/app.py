@@ -210,8 +210,11 @@ class App:
             stats = {"pending": uploader.queue.pending() if uploader and self.capture["state"] == "running" else None,
                      "uploaded": self.totals[0], "uploaded_at": self.totals[1],
                      "connections": uploader.connections() if uploader else 0}
+            relogins = [entry for entry in (self.session or {}).get("relogin", {}).values() if entry[2]]
             return {
                 "version": self.version, "app_version": __version__, "server": self.server.origin, "site": site(),
+                "relogin": {"short": relogins[0][1] if relogins else "",
+                            "messages": [msg for _, _, messages in relogins for msg in messages]},
                 "capture": dict(self.capture, lost=bool(uploader and uploader.lost_after_move())), "stats": stats,
                 "tokens": [self._account(token) for token in self.tokens],
                 "hints": [dict(hint, token=mask(token)) for token, hint in self.hints.items()],
@@ -939,6 +942,32 @@ class App:
             return None
         return [r.get("id") for r in roles if isinstance(r, dict)]
 
+    def on_relogin(self, session, states):
+        if not isinstance(states, list):
+            return
+        with self.lock:
+            if self.session is not session or session["stop"].is_set():
+                return
+            known = session.setdefault("relogin", {})
+            changed = False
+            for state in states:
+                if not isinstance(state, dict):
+                    continue
+                owner, revision = state.get("owner"), state.get("revision")
+                short, messages = state.get("short"), state.get("messages")
+                if not (isinstance(owner, str) and 0 < len(owner) <= 64 and type(revision) is int
+                        and isinstance(short, str) and isinstance(messages, list)
+                        and all(isinstance(msg, str) for msg in messages)):
+                    continue
+                old = known.get(owner)
+                if old and old[0] >= revision:
+                    continue
+                entry = (revision, short[:16], [msg[:512] for msg in messages])
+                known[owner] = entry
+                changed |= (old[1:] if old else ("", [])) != entry[1:]
+            if changed:
+                self.touch()
+
     def prompt_for(self, token):
         def show(text, ask):  # only hints now; nothing is ever asked
             with self.lock:
@@ -1014,6 +1043,7 @@ class App:
             session["thread"].start()
         notify.start(self.server, session["tokens"], self.state_dir, stop, prompt_for=self.prompt_for,
                      ready_for=self.notify_ready, roles_for=self.notify_roles, show=self.on_notice,
+                     on_relogin=lambda states: self.on_relogin(session, states),
                      warn=lambda text: self.log(text, "warn"))
         if self.settings["phone_exit"]:
             self._start_exits(session)  # the phone's connections are reported by this capture
@@ -1023,6 +1053,7 @@ class App:
         def started(uploader):
             uploader.on_role = self.poke.set  # check_accounts now, not at the next minute
             uploader.on_clock = self.on_clock
+            uploader.on_relogin = lambda states: self.on_relogin(session, states)
             with self.lock:
                 session["uploader"] = uploader
                 if session is self.session:

@@ -346,6 +346,25 @@ class AppTests(unittest.TestCase):
         show(None, None)
         self.assertEqual(app.snapshot()["hints"], [])
 
+    def test_relogin_upload_and_poll_responses_cannot_undo_newer_state(self):
+        app = self.app(saved=GOOD)
+        session = app.session = {"stop": threading.Event(), "tokens": [GOOD]}
+        def update(owner, n, *messages):
+            app.on_relogin(session, [{"owner": owner, "revision": n, "short": "需重登" if messages else "",
+                                      "messages": list(messages)}])
+        update("a", 5, "甲需重登")
+        update("b", 3, "乙需重登")
+        update("a", 4)
+        self.assertEqual(app.snapshot()["relogin"]["messages"], ["甲需重登", "乙需重登"])
+        update("a", 6)
+        update("a", 5, "甲需重登")
+        self.assertEqual(app.snapshot()["relogin"], {"short": "需重登", "messages": ["乙需重登"]})
+        update("b", 7)
+        self.assertEqual(app.snapshot()["relogin"], {"short": "", "messages": []})
+        app.session = None
+        update("a", 8, "过期连接")
+        self.assertFalse(app.snapshot()["relogin"]["messages"])
+
     def test_notice_settings_are_the_same_for_every_account(self):
         app = self.app(saved=f"{GOOD},{NEW},{BAD}")
         app.check_accounts()
