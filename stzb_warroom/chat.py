@@ -159,6 +159,7 @@ class Chat:
         self.key, self.path = None, None  # the account whose messages are kept and shown
         self.messages = collections.deque(maxlen=KEEP)
         self.seq = 0
+        self.scope = None  # the membership for which the server accepted this cursor
         self.after = 0  # the newest id the stream gave: what came after it is asked for
         self.state, self.name, self.online, self.error = "connecting", None, None, None
         self.admin, self.recall_seconds = False, 0  # what the server said in hello
@@ -187,6 +188,7 @@ class Chat:
                 self.mention_push, self.phone, self.pinned = None, False, None
             self.key, self.path = key, self.dir / f"chat-{key}.jsonl"
             self.messages.clear()
+            self.scope = None
             self.seq = self.after = 0
             legacy = self.dir / "chat.jsonl"  # before v1.13.2 one for all: the first account used takes it
             if legacy.is_file() and not self.path.exists():
@@ -467,18 +469,20 @@ class Chat:
     def follow_once(self, token, stop):
         self.use(token)
         with self.lock:
-            after = self.after
+            query = {"after": self.after, "recall": 1}
+            if self.scope:
+                query["scope"] = self.scope
         # Looked at on every line (the keep-alives too), not only on a message: a switch is not
         # left waiting for someone to speak.
         gone = Either(stop, lambda: self.token() != token)
-        with self.server.open(f"{STREAM}?after={after}&recall=1", token, timeout=STREAM_TIMEOUT) as stream:
+        with self.server.open(f"{STREAM}?{urlencode(query)}", token, timeout=STREAM_TIMEOUT) as stream:
             with self.lock:
                 self.stream = stream
             try:
                 for kind, _id, data in events(stream, gone):
-                    self._take(kind, data)
                     if self.token() != token:
                         return  # the account was removed, or another chosen
+                    self._take(kind, data)
             finally:
                 with self.lock:
                     if self.stream is stream:
@@ -490,7 +494,12 @@ class Chat:
             return
         if kind == "hello" and isinstance(data.get("conn"), str):
             recall = data.get("recall")
-            self._set(state="online", conn=data["conn"][:64], name=text_of(data.get("name"), 32),
+            resume = {}
+            scope, after = data.get("scope"), data.get("after")
+            if isinstance(scope, str) and re.fullmatch(r"[0-9a-f]{24}", scope) and type(after) is int and after >= 0:
+                # Reconnect from the part actually received if a replay is interrupted midway.
+                resume = {"scope": scope, "after": after}
+            self._set(**resume, state="online", conn=data["conn"][:64], name=text_of(data.get("name"), 32),
                       online=data.get("online") if type(data.get("online")) is int else None, error=None,
                       admin=data.get("admin") is True, recall_seconds=recall if type(recall) is int and recall > 0 else 0,
                       mention_push=data["mention_push"] if isinstance(data.get("mention_push"), bool) else None,

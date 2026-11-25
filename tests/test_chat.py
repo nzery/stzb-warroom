@@ -123,6 +123,28 @@ class ChatTests(unittest.TestCase):
         self.assertEqual([(m["text"], m["mine"]) for m in again.messages], [("一", False), ("我说的", True), ("二", False)])
         self.assertEqual(again.after, 6)
 
+    def test_reconnecting_halfway_through_the_new_memberships_history(self):
+        first, second = "a" * 24, "b" * 24
+        def msg(i):
+            return ("msg", {"id": i, "name": "甲", "text": str(i), "time": i})
+        def hello(scope, after, pin):
+            return ("hello", {"conn": "c1", "scope": scope, "after": after, "pinned": pin})
+        room = self.chat(Server(sse(hello(first, 0, "新人置顶"), msg(90))))
+        room.follow_once(TOKEN, threading.Event())
+        room.server.stream = sse(hello(second, 0, "正式群置顶"), msg(12))
+        room.follow_once(TOKEN, threading.Event())
+        self.assertIn(f"after=90&recall=1&scope={first}", room.server.opened[-1])
+        self.assertEqual((room.pinned, room.after), ("正式群置顶", 12))
+        room.server.stream = sse(hello(second, 12, "正式群置顶"), msg(13))
+        room.follow_once(TOKEN, threading.Event())
+        self.assertIn(f"after=12&recall=1&scope={second}", room.server.opened[-1])
+        self.assertEqual([m["id"] for m in room.messages], [90, 12, 13])
+        # A restart with a pre-upgrade cache may ask after 90 again. The server rewinds it.
+        again = self.chat(Server(sse(hello(second, 11, "正式群置顶"), msg(12), msg(13), msg(14))))
+        again.follow_once(TOKEN, threading.Event())
+        self.assertIn("after=90", again.server.opened[-1])
+        self.assertEqual([m["id"] for m in again.messages], [90, 12, 13, 14])
+
     def test_what_the_account_sent_elsewhere_shows_as_its_own(self):
         room = self.chat(Server(sse(("hello", {"conn": "c1", "name": "沉稳的赤兔"}),
                                     ("msg", {"id": 7, "name": "沉稳的赤兔", "text": "后台回的", "time": 170, "mine": True}),
