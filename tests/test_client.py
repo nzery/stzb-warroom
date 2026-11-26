@@ -285,14 +285,15 @@ Queue(sys.argv[1])
         self.assertEqual(roundtrip(99991, value)[4][0][1][1], [[7, 42, None]])
         self.assertEqual(roundtrip(90005, update),
                          [[2, table, [0, 7, 2, None, 1, 42]], [1, table, [8, 41, None]]])
-        self.assertIsNone(roundtrip(99991, []))
+        self.assertEqual(roundtrip(99991, [])["shape"], [])
         self.assertEqual(roundtrip(90005, update), [])
 
     def test_compact_login_keeps_role_and_server_and_filters_protected_updates(self):
         schema = {}
         version = "a" * 32
-        rules = {version: {"Tb_user_stuff": {"width": 5, "integers": [0, 3]}}}
-        uploader = self.uploader({"loginLayouts": rules})
+        rules = {version: {"Tb_user_stuff": {"width": 5, "integers": [0, 3]},
+                           "Tb_fixture": {"width": 2, "integers": [1]}}}
+        uploader = self.uploader({"loginLayouts": rules, "loginEvidencePaths": [[1, 0]]})
         def roundtrip(command, value):
             row = upload.frame_row(1, False, server_frame(command, value, encoding=3), schema, uploader.login_layout)
             return body(base64.b64decode(row["frame"]) + bytes(row.get("pad", 0)), False)[1]
@@ -314,12 +315,25 @@ Queue(sys.argv[1])
         self.assertEqual(roundtrip(90005, updates),
                          [[1, stuff, tables[stuff]], [2, stuff, [0, 7, 3, 45108]]])
         snapshot[0] = "f" * 32
-        self.assertEqual(roundtrip(99991, frame)[4][0], ["f" * 32])
+        diagnostic = roundtrip(99991, frame)
+        self.assertEqual(diagnostic["format"], snapshot[0])
+        self.assertEqual(diagnostic["shape"][1], [7])
+        observed = dict(diagnostic["shape"][4][0][1:])
+        self.assertEqual(observed[stuff], [["i", "s", "s", "i", "s"]])
+        self.assertEqual(observed[private], [["s"]])
+        self.assertNotIn("private", str(diagnostic))
         self.assertEqual(roundtrip(90005, updates), [])
         self.assertEqual(len(uploader.server.requests), 1)
         snapshot[0] = version
         row.append("private")
-        self.assertEqual(roundtrip(99991, frame)[4][0], [version])
+        snapshot.append(["Tb_example", [[123, {"secret-key": "private"}]]])
+        snapshot.append(["Tb_fixture", [["private", 17]]])
+        diagnostic = roundtrip(99991, frame)
+        self.assertEqual(diagnostic["cause"], "width")
+        self.assertEqual(dict(diagnostic["shape"][4][0][1:])[stuff], [["i", "s", "s", "i", "s", "s"]])
+        self.assertEqual(dict(diagnostic["shape"][4][0][1:])["Tb_fixture"], [["s", 17]])
+        self.assertNotIn("secret-key", str(diagnostic))
+        self.assertNotIn("private", str(diagnostic))
         row.pop()
 
         # A client restarted offline still recognizes its server's cached schema.

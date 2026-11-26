@@ -144,14 +144,16 @@ class Queue:
                 dropped = self.db.execute("DELETE FROM rows").rowcount
                 self.db.execute("DELETE FROM reports")
                 self.db.execute("DELETE FROM meta WHERE key='login_layouts'")
+                self.db.execute("DELETE FROM meta WHERE key='login_evidence_paths'")
             self.db.execute("INSERT OR REPLACE INTO meta VALUES ('scope', ?)",
                             (json.dumps({"server": server, "tokens": tokens}),))
         return dropped
 
-    def login_layouts(self, layouts=None):
+    def login_layouts(self, layouts=None, paths=()):
         with self.lock, self.db:
             if layouts is not None:
                 self.db.execute("INSERT OR REPLACE INTO meta VALUES ('login_layouts', ?)", (json.dumps(layouts),))
+                self.db.execute("INSERT OR REPLACE INTO meta VALUES ('login_evidence_paths', ?)", (json.dumps(paths),))
                 return
             row = self.db.execute("SELECT value FROM meta WHERE key='login_layouts'").fetchone()
         try:
@@ -159,6 +161,14 @@ class Queue:
         except ValueError:
             return {}
         return cached if privacy.valid_layouts(cached) else {}
+
+    def evidence_paths(self):
+        with self.lock:
+            row = self.db.execute("SELECT value FROM meta WHERE key='login_evidence_paths'").fetchone()
+        try:
+            return privacy.integer_paths(json.loads(row[0])) if row else []
+        except ValueError:
+            return []
 
     def add(self, stream_id, seq, row):
         with self.lock:
@@ -327,6 +337,7 @@ class Uploader:
         self.log = log or (lambda **fields: print(json.dumps(fields, ensure_ascii=False), flush=True))
         dropped = queue.bind(server.origin, tokens)
         self.layouts = queue.login_layouts()
+        self.evidence_paths = queue.evidence_paths()
         self.check_layouts_at = 0
         if dropped:
             self.log(event="queue_reset", reason="server or tokens changed", rows=dropped)
@@ -375,12 +386,14 @@ class Uploader:
             try:
                 reply = self.server.json(PATH, self.tokens, {"request": "loginLayouts"}, timeout=3)
                 layouts = reply.get("loginLayouts") if isinstance(reply, dict) else None
-                if privacy.valid_layouts(layouts) and self.layouts != layouts:
-                    self.queue.login_layouts(layouts)
-                    self.layouts = layouts
+                if privacy.valid_layouts(layouts):
+                    paths = privacy.integer_paths(reply.get("loginEvidencePaths"))
+                    if self.layouts != layouts or self.evidence_paths != paths:
+                        self.queue.login_layouts(layouts, paths)
+                        self.layouts, self.evidence_paths = layouts, paths
             except (OSError, ValueError, http.client.HTTPException):
                 pass  # Offline: only a previously received layout can be used.
-        return self.layouts.get(version)
+        return self.layouts.get(version), self.evidence_paths
 
     def network_moved(self):
         """The computer changed network; only counts when a game was being captured just before."""
