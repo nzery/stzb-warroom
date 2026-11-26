@@ -195,155 +195,16 @@ class UploadTests(unittest.TestCase):
         self.assertEqual([(row["channel"], [r["battle_id"] for r in row["reports"]]) for row in rows],
                          [("personal", [5, 6]), ("alliance", [5, 6])])
 
-    def test_credentials_are_removed_before_queueing_and_on_old_queue_retries(self):
+    def test_frames_are_queued_exactly_as_captured(self):
+        # The server removes credentials; the client sends what the game sent.
         uploader = self.uploader(accept())
-        digest = hashlib.sha256(b"session:" + SESSION).digest()
-        for seq, (command, client) in enumerate([(99991, True), (98888, False), (90008, True),
-                                                  (1436, False), (3928, False), (7, True)], 1):
-            raw = (client_frame if client else server_frame)(command, ["private"])
-            row = upload.frame_row(1, client, raw)
-            clean = base64.b64decode(row["frame"]) + bytes(row.get("pad", 0))
-            if client:
-                self.assertEqual(clean[4:44], b"STW-H256" + digest)
-            if command == 7:
-                self.assertEqual(body(clean, True)[1], ["private"])
-            else:
-                self.assertEqual(len(clean), 57 if client else 12)
-            self.assertEqual(int.from_bytes(clean[:4], "big"), len(clean) - 4)
-            self.queue.add("a", seq, row)
-            legacy = dict(row, frame=base64.b64encode(raw).decode(), pad=0)
-            with self.queue.db:
-                self.queue.db.execute("INSERT INTO rows(stream_id,seq,row) VALUES(?,?,?)",
-                                      ("b", seq, json.dumps(legacy)))
-        current = self.queue.batch()[2]
-        self.queue.acknowledge("a", 6)
-        self.assertTrue(uploader.upload_once())
-        self.assertEqual(uploader.server.requests[0][2]["frames"], current)
-
-    def test_offline_upgrade_removes_old_pages_and_resumes_after_interruption(self):
-        import subprocess
-        import sys
-        from stzb_warroom.runner import upgrade_existing_queue
-
-        with tempfile.TemporaryDirectory() as folder:
-            path = Path(folder) / "queue.sqlite"
-            raw = server_frame(98888, ["legacy-sensitive-marker" * 900])
-            encoded = base64.b64encode(raw).decode()
-            marker = encoded[100:180].encode()
-            row = json.dumps(dict(captured_at=12, client=False, message_id=98888, frame=encoded))
-            with sqlite3.connect(path) as db:
-                db.execute("PRAGMA journal_mode=WAL")
-                db.execute("CREATE TABLE rows(stream_id TEXT,seq INTEGER,row TEXT,reports INTEGER DEFAULT 0,"
-                           "PRIMARY KEY(stream_id,seq))")
-                db.execute("INSERT INTO rows VALUES ('a',9,?,0)", (row,))
-                db.execute("INSERT INTO rows VALUES ('a',10,?,1)", (json.dumps({"reports": [report(123)]}),))
-                db.execute("CREATE TABLE meta(key TEXT PRIMARY KEY,value TEXT NOT NULL)")
-                db.execute("INSERT INTO meta VALUES ('uploaded',?)", ('{"reports":17,"at":2}',))
-            db.close()
-            self.assertIn(marker, path.read_bytes())
-            # A hard exit after VACUUM but before the final checkpoint leaves the WAL on disk.
-            interrupted = subprocess.run([sys.executable, "-c", """
-import os,sqlite3,sys
-from stzb_warroom.upload import Queue
-connect = sqlite3.connect
-def traced(*args, **kwargs):
-    db = connect(*args, **kwargs)
-    db.set_trace_callback(lambda sql: os._exit(75) if sql.startswith('PRAGMA wal_checkpoint') else None)
-    return db
-sqlite3.connect = traced
-Queue(sys.argv[1])
-""", str(path)], check=False, timeout=15, cwd=Path(upload.__file__).resolve().parents[1])
-            self.assertEqual(interrupted.returncode, 75)
-            self.assertTrue(path.with_name(path.name + "-wal").is_file())
-            upgrade_existing_queue(folder)
-            upgrade_existing_queue(folder)
-            queue = Queue(path)
-            try:
-                self.assertEqual(queue.totals(), (17, 2))
-                stream, start, rows = queue.batch()
-                self.assertEqual((stream, start), ("a", 9))
-                self.assertEqual(rows, [upload.frame_row(12, False, raw), {"reports": [report(123)]}])
-                self.assertEqual(queue.db.execute("SELECT seq,reports FROM rows ORDER BY seq").fetchall(),
-                                 [(9, 0), (10, 1)])
-                for file in path.parent.glob("queue.sqlite*"):
-                    self.assertNotIn(marker, file.read_bytes())
-            finally:
-                queue.close()
-
-    def test_snapshot_and_incremental_updates_remove_credentials_by_column(self):
-        schema = {}
-        def roundtrip(command, value):
-            row = upload.frame_row(1, False, server_frame(command, value, encoding=3), schema)
-            return body(base64.b64decode(row["frame"]) + bytes(row.get("pad", 0)), False)[1]
-
-        table = "Tb_user_stuff"
-        update = [[2, table, [0, 7, 2, "private", 1, 42]], [1, table, [8, 41, "private"]]]
-        self.assertEqual(roundtrip(90005, update), [])
-        snapshot = ["Tb_user_stuff,userid,now_run_server_id,safe_lock_password",
-                    [table, [[7, 42, "private"]]]]
-        value = [1, [7], 0, 0, [snapshot]]
-        self.assertEqual(roundtrip(99991, value)[4][0][1][1], [[7, 42, None]])
-        self.assertEqual(roundtrip(90005, update),
-                         [[2, table, [0, 7, 2, None, 1, 42]], [1, table, [8, 41, None]]])
-        self.assertEqual(roundtrip(99991, [])["shape"], [])
-        self.assertEqual(roundtrip(90005, update), [])
-
-    def test_compact_login_keeps_role_and_server_and_filters_protected_updates(self):
-        schema = {}
-        version = "a" * 32
-        rules = {version: {"Tb_user_stuff": {"width": 5, "integers": [0, 3]},
-                           "Tb_fixture": {"width": 2, "integers": [1]}}}
-        uploader = self.uploader({"loginLayouts": rules, "loginEvidencePaths": [[1, 0]]})
-        def roundtrip(command, value):
-            row = upload.frame_row(1, False, server_frame(command, value, encoding=3), schema, uploader.login_layout)
-            return body(base64.b64decode(row["frame"]) + bytes(row.get("pad", 0)), False)[1]
-
-        stuff = "Tb_user_stuff"
-        private = "Tb_user_stuff_one"
-        row = [7, "private", "private", 45107, "private"]
-        snapshot = [version, [stuff, [row]], [private, [["private"]]],
-                    ["Tb_army", [[23, 7]]]]
-        frame = [1, [7], 1, 0, [snapshot]]
-        decoded = roundtrip(99991, frame)
-        self.assertNotIn("private", str(decoded))
-        tables = dict(decoded[4][0][1:])
-        filtered = [7, None, None, 45107, None]
-        self.assertEqual(tables[stuff], [filtered])
-        self.assertEqual((tables[private], tables["Tb_army"]), ([], [[23, 7]]))
-        updates = [[1, stuff, [row]], [2, stuff, [0, 7, 1, "private", 3, 45108]],
-                   [2, stuff, [0, 7, 3, "private"]], [1, private, [["private"]]]]
-        self.assertEqual(roundtrip(90005, updates),
-                         [[1, stuff, tables[stuff]], [2, stuff, [0, 7, 3, 45108]]])
-        snapshot[0] = "f" * 32
-        diagnostic = roundtrip(99991, frame)
-        self.assertEqual(diagnostic["format"], snapshot[0])
-        self.assertEqual(diagnostic["shape"][1], [7])
-        observed = dict(diagnostic["shape"][4][0][1:])
-        self.assertEqual(observed[stuff], [["i", "s", "s", "i", "s"]])
-        self.assertEqual(observed[private], [["s"]])
-        self.assertNotIn("private", str(diagnostic))
-        self.assertEqual(roundtrip(90005, updates), [])
-        self.assertEqual(len(uploader.server.requests), 1)
-        snapshot[0] = version
-        row.append("private")
-        snapshot.append(["Tb_example", [[123, {"secret-key": "private"}]]])
-        snapshot.append(["Tb_fixture", [["private", 17]]])
-        diagnostic = roundtrip(99991, frame)
-        self.assertEqual(diagnostic["cause"], "width")
-        self.assertEqual(dict(diagnostic["shape"][4][0][1:])[stuff], [["i", "s", "s", "i", "s", "s"]])
-        self.assertEqual(dict(diagnostic["shape"][4][0][1:])["Tb_fixture"], [["s", 17]])
-        self.assertNotIn("secret-key", str(diagnostic))
-        self.assertNotIn("private", str(diagnostic))
-        row.pop()
-
-        # A client restarted offline still recognizes its server's cached schema.
-        restarted = self.uploader(OSError("offline"))
-        self.feed(restarted, (server_frame(99991, frame, encoding=3), False))
-        queued = self.queue.batch()[2][0]
-        login = body(base64.b64decode(queued["frame"]) + bytes(queued.get("pad", 0)), False)[1]
-        self.assertEqual(dict(login[4][0][1:])[stuff], [filtered])
-        self.queue.bind("https://another.example", ["t1"])
-        self.assertEqual(self.queue.login_layouts(), {})
+        request = client_frame(99991, {"password": "x"})
+        login = server_frame(99991, [1, [7], 1, 0, [["Tb_user_stuff,userid,safe_lock_password",
+                                                      ["Tb_user_stuff", [[7, "lock"]]]]]], encoding=3)
+        self.feed(uploader, (request, True), (login, False))
+        rows = self.queue.batch()[2]
+        self.assertEqual([base64.b64decode(row["frame"]) + bytes(row.get("pad", 0)) for row in rows],
+                         [request, login])
 
     def test_a_refused_stream_is_dropped_and_its_connection_starts_another(self):
         uploader = self.uploader(refuse(409), accept())

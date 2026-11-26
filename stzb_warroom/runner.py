@@ -33,20 +33,6 @@ def lock(path):
     return handle
 
 
-def upgrade_existing_queue(folder):
-    """Opening the window also cleans an old queue when capture is disabled or offline."""
-    path = Path(folder) / "queue.sqlite"
-    if path.is_file():
-        try:
-            held = lock(path.with_name("capture.lock"))
-        except RuntimeError:
-            return  # The capturing process owns the queue and migrates it when it opens.
-        try:
-            Queue(path).close()
-        finally:
-            held.close()
-
-
 def run_capture(server, tokens, folder, stop, interface=None, all_hosts=False, dumpcap=None, started=None):
     """Capture and upload until `stop` is set; RuntimeError when the capture or the upload fails.
 

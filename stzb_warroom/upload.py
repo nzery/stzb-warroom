@@ -22,7 +22,6 @@ from pathlib import Path
 from urllib.error import HTTPError
 
 from .api import ConnectTimeout
-from . import privacy
 from .frames import Splitter, body, message_id
 
 PATH = "/v2/capture/frames"
@@ -93,42 +92,9 @@ class Queue:
         # rows (2026-11-13 user), and keeps the count across launches in meta.
         if "reports" not in {column[1] for column in self.db.execute("PRAGMA table_info(rows)")}:
             self.db.execute("ALTER TABLE rows ADD COLUMN reports INTEGER NOT NULL DEFAULT 0")
-        if "sanitized" not in {column[1] for column in self.db.execute("PRAGMA table_info(rows)")}:
-            self.db.execute("ALTER TABLE rows ADD COLUMN sanitized INTEGER NOT NULL DEFAULT 0")
         self.db.commit()
-        try:
-            self._clean_legacy_queue()
-        except BaseException:
-            self.db.close()
-            raise
         self.lock = threading.Lock()
         self.full_logged = 0
-
-    def _clean_legacy_queue(self):
-        if self.db.execute("PRAGMA user_version").fetchone()[0] >= 1:
-            return
-        self.db.execute("PRAGMA secure_delete=ON")
-        last = 0
-        while True:
-            ids = self.db.execute("SELECT rowid FROM rows WHERE rowid>? AND sanitized=0 "
-                                  "ORDER BY rowid LIMIT 64", (last,)).fetchall()
-            if not ids:
-                break
-            with self.db:
-                for last, in ids:
-                    text, = self.db.execute("SELECT row FROM rows WHERE rowid=?", (last,)).fetchone()
-                    row = json.loads(text)
-                    if "frame" in row:
-                        row = clean_legacy_row(row)
-                        self.db.execute("UPDATE rows SET row=?,sanitized=1 WHERE rowid=?", (json.dumps(row), last))
-                    else:
-                        self.db.execute("UPDATE rows SET sanitized=1 WHERE rowid=?", (last,))
-        # Includes free pages left by an earlier version even if it already sent every row.
-        # Publish completion only after old WAL frames and database page fragments are gone.
-        self.db.execute("VACUUM")
-        if self.db.execute("PRAGMA wal_checkpoint(TRUNCATE)").fetchone()[0]:
-            raise sqlite3.OperationalError("upload queue is still in use, retry on restart")
-        self.db.execute("PRAGMA user_version=1")
 
     def bind(self, server, tokens):
         """Keep the queued rows only for the server and the tokens they were captured for:
@@ -143,37 +109,14 @@ class Queue:
             if old is not None and (old.get("server") != server or not set(old.get("tokens") or ()) <= set(tokens)):
                 dropped = self.db.execute("DELETE FROM rows").rowcount
                 self.db.execute("DELETE FROM reports")
-                self.db.execute("DELETE FROM meta WHERE key='login_layouts'")
-                self.db.execute("DELETE FROM meta WHERE key='login_evidence_paths'")
             self.db.execute("INSERT OR REPLACE INTO meta VALUES ('scope', ?)",
                             (json.dumps({"server": server, "tokens": tokens}),))
         return dropped
 
-    def login_layouts(self, layouts=None, paths=()):
-        with self.lock, self.db:
-            if layouts is not None:
-                self.db.execute("INSERT OR REPLACE INTO meta VALUES ('login_layouts', ?)", (json.dumps(layouts),))
-                self.db.execute("INSERT OR REPLACE INTO meta VALUES ('login_evidence_paths', ?)", (json.dumps(paths),))
-                return
-            row = self.db.execute("SELECT value FROM meta WHERE key='login_layouts'").fetchone()
-        try:
-            cached = json.loads(row[0]) if row else {}
-        except ValueError:
-            return {}
-        return cached if privacy.valid_layouts(cached) else {}
-
-    def evidence_paths(self):
-        with self.lock:
-            row = self.db.execute("SELECT value FROM meta WHERE key='login_evidence_paths'").fetchone()
-        try:
-            return privacy.integer_paths(json.loads(row[0])) if row else []
-        except ValueError:
-            return []
-
     def add(self, stream_id, seq, row):
         with self.lock:
             if self._room(1):
-                self.db.execute("INSERT INTO rows (stream_id, seq, row, sanitized) VALUES (?,?,?,1)",
+                self.db.execute("INSERT INTO rows (stream_id, seq, row) VALUES (?,?,?)",
                                 (stream_id, seq, json.dumps(row)))
                 self.db.commit()
                 return True
@@ -216,7 +159,7 @@ class Queue:
             else:
                 for offset, (name, items) in enumerate(groups.items()):
                     row = {"captured_at": captured_at, "channel": name, "reports": items}
-                    self.db.execute("INSERT INTO rows (stream_id, seq, row, reports,sanitized) VALUES (?,?,?,?,1)",
+                    self.db.execute("INSERT INTO rows (stream_id, seq, row, reports) VALUES (?,?,?,?)",
                                     (stream_id, seq + offset, json.dumps(row), len(items)))
         if full:
             self._warn_full()
@@ -234,16 +177,13 @@ class Queue:
                 first = self.db.execute("SELECT stream_id FROM rows ORDER BY rowid LIMIT 1").fetchone()
             if first is None:
                 return None
-            rows = self.db.execute("SELECT seq,row,sanitized FROM rows WHERE stream_id=? ORDER BY seq LIMIT ?",
+            rows = self.db.execute("SELECT seq,row FROM rows WHERE stream_id=? ORDER BY seq LIMIT ?",
                                    (first[0], MAX_ROWS)).fetchall()
         start, items, size = rows[0][0], [], 0
-        for seq, text, sanitized in rows:
+        for seq, text in rows:
             if seq != start + len(items) or (items and size + len(text) > MAX_BODY):
                 break
-            row = json.loads(text)
-            if not sanitized and "frame" in row:
-                row = clean_legacy_row(row)
-            items.append(row)
+            items.append(json.loads(text))
             size += len(text)
         return first[0], start, items
 
@@ -302,18 +242,9 @@ def saved_totals(path):
         return 0, None
 
 
-def clean_legacy_row(row):
-    raw = base64.b64decode(row["frame"]) + bytes(row.get("pad", 0))
-    if row["client"] or message_id(raw, False) in privacy.FILTER_SERVER:
-        return frame_row(row["captured_at"], row["client"], raw)
-    return row
-
-
-def frame_row(captured_at, client, frame, schema=None, lookup=None):
-    command = message_id(frame, client)
-    frame = privacy.for_upload(frame, client, schema if schema is not None else {}, lookup)
+def frame_row(captured_at, client, frame):
     trimmed = frame.rstrip(b"\0")  # some messages pad their body with NULs to a buffer size
-    row = {"captured_at": captured_at, "client": client, "message_id": command,
+    row = {"captured_at": captured_at, "client": client, "message_id": message_id(frame, client),
            "frame": base64.b64encode(trimmed).decode("ascii")}
     if len(trimmed) < len(frame):
         row["pad"] = len(frame) - len(trimmed)
@@ -336,14 +267,10 @@ class Uploader:
         self.queued = threading.Event()
         self.log = log or (lambda **fields: print(json.dumps(fields, ensure_ascii=False), flush=True))
         dropped = queue.bind(server.origin, tokens)
-        self.layouts = queue.login_layouts()
-        self.evidence_paths = queue.evidence_paths()
-        self.check_layouts_at = 0
         if dropped:
             self.log(event="queue_reset", reason="server or tokens changed", rows=dropped)
         self.splitter = Splitter()
         self.links = {}  # connection -> [stream id, last seq, last seen]
-        self.columns = {}  # sensitive column positions, from each connection's own login
         self.roles = {}  # stream id -> role, as the server said
         self.dead = set()  # streams the server refused: their connection starts a new one
         self.drop = {"client": set(), "server": set()}  # message ids the server does not want
@@ -377,24 +304,6 @@ class Uploader:
 
     # capture thread -----------------------------------------------------------------
 
-    def login_layout(self, version):
-        # Only compact logins reach here. Refresh on login, at most once a minute.
-        # Use a separate request from the upload thread's keep-alive connection.
-        now = time.monotonic()
-        if now >= self.check_layouts_at:
-            self.check_layouts_at = now + 60
-            try:
-                reply = self.server.json(PATH, self.tokens, {"request": "loginLayouts"}, timeout=3)
-                layouts = reply.get("loginLayouts") if isinstance(reply, dict) else None
-                if privacy.valid_layouts(layouts):
-                    paths = privacy.integer_paths(reply.get("loginEvidencePaths"))
-                    if self.layouts != layouts or self.evidence_paths != paths:
-                        self.queue.login_layouts(layouts, paths)
-                        self.layouts, self.evidence_paths = layouts, paths
-            except (OSError, ValueError, http.client.HTTPException):
-                pass  # Offline: only a previously received layout can be used.
-        return self.layouts.get(version), self.evidence_paths
-
     def network_moved(self):
         """The computer changed network; only counts when a game was being captured just before."""
         now = time.monotonic()
@@ -427,7 +336,6 @@ class Uploader:
             for ends, link in list(self.links.items()):
                 if now - link[2] > LINK_IDLE:
                     del self.links[ends]
-                    self.columns.pop(ends, None)
                     self.splitter.forget(ends)
 
     def game_clock(self, at, frame):
@@ -442,7 +350,7 @@ class Uploader:
     def add_frame(self, ends, at, client, frame):
         channel = None if client else BATTLE_LISTS.get(message_id(frame, client))
         if channel is None or message_id(frame, client) in self.whole:
-            self.add(ends, frame_row(at, client, frame, self.columns.setdefault(ends, {}), self.login_layout))
+            self.add(ends, frame_row(at, client, frame))
         if channel is None:
             return
         reports = battle_reports(body(frame, client)[1])
