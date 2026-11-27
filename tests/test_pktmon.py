@@ -10,7 +10,7 @@ import unittest
 import unittest.mock
 from pathlib import Path
 
-from stzb_warroom import app as appmod, pcap, winpktmon, winsys
+from stzb_warroom import app as appmod, frames, pcap, winpktmon, winsys
 from stzb_warroom.app import App
 
 
@@ -26,25 +26,46 @@ class PktMonUnitTests(unittest.TestCase):
         truncated = struct.pack("<QHHHHHHHIIHH", 1, 1, 1, 0, 1, 1, 1, 1, 0, 0, 100, 100) + b"short"
         self.assertIsNone(winpktmon.parse_frame_payload(truncated))
 
-    def test_packet_deduper_drops_repeats_and_evicts_old(self):
-        dedup = winpktmon.PacketDeduper(maxlen=2)
-        self.assertTrue(dedup.accept(10, 1))
-        self.assertFalse(dedup.accept(10, 1))
-        self.assertTrue(dedup.accept(10, 2))
-        self.assertTrue(dedup.accept(11, 1))
-        self.assertTrue(dedup.accept(10, 1))  # evicted after maxlen=2
-        self.assertTrue(dedup.accept(0, 0))   # zero group_id is never suppressed
-        self.assertTrue(dedup.accept(0, 0))
+    def test_segment_deduper_drops_repeats_and_evicts_old(self):
+        dedup = winpktmon.SegmentDeduper(maxlen=2)
+        s1 = ("1.2.3.4", 8001, "192.168.1.2", 50000, 100, False, b"abcd", False)
+        s2 = ("1.2.3.4", 8001, "192.168.1.2", 50000, 104, False, b"efgh", False)
+        s3 = ("1.2.3.4", 8001, "192.168.1.2", 50000, 108, False, b"ijkl", False)
+        s1_longer = ("1.2.3.4", 8001, "192.168.1.2", 50000, 100, False, b"abcdefgh", False)
+        self.assertTrue(dedup.accept(s1))
+        self.assertFalse(dedup.accept(s1))
+        self.assertTrue(dedup.accept(s1_longer))  # different payload length is kept
+        self.assertTrue(dedup.accept(s2))
+        self.assertTrue(dedup.accept(s3))
+        self.assertTrue(dedup.accept(s1))  # evicted after maxlen=2
+
+    def test_pcap_handles_windows_lso_and_wifi_80211(self):
+        payload = b"x" * 2000
+        tcp = struct.pack(">HHIIBBHHH", 50000, 8001, 1234, 0, 5 << 4, 0x18, 65535, 0, 0) + payload
+        # IPv4 LSO v2: total length == 0
+        ip_lso = struct.pack(">BBHHHBBH4s4s", 0x45, 0, 0, 0, 0x4000, 64, 6, 0,
+                             bytes([192, 168, 1, 2]), bytes([1, 2, 3, 4])) + tcp
+        eth_lso = b"\x00" * 12 + b"\x08\x00" + ip_lso
+        seg = pcap.tcp_segment(1, eth_lso)
+        self.assertIsNotNone(seg)
+        self.assertEqual((seg[1], seg[3], seg[4], len(seg[6])), (50000, 8001, 1234, 2000))
+        # Raw IP (linktype 101) with LSO
+        self.assertEqual(len(pcap.tcp_segment(101, ip_lso)[6]), 2000)
+        # IEEE 802.11 QoS Data frame (linktype 105) + LLC/SNAP
+        wifi_qos = bytes([0x88, 0x01]) + b"\x00" * 22 + b"\x00\x00" + b"\xaa\xaa\x03\x00\x00\x00\x08\x00" + ip_lso
+        seg_wifi = pcap.tcp_segment(105, wifi_qos)
+        self.assertIsNotNone(seg_wifi)
+        self.assertEqual((seg_wifi[1], seg_wifi[3], len(seg_wifi[6])), (50000, 8001, 2000))
 
     def test_pktmon_start_args_handles_win11_and_win10_help(self):
         win11 = "pktmon start --capture --comp nics --pkt-size 0 --log-mode real-time"
         self.assertEqual(
             winpktmon.pktmon_start_args("pktmon.exe", win11),
-            ["pktmon.exe", "start", "--capture", "--comp", "nics", "--pkt-size", "0", "--log-mode", "real-time"],
+            ["pktmon.exe", "start", "--capture", "--pkt-size", "0", "--log-mode", "real-time"],
         )
         self.assertEqual(
-            winpktmon.pktmon_start_args("pktmon.exe", win11, comp_nics=False),
-            ["pktmon.exe", "start", "--capture", "--pkt-size", "0", "--log-mode", "real-time"],
+            winpktmon.pktmon_start_args("pktmon.exe", win11, comp_nics=True),
+            ["pktmon.exe", "start", "--capture", "--comp", "nics", "--pkt-size", "0", "--log-mode", "real-time"],
         )
         win10 = "pktmon start --etw -p 0 -m real-time"
         self.assertEqual(
@@ -54,7 +75,7 @@ class PktMonUnitTests(unittest.TestCase):
         # Empty/unrecognized help output defaults to modern --capture --pkt-size 0 (never -p 0).
         self.assertEqual(
             winpktmon.pktmon_start_args("pktmon.exe", ""),
-            ["pktmon.exe", "start", "--capture", "--comp", "nics", "--pkt-size", "0", "--log-mode", "real-time"],
+            ["pktmon.exe", "start", "--capture", "--pkt-size", "0", "--log-mode", "real-time"],
         )
 
     def test_filetime_to_unix(self):
@@ -98,6 +119,9 @@ class PktMonUnitTests(unittest.TestCase):
 
             def check(self):
                 pass
+
+            def snapshot_stats(self):
+                return {"events": 2, "types": {"1": 1, "3": 1}, "tcp": 2, "dedup": 0, "truncated": 0, "dropped": 0}
 
             def close(self):
                 closed_session.set()
@@ -194,20 +218,35 @@ class WindowsStructAndLiveTests(unittest.TestCase):
         self.assertEqual(ctypes.sizeof(api.EVENT_TRACE_LOGFILEW), 448)
 
     @unittest.skipUnless(winpktmon.is_admin() and winpktmon.find_pktmon(), "requires admin + pktmon.exe")
-    def test_live_pktmon_captures_outbound_tcp_8001_syn(self):
-        seen = []
-        found = threading.Event()
+    def test_live_pktmon_captures_outbound_and_large_bidirectional_game_frames(self):
+        import json as _json
+        seen_syn = []
+        decoded_frames = []
+        splitter = frames.Splitter(port=8001)
+        got_syn = threading.Event()
+        got_frames = threading.Event()
 
         def on_packet(at, linktype, packet):
             seg = pcap.tcp_segment(linktype, packet)
-            if seg is not None and seg[3] == 8001 and seg[5]:  # dport == 8001 and SYN
-                seen.append((at, linktype, seg))
-                found.set()
+            if seg is not None and seg[3] == 8001 and seg[5]:
+                seen_syn.append((at, linktype, seg))
+                got_syn.set()
+            for item in splitter.feed(at, linktype, packet):
+                decoded_frames.append(item)
+                if len(decoded_frames) >= 2:
+                    got_frames.set()
+
+        # Build a realistic >2000-byte server game frame + client game frame (catches 128B truncation / LSO bugs).
+        big_body = _json.dumps({"items": ["x" * 100 for _ in range(25)]}).encode()
+        srv_frame = struct.pack(">II", len(big_body) + 9, 9) + b"\0" * 4 + bytes([2]) + big_body
+        cli_body = _json.dumps({"hello": "world"}).encode()
+        cli_head = struct.pack(">II", 1, 2) + b"0123456789abcdef0123456789abcdef" + struct.pack(">II", 7, 1) + b"\0\0\0\x00\x02"
+        cli_frame = struct.pack(">I", len(cli_head) + len(cli_body)) + cli_head + cli_body
 
         session = winpktmon.PktMonSession(on_packet, port=8001)
         session.start()
         try:
-            # Trigger a single outbound TCP SYN on port 8001 to the public resolver already allowed by test_public.
+            # 1) Outbound TCP 8001 SYN over real NIC.
             sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
             sock.settimeout(0.5)
             try:
@@ -216,11 +255,55 @@ class WindowsStructAndLiveTests(unittest.TestCase):
                 pass
             finally:
                 sock.close()
-            found.wait(4.0)
+
+            # 2) Bidirectional large (>2KB) TCP 8001 exchange on localhost (verifies full payload + Splitter).
+            srv = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+            srv.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+            try:
+                srv.bind(("127.0.0.1", 8001))
+                srv.listen(1)
+                srv.settimeout(3)
+
+                def serve():
+                    try:
+                        conn, _ = srv.accept()
+                        with conn:
+                            conn.settimeout(3)
+                            conn.recv(4096)
+                            conn.sendall(srv_frame)
+                            time.sleep(0.3)
+                    except OSError:
+                        pass
+
+                t = threading.Thread(target=serve, daemon=True)
+                t.start()
+                cli = socket.create_connection(("127.0.0.1", 8001), timeout=3)
+                try:
+                    cli.sendall(cli_frame)
+                    got = bytearray()
+                    cli.settimeout(3)
+                    while len(got) < len(srv_frame):
+                        chunk = cli.recv(4096)
+                        if not chunk:
+                            break
+                        got += chunk
+                finally:
+                    cli.close()
+                t.join(timeout=3)
+            finally:
+                srv.close()
+
+            got_syn.wait(4.0)
+            got_frames.wait(4.0)
             session.check()
+            stats = session.snapshot_stats()
+            print(f"live pktmon stats: {stats}", flush=True)
         finally:
             session.close()
-        self.assertTrue(seen, "expected PktMon ETW to capture outbound TCP 8001 SYN")
+        self.assertTrue(seen_syn, f"expected outbound TCP 8001 SYN; stats={stats}")
+        self.assertGreaterEqual(len(decoded_frames), 2, f"expected client+server frames decoded; stats={stats}")
+        self.assertIn((True, cli_frame), [(c, f) for _, _, c, f in decoded_frames])
+        self.assertIn((False, srv_frame), [(c, f) for _, _, c, f in decoded_frames])
 
 
 if __name__ == "__main__":

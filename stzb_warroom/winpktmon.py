@@ -23,6 +23,8 @@ import threading
 import time
 from pathlib import Path
 
+from .pcap import tcp_segment
+
 GAME_PORT = 8001
 
 # ETW provider: Microsoft-Windows-PktMon {4D4F80D9-C8BD-4D73-BB5B-19C90402C5AC}
@@ -34,16 +36,19 @@ FILTER_NAME = "stzb-warroom"
 PKTMON_EVENT_FRAME_PAYLOAD = 160
 PKTMON_KEYWORD_PAYLOAD = 0x10
 PKTMON_TYPE_ETHERNET = 1
+PKTMON_TYPE_WIFI = 2
 PKTMON_TYPE_IP = 3
 
 # PktMon PacketType -> pcap linktype understood by pcap.tcp_segment
 LINKTYPES = {
     PKTMON_TYPE_ETHERNET: 1,
+    PKTMON_TYPE_WIFI: 105,
     PKTMON_TYPE_IP: 101,
 }
 
 # Loopback IPC framing between the elevated helper and the main process: <dHI + payload
 RECORD_HEADER = struct.Struct("<dHI")
+RECORD_STATS = 0xFFFD
 RECORD_READY = 0xFFFE
 RECORD_ERROR = 0xFFFF
 MAX_RECORD = 256 * 1024
@@ -130,18 +135,21 @@ def parse_frame_payload(data):
     return group_id, pkt_num, pkt_type, bytes(data[34:34 + logged])
 
 
-class PacketDeduper:
-    """Drop repeated appearances of the same PktMon packet across NIC/stack edges."""
+class SegmentDeduper:
+    """Drop repeated appearances of the same TCP segment across Windows networking stack components.
+
+    Keyed by TCP tuple + sequence + flags + payload length (not PktGroupId, which PktMon can share
+    across coalesced segments in one NBL chain).
+    """
 
     def __init__(self, maxlen=512):
         self.maxlen = maxlen
         self.order = collections.deque()
         self.seen = set()
 
-    def accept(self, group_id, pkt_number):
-        if not group_id:
-            return True
-        key = (group_id, pkt_number)
+    def accept(self, segment):
+        src, sport, dst, dport, seq, syn, payload, end = segment
+        key = (src, sport, dst, dport, seq, syn, end, len(payload))
         if key in self.seen:
             return False
         self.seen.add(key)
@@ -151,8 +159,12 @@ class PacketDeduper:
         return True
 
 
-def pktmon_start_args(pktmon_path, help_text, comp_nics=True):
-    """Build compatible `pktmon start` arguments across Windows 10 (2004+) and Windows 11."""
+def pktmon_start_args(pktmon_path, help_text, comp_nics=False):
+    """Build compatible `pktmon start` arguments across Windows 10 (2004+) and Windows 11.
+
+    Defaults to all components (no `--comp nics`) so Wi-Fi, PPPoE, virtual/TUN adapters and the
+    TCP/IP stack all emit clean Ethernet/IP frames; `SegmentDeduper` collapses stack duplicates.
+    """
     lower = (help_text or "").lower()
     legacy_etw = "--etw" in lower and "--capture" not in lower
     args = [pktmon_path, "start", "--etw" if legacy_etw else "--capture"]
@@ -466,8 +478,10 @@ class PktMonSession:
         self._output = collections.deque(maxlen=20)
         self._stop = threading.Event()
         self._threads = []
-        self._dedup = PacketDeduper()
+        self._dedup = SegmentDeduper()
         self._active = False
+        self.stats = {"events": 0, "types": {}, "tcp": 0, "dedup": 0, "truncated": 0, "dropped": 0}
+        self._stats_lock = threading.Lock()
 
     def _new_props(self, independent=True):
         api = self._api
@@ -533,7 +547,7 @@ class PktMonSession:
         # Pre-allocate TDH property descriptors to avoid per-event allocations.
         self._prop_bufs = {}
         self._prop_descs = {}
-        for name in ("PktGroupId", "PktNumber", "PacketType", "LoggedPayloadSize", "Payload"):
+        for name in ("PacketType", "OriginalPayloadSize", "LoggedPayloadSize", "Payload"):
             wbuf = ctypes.create_unicode_buffer(name)
             self._prop_bufs[name] = wbuf
             self._prop_descs[name] = api.PROPERTY_DATA_DESCRIPTOR(ctypes.addressof(wbuf), api.ULONG_MAX, 0)
@@ -575,29 +589,27 @@ class PktMonSession:
         ctypes = api.ctypes
         pkt_type = self._tdh_uint(record_ptr, "PacketType", 4)
         logged = self._tdh_uint(record_ptr, "LoggedPayloadSize", 4)
+        orig = self._tdh_uint(record_ptr, "OriginalPayloadSize", 4) or 0
         if pkt_type is not None and logged is not None and 0 < logged <= MAX_RECORD:
-            linktype = LINKTYPES.get(pkt_type)
-            if linktype is None:
-                return None
             payload_buf = (ctypes.c_ubyte * logged)()
             err = api.tdh.TdhGetProperty(
                 record_ptr, 0, None, 1, ctypes.byref(self._prop_descs["Payload"]), logged, payload_buf,
             )
             if err == 0:
-                group_id = self._tdh_uint(record_ptr, "PktGroupId", 8) or 0
-                pkt_num = self._tdh_uint(record_ptr, "PktNumber", 4) or 0
-                return group_id, pkt_num, linktype, bytes(payload_buf)
+                return pkt_type, orig, bytes(payload_buf)
         # Fallback: parse UserData directly if TDH failed on this build.
         rec = record_ptr.contents
         if rec.UserData and rec.UserDataLength >= 34:
             raw = ctypes.string_at(rec.UserData, rec.UserDataLength)
             parsed = parse_frame_payload(raw)
             if parsed is not None:
-                group_id, pkt_num, pkt_type, payload = parsed
-                linktype = LINKTYPES.get(pkt_type)
-                if linktype is not None:
-                    return group_id, pkt_num, linktype, payload
+                _group_id, _pkt_num, pkt_type, payload = parsed
+                return pkt_type, len(payload), payload
         return None
+
+    def snapshot_stats(self):
+        with self._stats_lock:
+            return {**self.stats, "types": dict(self.stats["types"])}
 
     def _on_event(self, record_ptr):
         try:
@@ -609,11 +621,34 @@ class PktMonSession:
             if header.ProviderId.as_tuple() != PKTMON_PROVIDER_UUID:
                 return
             extracted = self._extract_event(record_ptr)
+            with self._stats_lock:
+                self.stats["events"] += 1
             if extracted is None:
+                with self._stats_lock:
+                    self.stats["dropped"] += 1
                 return
-            group_id, pkt_num, linktype, payload = extracted
-            if not self._dedup.accept(group_id, pkt_num):
+            pkt_type, orig_size, payload = extracted
+            with self._stats_lock:
+                key = str(pkt_type)
+                self.stats["types"][key] = self.stats["types"].get(key, 0) + 1
+                if orig_size and len(payload) < orig_size:
+                    self.stats["truncated"] += 1
+            linktype = LINKTYPES.get(pkt_type)
+            if linktype is None:
+                with self._stats_lock:
+                    self.stats["dropped"] += 1
                 return
+            seg = tcp_segment(linktype, payload)
+            if seg is None or self.port not in (seg[1], seg[3]):
+                with self._stats_lock:
+                    self.stats["dropped"] += 1
+                return
+            if not self._dedup.accept(seg):
+                with self._stats_lock:
+                    self.stats["dedup"] += 1
+                return
+            with self._stats_lock:
+                self.stats["tcp"] += 1
             self.on_packet(filetime_to_unix(header.TimeStamp), linktype, payload)
         except Exception as exc:
             if self.error is None:
@@ -670,7 +705,7 @@ class PktMonSession:
 
         self._start_etw()
         last_err = None
-        for comp_nics in (True, False):
+        for comp_nics in (False, True):
             cmd = pktmon_start_args(self.pktmon, help_text, comp_nics=comp_nics)
             self._output.clear()
             self.error = None
@@ -828,6 +863,12 @@ class PktMonCapture:
         self._thread = None
         self._stop = threading.Event()
         self.error = None
+        self.stats = {}
+
+    def snapshot_stats(self):
+        if self._direct is not None:
+            return self._direct.snapshot_stats()
+        return dict(self.stats)
 
     def start(self, timeout=20):
         if not self.pktmon or not os.path.isfile(self.pktmon):
@@ -906,6 +947,12 @@ class PktMonCapture:
                 if kind == RECORD_ERROR:
                     self.error = RuntimeError(payload.decode("utf-8", "replace") or "pktmon helper error")
                     return
+                if kind == RECORD_STATS:
+                    try:
+                        self.stats = json.loads(payload.decode("utf-8"))
+                    except (OSError, ValueError):
+                        pass
+                    continue
                 if kind < 0xFF00:
                     self.on_packet(captured_at, kind, payload)
         except Exception as exc:
@@ -1039,6 +1086,8 @@ def run_helper(config_path):
                 pass
             return
         send_raw(encode_record(time.time(), RECORD_READY))
+        last_stats = None
+        last_sent = 0.0
         while not stop.wait(0.5):
             try:
                 session.check()
@@ -1048,6 +1097,16 @@ def run_helper(config_path):
                 except OSError:
                     pass
                 break
+            now = time.monotonic()
+            if now - last_sent >= 2.0:
+                current = session.snapshot_stats()
+                if current != last_stats:
+                    try:
+                        send_raw(encode_record(time.time(), RECORD_STATS, json.dumps(current).encode("utf-8")))
+                        last_stats = current
+                        last_sent = now
+                    except OSError:
+                        break
     finally:
         stop.set()
         session.close()

@@ -1238,11 +1238,21 @@ class App:
             reach = f"{type(exc).__name__}: {exc}"
         mode = snapshot["capture"].get("backend") or snapshot["settings"].get("capture_mode")
         mode_text = {"pktmon": "Windows 内置（PktMon）", "dumpcap": "Wireshark（dumpcap）"}.get(mode, "无")
+        pktmon_line = []
+        uploader = (self.session or {}).get("uploader")
+        source = getattr(uploader, "source", None) if uploader else None
+        if source is not None and hasattr(source, "snapshot_stats"):
+            st = source.snapshot_stats()
+            if st:
+                pktmon_line = [f"PktMon：事件 {st.get('events', 0)}（类型 {st.get('types', {})}），"
+                               f"TCP8001 {st.get('tcp', 0)}，去重 {st.get('dedup', 0)}，"
+                               f"截断 {st.get('truncated', 0)}，丢弃 {st.get('dropped', 0)}"]
         lines = [f"率土战局 {__version__}  {datetime.now():%Y-%m-%d %H:%M:%S}",
                  f"系统：{winsys.system()}  Python {platform.python_version()}",
                  # what a capture problem needs comes first: pasted in the group chat, only 500 characters arrive
                  *adapter_report(snapshot["settings"]["dumpcap"]),
                  f"抓包方式：{mode_text}",
+                 *pktmon_line,
                  f"dumpcap：{snapshot['settings']['dumpcap'] or '没有找到'}；Npcap：{ {True: '已安装', False: '未安装', None: '-'}[winsys.npcap_installed()]}",
                  *([f"更新：新版本 {self.load_failed} 没能启动，用的是自带的 {__version__}"] if self.load_failed else []),
                  f"上报：{snapshot['capture']['state']} {snapshot['capture']['error'] or ''}".rstrip(),

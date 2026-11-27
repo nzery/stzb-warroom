@@ -113,6 +113,21 @@ def tcp_segment(linktype, packet):
             return None
     elif linktype == 0:  # BSD loopback (Npcap loopback adapter)
         offset = 4
+    elif linktype == 105:  # IEEE 802.11 Wi-Fi (data frame + LLC/SNAP, e.g. Windows PktMon)
+        if len(packet) < 32 or (packet[0] & 0x0C) != 0x08 or (packet[0] & 0x40):
+            return None  # not a data frame, or null data
+        offset = 24
+        if (packet[1] & 0x03) == 0x03:  # ToDS + FromDS (4-address frame)
+            offset += 6
+        if packet[0] & 0x80:  # QoS Data
+            offset += 2
+            if packet[1] & 0x80:  # +HTC
+                offset += 4
+        if len(packet) < offset + 8 or packet[offset:offset + 6] != b"\xaa\xaa\x03\x00\x00\x00":
+            return None
+        if packet[offset + 6:offset + 8] not in (b"\x08\x00", b"\x86\xdd"):
+            return None
+        offset += 8
     elif linktype in (113, 276):  # Linux cooked capture v1/v2 (dumpcap -i any)
         offset, protocol_at = (16, 14) if linktype == 113 else (20, 0)
         if len(packet) < offset or packet[protocol_at:protocol_at + 2] not in (b"\x08\x00", b"\x86\xdd"):
@@ -126,18 +141,22 @@ def tcp_segment(linktype, packet):
         return None
     if ip[0] >> 4 == 4:
         header_len, total = (ip[0] & 0x0F) * 4, struct.unpack_from(">H", ip, 2)[0]
-        if ip[9] != 6 or struct.unpack_from(">H", ip, 6)[0] & 0x3FFF:
+        if header_len < 20 or ip[9] != 6 or struct.unpack_from(">H", ip, 6)[0] & 0x3FFF:
             return None  # not TCP, or a fragment
         src, dst = socket.inet_ntoa(ip[12:16]), socket.inet_ntoa(ip[16:20])
-        tcp = ip[header_len:total]
+        # Windows LSO v2 / RSC leaves IPv4 Total Length as 0 until NIC segmentation.
+        tcp = ip[header_len:] if total == 0 else ip[header_len:total]
     elif ip[0] >> 4 == 6 and len(ip) >= 40 and ip[6] == 6:
         src = socket.inet_ntop(socket.AF_INET6, ip[8:24])
         dst = socket.inet_ntop(socket.AF_INET6, ip[24:40])
-        tcp = ip[40:40 + struct.unpack_from(">H", ip, 4)[0]]
+        plen = struct.unpack_from(">H", ip, 4)[0]
+        tcp = ip[40:] if plen == 0 else ip[40:40 + plen]
     else:
         return None
     if len(tcp) < 20:
         return None
     sport, dport, seq = struct.unpack_from(">HHI", tcp)
     data_offset, flags = (tcp[12] >> 4) * 4, tcp[13]
+    if data_offset < 20 or data_offset > len(tcp):
+        return None
     return src, sport, dst, dport, seq, bool(flags & 0x02), tcp[data_offset:], bool(flags & 0x05)

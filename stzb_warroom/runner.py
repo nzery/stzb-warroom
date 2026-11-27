@@ -54,6 +54,7 @@ def run_capture(server, tokens, folder, stop, interface=None, all_hosts=False, d
         else:
             source = Capture(uploader.on_packet, interface=interface, all_hosts=all_hosts,
                              **({"dumpcap": dumpcap} if dumpcap else {}))
+        uploader.source = source
         thread = threading.Thread(target=uploader.run, name="upload", daemon=True)
         try:
             source.start()
