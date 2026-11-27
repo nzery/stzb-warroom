@@ -317,7 +317,9 @@ function captureView(d) {
     case 'running': if (d.phone?.blind) return { cls: 'wait', icon: 'alert', title: '手机的游戏数据没有抓到', desc: '手机正在经这台电脑玩游戏，但电脑没抓到数据，战报不会上传。点“重新抓包”试试；开着 VPN 或代理的话先关掉。', dot: 'wait', side: '没抓到数据' };
       if (c.lost) return { cls: 'wait', icon: 'alert', title: '换网络后没抓到游戏数据', desc: '电脑刚换了网络，之后没再抓到游戏数据，通知和战报都会中断。还在玩的话点“重新抓包”；没在玩可以不管，这条提示过几分钟会消失。', dot: 'wait', side: '没抓到数据' };
       return { cls: '', icon: 'wave', title: '正在上报', desc: `已运行 ${duration(Date.now() / 1000 - c.since)}。玩游戏时保持程序开着，可以最小化这个窗口。`, dot: 'run', side: '上报中' };
-    case 'starting': return { cls: 'wait', icon: 'clock', title: '正在启动…', desc: '正在启动网络组件。', dot: 'wait', side: '启动中' };
+    case 'starting': return { cls: 'wait', icon: 'clock', title: '正在启动…',
+      desc: c.backend === 'pktmon' ? '正在启动 Windows 内置抓包… 如果系统弹出权限提示，请点“是”。' : '正在启动网络组件。',
+      dot: 'wait', side: '启动中' };
     case 'stopping': return { cls: 'wait', icon: 'clock', title: '正在停止…', desc: '正在把没上传完的数据保存好。', dot: 'wait', side: '停止中' };
     case 'error': return { cls: 'err', icon: 'alert', title: '上报已停止', desc: c.hint || c.error || '', dot: 'err', side: '出错' };
     default: return { cls: 'idle', icon: 'pause', title: '上报没有运行', desc: '点“开始上报”启动。没有运行时游戏数据不会上传。', dot: '', side: '未运行' };
@@ -448,8 +450,13 @@ function renderOverview(d) {
   $('hero-icon').innerHTML = icon(view.icon);
   $('hero-title').textContent = view.title;
   $('hero-desc').textContent = view.desc;
-  const actions = view.cls === 'err' && (d.capture.error || '').includes('dumpcap not found')
+  const errText = d.capture.error || '';
+  const actions = view.cls === 'err' && errText.includes('dumpcap not found')
     ? '<button class="btn primary" data-action="open_installer">安装 Wireshark</button><button class="btn" data-goto="settings">手动选择 dumpcap</button>'
+    : view.cls === 'err' && errText.includes('pktmon')
+    ? '<button class="btn primary" data-action="start">重试（允许权限）</button><button class="btn" data-action="open_installer">或安装 Wireshark</button>'
+    : view.cls === 'err'
+    ? '<button class="btn primary" data-action="start">重试</button>'
     : !d.tokens.length ? '<button class="btn primary" data-goto="accounts">添加账号</button>'
     : view.cls === 'wait' && d.capture.state === 'running' ? '<button class="btn primary" data-action="restart_capture">重新抓包</button>'
     : view.cls === 'idle' ? '<button class="btn primary" data-action="start">开始上报</button>' : '';
@@ -1283,7 +1290,13 @@ function renderSettings(d) {
   autostart.disabled = !s.autostart_available;
   autostart.closest('.setting').title = s.autostart_available ? '' : '只有打包好的 Windows 程序可以设置';
   $('set-keep').checked = s.keep_running;
-  $('dumpcap-path').textContent = s.dumpcap ? `${s.dumpcap}${s.dumpcap_picked ? '（手动选择）' : '（自动找到）'}` : '没有找到，请安装 Wireshark 或手动选择';
+  const mode = s.capture_mode || (s.dumpcap ? 'dumpcap' : 'none');
+  $('capture-mode').textContent = mode === 'pktmon'
+    ? 'Windows 内置抓包（免装 Wireshark，启动时在系统权限弹窗点“是”）'
+    : mode === 'dumpcap' ? 'Wireshark（dumpcap，免权限弹窗）'
+    : '没有找到可用的抓包组件，请安装 Wireshark';
+  $('dumpcap-path').textContent = s.dumpcap ? `${s.dumpcap}${s.dumpcap_picked ? '（手动选择）' : '（自动找到）'}`
+    : s.pktmon ? '未安装（当前使用 Windows 内置抓包，无需安装）' : '没有找到，请安装 Wireshark 或手动选择';
   $('forget-dumpcap').classList.toggle('hidden', !s.dumpcap_picked);
   $('pick-dumpcap').disabled = !s.windows;
   $('state-dir').textContent = s.state_dir;
@@ -1294,10 +1307,13 @@ function renderChecks(d) {
   const row = (ok, name, text) => `<div class="check-row ${ok === null ? 'unknown' : ok ? 'ok' : 'bad'}"><i>${icon(ok === null ? 'question' : ok ? 'check' : 'cross')}</i><b>${name}</b><span>${esc(text)}</span></div>`;
   const accounts = d.tokens;
   const offline = accounts.length && accounts.every((a) => a.state === 'offline');
+  const mode = d.settings.capture_mode || (d.settings.dumpcap ? 'dumpcap' : 'none');
+  const netText = mode === 'pktmon' ? 'Windows 内置抓包（无需 Wireshark）'
+    : d.settings.dumpcap || '没有找到可用的抓包组件（Wireshark）';
   const rows = [
     row(!offline && accounts.some((a) => a.state !== 'checking') ? true : offline ? false : null, '服务器', offline ? `连不上 ${d.server}` : d.server),
     row(accounts.length ? accounts.every((a) => a.state === 'ok') : false, '账号', accounts.length ? accounts.map((a) => `${a.token} ${accountState(a)[0]}`).join('；') : '没有 Token'),
-    row(Boolean(d.settings.dumpcap), '网络组件', d.settings.dumpcap || '没有找到 dumpcap.exe（Wireshark）'),
+    row(mode !== 'none', '网络组件', netText),
     row(d.capture.state === 'running' ? true : d.capture.state === 'error' ? false : null, '上报', d.capture.state === 'running' ? '运行中' : d.capture.error || '未运行'),
     row(d.stats.connections > 0 ? true : null, '连接', d.stats.connections > 0 ? `${d.stats.connections} 条` : '最近 5 分钟没有看到游戏连接（没在玩游戏时正常）'),
   ];

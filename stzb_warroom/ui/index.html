@@ -159,15 +159,18 @@
       <div class="card settings">
         <h3>网络组件</h3>
         <div class="setting">
+          <div><b>当前抓包方式</b><p id="capture-mode" class="path">-</p></div>
+        </div>
+        <div class="setting">
+          <div><b>Wireshark（可选）</b><p>Windows 10/11 已支持免安装直接上报（启动时在系统权限弹窗点“是”即可）。不想每次确认权限，或老系统不支持时，再安装 Wireshark（保持勾选 Npcap）。</p></div>
+          <button class="btn ghost small" id="install-wireshark">安装 Wireshark</button>
+        </div>
+        <div class="setting">
           <div><b>dumpcap.exe</b><p id="dumpcap-path" class="path">-</p></div>
           <div class="row-actions">
             <button class="btn ghost small" id="pick-dumpcap">手动选择</button>
             <button class="btn ghost small" id="forget-dumpcap">自动查找</button>
           </div>
-        </div>
-        <div class="setting">
-          <div><b>Wireshark</b><p>程序要用 Wireshark 自带的 Npcap 和 dumpcap。还没装的话先安装，安装时保持勾选 Npcap。</p></div>
-          <button class="btn ghost small" id="install-wireshark">安装 Wireshark</button>
         </div>
       </div>
       <div class="card settings">

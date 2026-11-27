@@ -35,7 +35,7 @@ from pathlib import Path
 from urllib.error import HTTPError
 from urllib.parse import urlencode
 
-from . import __version__, chat, notify, relay, update as updates, upload, vault, winsys
+from . import __version__, chat, notify, relay, update as updates, upload, vault, winpktmon, winsys
 from .api import client_tokens, invite_code, site, tokens_in
 from .capture import adapter_report, find_dumpcap
 from .runner import run_capture
@@ -63,7 +63,9 @@ ADAPTER_HINT = ("抓不到当前网络的数据，重装 Wireshark 通常没用�
 HINTS = (  # what a player can do about a capture failure, from its text
     ("another capture process", "已经有一个程序在上报（可能是另一个窗口），先关掉它。"),
     ("401", "所有 Token 都无效：到“账号”检查 Token。"),
-    ("dumpcap not found", "没有找到 Wireshark：到“设置”里安装或手动选择 dumpcap.exe。"),
+    ("pktmon uac cancelled", "未授予管理员权限：点“重试”，在弹出的系统权限提示中点“是”即可开始上报（也可以到“设置”安装 Wireshark 后免弹窗运行）。"),
+    ("pktmon", "Windows 内置抓包没能启动：点“重试”并在系统权限提示中点“是”；如果反复失败，可以到“设置”安装 Wireshark。"),
+    ("dumpcap not found", "没有找到可用的抓包组件：当前系统不支持免安装抓包，请到“设置”里安装 Wireshark 或手动选择 dumpcap.exe。"),
     ("no adapter found", "没有找到正在上网的网卡：确认这台电脑能上网，再点重试。"),
     ("NPF driver", "Npcap 没有运行：重新安装 Wireshark 并勾选 Npcap，装好后重启电脑再试。"),
     ("wpcap", "Npcap 没有运行：重新安装 Wireshark 并勾选 Npcap，装好后重启电脑再试。"),
@@ -133,7 +135,7 @@ class App:
         # (upload.SYNC_SERVER_TIME), and when it last came; 0 and None before one.
         self.clock_offset, self.clock_synced = 0.0, None
         self.accounts = {}  # token -> what /v1/client/status said, or why it could not
-        self.capture = {"state": "stopped", "error": None, "hint": None, "since": None, "dumpcap": None}
+        self.capture = {"state": "stopped", "error": None, "hint": None, "since": None, "dumpcap": None, "backend": None}
         # Battle reports uploaded from this computer, all launches together (2026-11-13 user), and when
         # the last went: from the queue's file until a capture runs, then from its uploader.
         self.totals = upload.saved_totals(self.state_dir / "queue.sqlite")
@@ -210,6 +212,7 @@ class App:
                      "uploaded": self.totals[0], "uploaded_at": self.totals[1],
                      "connections": uploader.connections() if uploader else 0}
             relogins = [entry for entry in (self.session or {}).get("relogin", {}).values() if entry[2]]
+            capture_mode, _tool, _places = self.capture_method()
             return {
                 "version": self.version, "app_version": __version__, "server": self.server.origin, "site": site(),
                 "relogin": {"short": relogins[0][1] if relogins else "",
@@ -223,6 +226,7 @@ class App:
                 "settings": {"keep_running": self.settings["keep_running"], "phone_exit": self.settings["phone_exit"],
                              "autostart": winsys.autostart(), "autostart_available": winsys.autostart_command() is not None,
                              "dumpcap": self.find_dumpcap()[0], "dumpcap_picked": self._picked(),
+                             "pktmon": bool(self.find_pktmon()), "capture_mode": capture_mode,
                              "state_dir": str(self.state_dir), "windows": winsys.WINDOWS},
                 "update": self.update,
                 "load_failed": self.load_failed,
@@ -299,6 +303,30 @@ class App:
         """(dumpcap or None, places looked at): ST_DUMPCAP, the one picked by hand, then the search."""
         picked = self._picked()
         return find_dumpcap([picked] if picked else [])
+
+    def find_pktmon(self):
+        return winpktmon.find_pktmon()
+
+    def capture_method(self):
+        """('dumpcap'|'pktmon'|'none', tool path or None, places looked at).
+
+        Prefer an existing working Wireshark + Npcap install (zero UAC), or an explicitly picked
+        dumpcap; otherwise use Windows' built-in PktMon so new users do not need Wireshark.
+        """
+        explicit = bool(os.environ.get("ST_DUMPCAP") or self._picked())
+        dumpcap, places = self.find_dumpcap()
+        if explicit:
+            return ("dumpcap", dumpcap, places) if dumpcap else ("none", None, places)
+        if not winsys.WINDOWS:
+            return ("dumpcap", dumpcap, places) if dumpcap else ("none", None, places)
+        if dumpcap and winsys.npcap_installed():
+            return "dumpcap", dumpcap, places
+        pktmon = self.find_pktmon()
+        if pktmon:
+            return "pktmon", pktmon, places
+        if dumpcap:
+            return "dumpcap", dumpcap, places
+        return "none", None, places
 
     def pick_dumpcap(self):
         chosen = winsys.pick_file("选择 Wireshark 文件夹里的 dumpcap.exe", ("dumpcap", "dumpcap.exe"))
@@ -1033,18 +1061,20 @@ class App:
                 return
             if not self.tokens:
                 raise ValueError("先到“账号”添加 Token")
-            dumpcap, places = self.find_dumpcap()
-            if dumpcap is None:
-                self.log("没有找到 dumpcap，找过：" + "；".join(places), "error")
+            method, tool, places = self.capture_method()
+            if method == "none":
+                self.log("没有找到抓包组件，找过：" + "；".join(places), "error")
                 self.capture.update(state="error", error="dumpcap not found",
-                                    hint=hint("dumpcap not found"), since=None, dumpcap=None)
+                                    hint=hint("dumpcap not found"), since=None, dumpcap=None, backend=None)
                 self.touch()
                 return
             stop = threading.Event()
             session = self.session = {"stop": stop, "uploader": None, "tokens": list(self.tokens), "exits": []}
-            self.capture.update(state="starting", error=None, hint=None, since=time.time(), dumpcap=dumpcap)
+            dumpcap = tool if method == "dumpcap" else None
+            self.capture.update(state="starting", error=None, hint=None, since=time.time(),
+                                dumpcap=dumpcap, backend=method)
             self.hints.clear()
-            session["thread"] = threading.Thread(target=self._capture, args=(session, dumpcap), name="capture",
+            session["thread"] = threading.Thread(target=self._capture, args=(session, dumpcap, method), name="capture",
                                                  daemon=True)
             session["thread"].start()
         notify.start(self.server, session["tokens"], self.state_dir, stop, prompt_for=self.prompt_for,
@@ -1055,7 +1085,7 @@ class App:
             self._start_exits(session)  # the phone's connections are reported by this capture
         self.touch()
 
-    def _capture(self, session, dumpcap):
+    def _capture(self, session, dumpcap, backend="dumpcap"):
         def started(uploader):
             uploader.on_role = self.poke.set  # check_accounts now, not at the next minute
             uploader.on_clock = self.on_clock
@@ -1068,8 +1098,9 @@ class App:
 
         error = None
         try:
+            extra = {"backend": backend} if backend == "pktmon" else {}
             run_capture(self.server, session["tokens"], self.state_dir, session["stop"], dumpcap=dumpcap,
-                        started=started)
+                        started=started, **extra)
         except Exception as exc:
             error = str(exc) or type(exc).__name__
         finally:
@@ -1205,10 +1236,13 @@ class App:
                 reach = f"HTTP {response.status}"
         except OSError as exc:
             reach = f"{type(exc).__name__}: {exc}"
+        mode = snapshot["capture"].get("backend") or snapshot["settings"].get("capture_mode")
+        mode_text = {"pktmon": "Windows 内置（PktMon）", "dumpcap": "Wireshark（dumpcap）"}.get(mode, "无")
         lines = [f"率土战局 {__version__}  {datetime.now():%Y-%m-%d %H:%M:%S}",
                  f"系统：{winsys.system()}  Python {platform.python_version()}",
                  # what a capture problem needs comes first: pasted in the group chat, only 500 characters arrive
                  *adapter_report(snapshot["settings"]["dumpcap"]),
+                 f"抓包方式：{mode_text}",
                  f"dumpcap：{snapshot['settings']['dumpcap'] or '没有找到'}；Npcap：{ {True: '已安装', False: '未安装', None: '-'}[winsys.npcap_installed()]}",
                  *([f"更新：新版本 {self.load_failed} 没能启动，用的是自带的 {__version__}"] if self.load_failed else []),
                  f"上报：{snapshot['capture']['state']} {snapshot['capture']['error'] or ''}".rstrip(),

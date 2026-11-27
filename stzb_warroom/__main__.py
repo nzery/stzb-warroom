@@ -130,7 +130,12 @@ def main(argv=None):
     relaying = commands.add_parser("relay", help="let the phone play through this computer")
     relaying.add_argument("--relay", action="append",
                           help="a relay's HTTPS origin, may repeat (default: the ones the server's phone page names)")
+    helper = commands.add_parser("pktmon-helper", help=argparse.SUPPRESS)
+    helper.add_argument("--config", required=True)
     args = parser.parse_args(argv)
+    if args.command == "pktmon-helper":
+        from . import winpktmon
+        return winpktmon.run_helper(args.config)
     if not args.server:
         parser.error("no server: pass --server or set ST_SERVER")
     if args.command == "capture":

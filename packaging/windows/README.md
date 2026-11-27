@@ -89,9 +89,14 @@ runtime 指纹：构建用的 Python 和 PyInstaller 版本、PyInstaller 打进
 `%LOCALAPPDATA%\stzb-warroom\window`。找不到 `window\` 时退回用默认浏览器打开，功能一样。
 页面只认启动时随机生成的密钥 Cookie，且只接受以 `127.0.0.1:端口` 访问，别的网站和别的电脑用不了。
 
-### 包外的依赖：Wireshark
+### 抓包方式：Windows 内置 PktMon 与 Wireshark（可选）
 
-包里不带抓包组件，程序用 Wireshark 的 `dumpcap.exe`（Wireshark 安装时会一起装 Npcap）。程序按这个顺序找，用找到的第一个：
+Windows 10（2004 及以后）和 Windows 11 无需安装 Wireshark 即可抓包：
+
+- 如果电脑已装好 Wireshark 和 Npcap，程序仍**优先**使用 `dumpcap.exe`（免每次确认权限，老用户无感）。
+- 否则程序自动使用系统自带的 `PktMon`（`%SystemRoot%\System32\pktmon.exe` + `Microsoft-Windows-PktMon` ETW 实时流，`stzb_warroom/winpktmon.py`），在内核态只过滤 TCP 8001，零第三方驱动、无需重启电脑。主窗口（Electron）继续以普通用户运行，只按需弹一次系统 UAC 提权一个极简子进程（`pktmon-helper`），通过本机随机端口和一次性密钥回传数据包。
+- 若玩家手动指定了 `ST_DUMPCAP` 或在“设置”里选了 `dumpcap.exe`，按指定路径优先使用。
+- 查找 `dumpcap.exe` 的顺序：
 
 1. 环境变量 `ST_DUMPCAP`；
 2. 用户在“设置”里手动选过的路径（记在 `%LOCALAPPDATA%\stzb-warroom\dumpcap.txt`）；
@@ -99,7 +104,7 @@ runtime 指纹：构建用的 Python 和 PyInstaller 版本、PyInstaller 打进
 4. PATH；
 5. `%ProgramFiles%`、`%ProgramFiles(x86)%` 下的 `Wireshark` 文件夹。
 
-都找不到时窗口会提示，并提供“安装 Wireshark”（包里有安装程序就运行它，没有就打开网站 `/download/wireshark.json` 给的链接，取不到时用 `/download/Wireshark-x64.exe`，构建时没配置网站才打开官网下载页）和“手动选择 dumpcap”。
+老版本系统既没有 `pktmon.exe` 又没有 Wireshark 时，窗口会提供“安装 Wireshark”（包里有安装程序就运行它，没有就打开网站 `/download/wireshark.json` 给的链接，取不到时用 `/download/Wireshark-x64.exe`，构建时没配置网站才打开官网下载页）和“手动选择 dumpcap”。
 
 ### 哪些能放进包里
 

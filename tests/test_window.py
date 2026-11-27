@@ -114,6 +114,7 @@ class AppTests(unittest.TestCase):
         with unittest.mock.patch.dict("os.environ", {"ST_CLIENT_TOKEN": env}):
             app = App(self.server, self.folder, opener=lambda *a, **k: Response('{"tag_name": "v9.0.0", "html_url": "u", "body": "本次更新……"}'.encode()))
         app.find_dumpcap = lambda: (None, ["nowhere"])  # never capture in tests
+        app.find_pktmon = lambda: None
         return app
 
     def test_only_the_players_tokens_are_kept_and_nothing_is_saved_unasked(self):

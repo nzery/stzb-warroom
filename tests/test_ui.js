@@ -7,7 +7,7 @@ const path = require('node:path');
 const ui = path.join(__dirname, '../stzb_warroom/ui');
 const html = fs.readFileSync(path.join(ui, 'index.html'), 'utf8');
 const nodes = new Map([...html.matchAll(/\bid="([^"]+)"/g)].map((match) => [match[1], {
-  addEventListener() {}, classList: { add() {}, remove() {}, toggle() {} },
+  addEventListener() {}, classList: { add() {}, remove() {}, toggle() {} }, closest() { return {}; },
   attrs: {}, dataset: {}, getAttribute(name) { return this.attrs[name] ?? null; }, setAttribute(name, value) { this.attrs[name] = value; },
 }]));
 assert.equal(nodes.has('quit'), false);
@@ -307,6 +307,14 @@ async function main() {
     { seq: 2, role: 8, tapped: '5', level: 'info', title: '乙点开', view: { blocks: [] } }]; renderNotices();`, context);
   const html = vm.runInContext(`document.getElementById('notice-list').innerHTML`, context);
   assert.ok(html.indexOf('乙点开') < html.indexOf('其他通知') && html.indexOf('其他通知') < html.indexOf('甲点开'), html);
+  // settings & checks reflect built-in Windows PktMon capture cleanly without requiring Wireshark
+  vm.runInContext(`renderSettings({ server: 'https://api.example', settings: { autostart: false, autostart_available: false,
+    keep_running: true, dumpcap: null, dumpcap_picked: null, pktmon: true, capture_mode: 'pktmon', state_dir: 'C:\\\\data', windows: true } });
+    renderChecks({ server: 'https://api.example', tokens: [{ token: 'sta_…1234', state: 'ok' }],
+      settings: { dumpcap: null, pktmon: true, capture_mode: 'pktmon' }, capture: { state: 'running', backend: 'pktmon' }, stats: { connections: 1 } });`, context);
+  assert.ok(nodes.get('capture-mode').textContent.includes('Windows 内置抓包'));
+  assert.ok(nodes.get('dumpcap-path').textContent.includes('无需安装'));
+  assert.ok(nodes.get('checks').innerHTML.includes('Windows 内置抓包'));
   console.log('UI startup and refresh regression checks passed');
 }
 main().catch((error) => { console.error(error); process.exitCode = 1; });

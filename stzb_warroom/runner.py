@@ -4,7 +4,8 @@ import os
 import threading
 from pathlib import Path
 
-from .capture import Capture
+from . import winpktmon, winsys
+from .capture import Capture, find_dumpcap
 from .upload import Queue, Uploader
 
 
@@ -33,18 +34,26 @@ def lock(path):
     return handle
 
 
-def run_capture(server, tokens, folder, stop, interface=None, all_hosts=False, dumpcap=None, started=None):
+def run_capture(server, tokens, folder, stop, interface=None, all_hosts=False, dumpcap=None, started=None,
+                backend=None):
     """Capture and upload until `stop` is set; RuntimeError when the capture or the upload fails.
 
-    `started(uploader)` runs once dumpcap is capturing.
+    `started(uploader)` runs once capture is active.
     """
     folder = Path(folder)
     held = lock(folder / "capture.lock")
     try:
         uploader = Uploader(Queue(folder / "queue.sqlite"), server, tokens)
         uploader.stop = stop  # a rejected token stops the capture too
-        source = Capture(uploader.on_packet, interface=interface, all_hosts=all_hosts,
-                         **({"dumpcap": dumpcap} if dumpcap else {}))
+        if backend is None and os.name == "nt" and not dumpcap and not interface:
+            found, _ = find_dumpcap()
+            if not (found and winsys.npcap_installed()) and winpktmon.find_pktmon():
+                backend = "pktmon"
+        if backend == "pktmon":
+            source = winpktmon.PktMonCapture(uploader.on_packet, state_dir=folder)
+        else:
+            source = Capture(uploader.on_packet, interface=interface, all_hosts=all_hosts,
+                             **({"dumpcap": dumpcap} if dumpcap else {}))
         thread = threading.Thread(target=uploader.run, name="upload", daemon=True)
         try:
             source.start()
