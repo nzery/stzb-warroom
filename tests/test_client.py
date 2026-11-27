@@ -198,9 +198,9 @@ class UploadTests(unittest.TestCase):
     def test_frames_are_queued_exactly_as_captured(self):
         # The server removes credentials; the client sends what the game sent.
         uploader = self.uploader(accept())
-        request = client_frame(99991, {"password": "x"})
-        login = server_frame(99991, [1, [7], 1, 0, [["Tb_user_stuff,userid,safe_lock_password",
-                                                      ["Tb_user_stuff", [[7, "lock"]]]]]], encoding=3)
+        request = client_frame(40001, {"password": "x"})
+        login = server_frame(40001, [1, [7], 1, 0, [["Tb_sample,id,secret", ["Tb_sample", [[7, "lock"]]]]]],
+                             encoding=3)
         self.feed(uploader, (request, True), (login, False))
         rows = self.queue.batch()[2]
         self.assertEqual([base64.b64decode(row["frame"]) + bytes(row.get("pad", 0)) for row in rows],

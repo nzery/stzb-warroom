@@ -6,9 +6,6 @@ import socket
 import time
 from collections import OrderedDict
 
-LOGIN = 99991
-
-
 
 class LocalCapture:
     def __init__(self, path):
@@ -25,11 +22,11 @@ class LocalCapture:
         # the player, including when an optional local request times out or is retried.
         header = "Bearer " + (tokens if isinstance(tokens, str) else ",".join(tokens))
         scope = hashlib.sha256(header.encode()).hexdigest()
-        # Until the server delegates a stream, offer only its position. Logins always stay on the
-        # original upload path.
+        # Until the server delegates a stream, offer only its position. The server sends what it
+        # does not take (a login) through the original upload path.
         local = {"stream_id": stream, "start_seq": batch["start_seq"]}
         frames = [row for row in batch["frames"] if "reports" not in row] if grant else []
-        if frames and all(row.get("message_id") != LOGIN for row in frames):
+        if frames:
             local["frames"] = frames
         else:
             grant = None

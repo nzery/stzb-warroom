@@ -350,7 +350,7 @@ class HelloTests(unittest.TestCase):
 
 class GameCheckTests(unittest.TestCase):
     def test_the_game_from_the_first_byte_even_in_pieces(self):
-        first = client_frame(99991, {"passport": "x@163.com", "ver": "9.2.2"})
+        first = client_frame(40001, {"name": "x", "ver": "9.2.2"})
         stream = first + client_frame(5025, {"a": 1})
         for cut in (1, 10, 57, len(first) - 1, len(first), len(stream) - 1):
             check = relay.GameCheck()
@@ -395,7 +395,7 @@ class GameCheckTests(unittest.TestCase):
 
     def test_a_verdict_stays(self):
         check = relay.GameCheck()
-        self.assertTrue(check.feed(client_frame(99991, {"x": 1})))
+        self.assertTrue(check.feed(client_frame(40001, {"x": 1})))
         self.assertTrue(check.feed(os.urandom(1000)))
 
 
