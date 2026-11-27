@@ -53,6 +53,7 @@ SLOW_BATCH = 3  # a batch taking longer than this is logged
 # new run's clock starts elsewhere.
 RUN = uuid.uuid4().hex[:16]
 MAX_STALLS = 20  # interruptions told to the server at most, the newest
+SMALLEST_BATCH = 6  # halvings of a batch after failures in a row at most (100 rows -> 1, 3 MB -> 48 KB)
 
 
 def battle_reports(value):
@@ -166,8 +167,9 @@ class Queue:
             return 0
         return len(groups)
 
-    def batch(self, skip=()):
-        """(stream_id, first seq, rows) of the oldest stream not in `skip`, or None."""
+    def batch(self, skip=(), max_rows=MAX_ROWS, max_bytes=MAX_BODY):
+        """(stream_id, first seq, rows) of the oldest stream not in `skip`, or None: at most
+        `max_rows` rows and `max_bytes` bytes of them, but always the first."""
         with self.lock:
             if skip:
                 first = next(((stream_id,) for stream_id, _first in self.db.execute(
@@ -178,10 +180,10 @@ class Queue:
             if first is None:
                 return None
             rows = self.db.execute("SELECT seq,row FROM rows WHERE stream_id=? ORDER BY seq LIMIT ?",
-                                   (first[0], MAX_ROWS)).fetchall()
+                                   (first[0], max(1, max_rows))).fetchall()
         start, items, size = rows[0][0], [], 0
         for seq, text in rows:
-            if seq != start + len(items) or (items and size + len(text) > MAX_BODY):
+            if seq != start + len(items) or (items and size + len(text) > max_bytes):
                 break
             items.append(json.loads(text))
             size += len(text)
@@ -430,7 +432,11 @@ class Uploader:
     def upload_once(self):
         """Send one batch; False when the queue is empty."""
         now = time.monotonic()
-        batch = self.queue.batch({stream_id for stream_id, (until, _wait) in self.waiting.items() if until > now})
+        # After a stalled or broken try the next batch is half as large, down to SMALLEST_BATCH
+        # halvings: what did not get through on a poor line is not sent again whole.
+        shrink = min(self.failures, SMALLEST_BATCH)
+        batch = self.queue.batch({stream_id for stream_id, (until, _wait) in self.waiting.items() if until > now},
+                                 max_rows=MAX_ROWS >> shrink, max_bytes=MAX_BODY >> shrink)
         if batch is None:
             return False
         stream_id, start, rows = batch
@@ -529,20 +535,21 @@ class Uploader:
                     last_error = summary
             except ConnectTimeout:
                 # No answer to the handshake: at once from another port, the stall limit as it was.
+                # Logged once a run of failures (upload_recovered tells how many): a line down for
+                # half an hour would otherwise fill the window's log.
                 if not (self.failures or self.unanswered):
                     self.failed_at = time.monotonic()
-                self.unanswered += 1
-                if self.unanswered == 1:
                     self.log(event="upload_failed", error="connect timed out", failures=self.failures)
+                self.unanswered += 1
                 last_error = "connect timed out"
                 continue
             except (OSError, ValueError) as exc:
                 # A stalled or broken connection (Connection.json closed it): again on a new one.
+                busy, last_error = False, f"{type(exc).__name__}: {exc}"
                 if not (self.failures or self.unanswered):
                     self.failed_at = time.monotonic()
+                    self.log(event="upload_failed", error=last_error[:120], failures=1)
                 self.failures += 1
-                busy, last_error = False, f"{type(exc).__name__}: {exc}"
-                self.log(event="upload_failed", error=last_error[:120], failures=self.failures)
                 self.stop.wait(RETRY_AFTER[min(self.failures - 1, len(RETRY_AFTER) - 1)])
                 continue
             if busy or last_error is not None:

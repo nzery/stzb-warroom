@@ -258,6 +258,9 @@ async function main() {
     copy: ['甲 曹操 "8红"，推荐无', null] })`, context);
   assert.match(copied, /<td title="曹操">曹操<button class="row-copy" data-copy-row="甲 曹操 &quot;8红&quot;，推荐无"[^>]*>复制<\/button><\/td><\/tr>/);
   assert.equal(copied.match(/row-copy/g).length, 1);
+  // a line with $ patterns is kept as it is, not read as replacement patterns
+  const dollars = vm.runInContext(`noticeTable({ columns: ['玩家'], rows: [['甲']], copy: ['a $& b $\\' c $$'] })`, context);
+  assert.match(dollars, /data-copy-row="a \$&amp; b \$&#39; c \$\$"/);
   // when each army lands counts down in its row, not a line of its own
   const later = Math.floor(Date.now() / 1000) + 600;
   const rows = vm.runInContext(`noticeTable({ columns: ['到达', '阵容'], key: 1,

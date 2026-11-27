@@ -10,6 +10,7 @@ sends back the line typed when a prompt asks for one.
 import hashlib
 import json
 import os
+import random
 import re
 import sys
 import threading
@@ -49,6 +50,12 @@ def render(notice, color, label=False):
 # (seconds) is dead (a lossy line in the evening), dropped and opened again at once, not after a minute.
 STREAM_TIMEOUT = 25
 RECONNECT_FIRST, RECONNECT_MAX = 0.5, 10  # seconds before opening a stream again, doubling on failures
+STREAM_LASTED = 60  # a stream open this long (seconds) ended normally: the next wait starts small again
+
+
+def jittered(delay):
+    """`delay` give or take half: the computers a server restart cut off do not all come back at once."""
+    return delay * random.uniform(0.5, 1.5)
 
 
 def events(stream, stop):
@@ -159,9 +166,13 @@ class Follower:
             if self.ready and not self.ready():
                 stop.wait(5)
                 continue
+            opened = time.monotonic()
             try:
                 self.follow_once(stop)
-                delay = RECONNECT_FIRST
+                # A stream the server ends at once again and again (restarting, overloaded) is
+                # opened again less and less often too.
+                lasted = time.monotonic() - opened >= STREAM_LASTED
+                delay = RECONNECT_FIRST if lasted else min(delay * 2, RECONNECT_MAX)
             except HTTPError as exc:
                 if exc.code == 401:
                     self.warn("a token was rejected (HTTP 401); its notifications stop")
@@ -179,7 +190,7 @@ class Follower:
                 if summary != self.problem:
                     self.warn(f"notifications interrupted: {summary}")
                     self.problem = summary
-            stop.wait(delay)
+            stop.wait(jittered(delay))
 
 
 def follow_prompts(server, token, stop, show=ask_terminal, on_relogin=None):

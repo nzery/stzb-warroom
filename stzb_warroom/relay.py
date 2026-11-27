@@ -649,12 +649,12 @@ def start(origins, tokens, log=None):
     return exits
 
 
-def relays_of(server, tokens, scoped=None):
+def relays_of(server, tokens, scoped=None, errors=None):
     """The relays any of the tokens may use, as the server names them (GET /v1/client/phone?only=relays,
     asked for each token: the public domain's and a private one's differ), in the order given;
     [] when every token was answered and none has any (not approved yet). ConnectionError when there
     are none but a token got no answer: nothing is known about that one, it may well be approved.
-    A server without ?only=relays gets the whole page asked."""
+    A server without ?only=relays gets the whole page asked. `errors` gets each token's failure."""
     found, failed = [], None
     for token in tokens:
         try:
@@ -666,6 +666,8 @@ def relays_of(server, tokens, scoped=None):
                 page = server.json("/v1/client/phone", token, timeout=20)
         except (OSError, ValueError) as exc:
             failed = exc
+            if errors is not None:
+                errors.append(exc)
             continue
         if scoped is not None and isinstance(page, dict):
             from .node_selection import candidates
@@ -677,6 +679,21 @@ def relays_of(server, tokens, scoped=None):
     if failed is not None and not found and not scoped:
         raise ConnectionError(str(failed))
     return list(dict.fromkeys(found))[:4]
+
+
+# Asking for the node exits failed for a token this many times in a row before the running ones
+# follow what the others' answers say: one lost answer (a lossy evening line) closes none.
+SCOPED_MISSES = 3
+
+
+def kept_scoped(exits, wanted, misses):
+    """What sync_scoped gets after an ask with `misses` failures in a row (0: it all went): while
+    fewer than SCOPED_MISSES, the running exits stay as they are and only new ones are added."""
+    if not misses or misses >= SCOPED_MISSES:
+        return wanted
+    kept = {origin: keys for origin, (keys, _running) in exits.items()}
+    kept.update((origin, keys) for origin, keys in wanted.items() if origin not in kept)
+    return kept
 
 
 def sync_scoped(exits, wanted, log=None):
@@ -704,15 +721,17 @@ def run(server, tokens, stop, log=None, origins=None):
         if explicit:
             stop.wait()
         else:
+            misses = 0
             while not stop.is_set():
-                sync_scoped(running, scoped, log)
+                sync_scoped(running, kept_scoped(running, scoped, misses), log)
                 if stop.wait(30 if running else 600):
                     break
-                scoped = {}
+                scoped, errors = {}, []
                 try:
-                    relays_of(server, tokens, scoped)
+                    relays_of(server, tokens, scoped, errors)
                 except ConnectionError:
                     scoped.clear()
+                misses = misses + 1 if errors else 0
     finally:
         sync_scoped(running, {})
         for exit_ in exits:

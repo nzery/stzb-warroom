@@ -289,7 +289,7 @@ class MovingTests(unittest.TestCase):
 
 class TLSTests(unittest.TestCase):
     def test_records_already_received_are_pending(self):
-        # 2026-10-16: the relay's 101 answer and the phone's first message (90008, 57 bytes) came in
+        # 2026-10-16: the relay's 101 answer and the phone's first message (57 bytes) came in
         # one read; a TLS read hands out one record, the other stayed encrypted where select() and
         # SSLObject.pending() do not look, until the phone gave up.
         class Records:  # SSLObject: one record a read, pending() only within that record
@@ -351,7 +351,7 @@ class HelloTests(unittest.TestCase):
 class GameCheckTests(unittest.TestCase):
     def test_the_game_from_the_first_byte_even_in_pieces(self):
         first = client_frame(40001, {"name": "x", "ver": "9.2.2"})
-        stream = first + client_frame(5025, {"a": 1})
+        stream = first + client_frame(41003, {"a": 1})
         for cut in (1, 10, 57, len(first) - 1, len(first), len(stream) - 1):
             check = relay.GameCheck()
             verdict = check.feed(stream[:cut])
@@ -359,10 +359,10 @@ class GameCheckTests(unittest.TestCase):
             self.assertTrue(check.feed(stream[cut:]), cut)
 
     def test_a_resumed_session_is_the_game(self):
-        # 2026-10-15, iPhone reconnecting: a 90008 without a body, then 90009s whose body is a number.
-        bare = client_frame(90008, None)
+        # 2026-10-15, iPhone reconnecting: a frame without a body, then frames whose body is a number.
+        bare = client_frame(41001, None)
         bare = struct.pack(">I", 53) + bare[4:57]  # the header alone
-        stream = bare + b"".join(client_frame(90009, 9787814 + n) for n in range(6))
+        stream = bare + b"".join(client_frame(41002, 9787814 + n) for n in range(6))
         check = relay.GameCheck()
         self.assertTrue(check.feed(stream[:57]) is None and check.feed(stream[57:]))
 
@@ -435,6 +435,63 @@ class RelaysTests(unittest.TestCase):
                 return {"relays": ["https://backup.example"]}
 
         self.assertEqual(relay.relays_of(Server(), ["t"]), ["https://backup.example"])
+
+    def test_a_bad_node_row_is_left_out_and_the_others_kept(self):
+        good = {"host": "n.example", "exit": "e" * 64, "phone": "00000000-0000-4000-8000-000000000001"}
+        page = {"relays": [], "candidates": [{"host": 5}, None, dict(good, exit="x"), dict(good, phone="no"), good]}
+
+        class Server:
+            def json(self, path, token, timeout):
+                return page
+
+        scoped, errors = {}, []
+        self.assertEqual(relay.relays_of(Server(), ["t"], scoped, errors), [])
+        self.assertEqual((scoped, errors), ({"https://n.example": ["e" * 64]}, []))
+        page["candidates"] = "x"
+        self.assertEqual(relay.relays_of(Server(), ["t"], {}), [])
+
+    def test_node_exits_stay_until_asking_failed_several_times_in_a_row(self):
+        running = {"https://a.example": (["ka"], object()), "https://b.example": (["kb"], object())}
+        answered = {"https://a.example": ["ka2"], "https://c.example": ["kc"]}  # b's token got no answer
+        self.assertEqual(relay.kept_scoped(running, answered, 0), answered)  # everything answered
+        for misses in range(1, relay.SCOPED_MISSES):
+            self.assertEqual(relay.kept_scoped(running, answered, misses),
+                             {"https://a.example": ["ka"], "https://b.example": ["kb"], "https://c.example": ["kc"]})
+        self.assertEqual(relay.kept_scoped(running, {}, 1), {o: keys for o, (keys, _r) in running.items()})
+        self.assertEqual(relay.kept_scoped(running, answered, relay.SCOPED_MISSES), answered)
+
+    def test_one_failed_ask_closes_no_node_exit(self):
+        good = {"host": "n.example", "exit": "e" * 64, "phone": "00000000-0000-4000-8000-000000000001"}
+        answers = [{"candidates": [good]}] + [OSError("down")] * relay.SCOPED_MISSES
+
+        class Server:
+            def json(self, path, token, timeout):
+                answer = answers.pop(0)
+                if isinstance(answer, Exception):
+                    raise answer
+                return answer
+
+        class Stop:
+            waits = 0
+
+            def is_set(self):
+                return not answers and self.waits > relay.SCOPED_MISSES
+
+            def wait(self, _delay):
+                self.waits += 1
+                return self.is_set()
+
+        synced = []
+        with unittest.mock.patch.object(relay, "sync_scoped",
+                                        side_effect=lambda exits, wanted, log=None: synced.append(dict(wanted))
+                                        or exits.update({o: (k, unittest.mock.Mock()) for o, k in wanted.items()})
+                                        or [exits.pop(o) for o in list(exits) if o not in wanted]), \
+                unittest.mock.patch.object(relay, "start", return_value=[]):
+            relay.run(Server(), ["t"], Stop())
+        node = {"https://n.example": ["e" * 64]}
+        # kept through the failures before the last one, closed once it failed SCOPED_MISSES times
+        self.assertEqual(synced[:-1], [node] * relay.SCOPED_MISSES + [{}])
+        self.assertEqual(synced[-1], {})
 
 
 if __name__ == "__main__":

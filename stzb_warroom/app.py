@@ -756,29 +756,34 @@ class App:
         path = PHONE + ("/reset" if reset else f"?only={only}" if only else "")
         if only in {"node", "sub"}:
             path += "&pick=1"
+        value = self._phone_ask(path, token, reset, 30)
+        if only in {"node", "sub"} and value.get("candidates"):
+            from .node_selection import candidates, choose
+            elapsed, host = choose(candidates(value))
+            value = self._phone_ask(PHONE + "?" + urlencode({"only": only, "node": host}), token, False, 15)
+            value["selection"] = {"ms": round(elapsed * 1000)}
+        if reset:
+            self.log("已重置手机节点：旧的二维码 30 秒内失效，手机要重新扫码")
+        return value
+
+    def _phone_ask(self, path, token, post, timeout):
+        """The server's answer (a dict) to one phone page request; ValueError says why not."""
         try:
-            with self.server.open(path, token, {} if reset else None,
-                                  timeout=30, method="POST" if reset else "GET") as response:
+            with self.server.open(path, token, {} if post else None,
+                                  timeout=timeout, method="POST" if post else "GET") as response:
                 value = json.load(response)
         except HTTPError as exc:
             if exc.code == 404:
                 raise ValueError("服务器还不支持用手机玩")
             try:
                 message = json.loads(exc.read() or b"{}").get("error")
-            except (OSError, ValueError):
+            except (OSError, ValueError, AttributeError):
                 message = None
-            raise ValueError(message or f"服务器返回 HTTP {exc.code}")
+            raise ValueError(message if isinstance(message, str) and message else f"服务器返回 HTTP {exc.code}")
         except OSError as exc:
             raise ValueError(f"连不上服务器：{exc}")
         if not isinstance(value, dict):
             raise ValueError("服务器的回复不对")
-        if only in {"node", "sub"} and value.get("candidates"):
-            from .node_selection import candidates, choose
-            elapsed, host = choose(candidates(value))
-            value = self.server.json(PHONE + "?" + urlencode({"only": only, "node": host}), token, timeout=15)
-            value["selection"] = {"ms": round(elapsed * 1000)}
-        if reset:
-            self.log("已重置手机节点：旧的二维码 30 秒内失效，手机要重新扫码")
         return value
 
     def _phone_status(self):
@@ -805,17 +810,19 @@ class App:
         def run():
             while live():
                 problem = "暂时没有可用的手机线路"
+                wanted, errors = {}, []
                 try:
-                    wanted = {}
-                    origins = relay.relays_of(self.server, session["tokens"], wanted)
+                    origins = relay.relays_of(self.server, session["tokens"], wanted, errors)
                 except ConnectionError as exc:
                     origins, problem = [], f"暂时连不上服务器（{exc}）"
+                misses = session["scoped_misses"] = session.get("scoped_misses", 0) + 1 if errors else 0
                 with self.lock:
                     exits = session.get("exits") or []
                     known = {e.origin for e in exits}
                     new = [o for o in origins if o.rstrip("/") not in known]
                     if live():
-                        relay.sync_scoped(session.setdefault("node_exits", {}), wanted, self._exit_log)
+                        node_exits = session.setdefault("node_exits", {})
+                        relay.sync_scoped(node_exits, relay.kept_scoped(node_exits, wanted, misses), self._exit_log)
                     if new and live():
                         session["exits"] = exits + relay.start(new, session["tokens"], log=self._exit_log)
                         if not exits:

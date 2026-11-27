@@ -89,8 +89,8 @@ def body(frame, client):
 
 def is_game(frame, client):
     """True: decodes as the game's JSON; False: an encoded body that does not; None: no body.
-    A number counts: a phone resuming its session sends 90009 requests whose body is one
-    (2026-10-15, e.g. 9787814), and nothing else after its 90008."""
+    A number counts: a phone resuming its session sends requests whose body is one
+    (2026-10-15, e.g. 9787814), and nothing else after a first frame without a body."""
     encoding, value = body(frame, client)
     if encoding not in (2, 3, 5) or not frame[CLIENT_HEADER if client else 13:].strip(b"\0"):
         return None

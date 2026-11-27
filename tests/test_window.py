@@ -4,6 +4,7 @@ import io
 import json
 import shutil
 import subprocess
+import sys
 import tempfile
 import threading
 import time
@@ -500,6 +501,26 @@ class AppTests(unittest.TestCase):
         self.assertNotIn("k1", json.dumps(list(app.logs)) + app.diagnostics())
         with self.assertRaisesRegex(ValueError, "没有这个账号"):
             app.phone(5)
+
+    def test_the_picked_node_refused_says_why(self):
+        # Timed nodes, then the page for the fastest: the server refusing that one is a message too.
+        app = self.app(saved=GOOD)
+        row = {"host": "a.example", "exit": "e" * 64, "phone": "00000000-0000-4000-8000-000000000001"}
+        answers = [{"candidates": [row, {"host": "Bad Host"}, "x"]},
+                   HTTPError("/v1/client/phone", 409, "conflict", {}, io.BytesIO('{"error": "节点刚换过"}'.encode()))]
+
+        def opened(path, token, body=None, timeout=45, method=None):
+            self.server.calls.append((method, path, body))
+            answer = answers.pop(0)
+            if isinstance(answer, Exception):
+                raise answer
+            return Response(json.dumps(answer).encode())
+        self.server.open = opened
+        with unittest.mock.patch("stzb_warroom.node_selection.choose", return_value=(0.05, "a.example")) as chose, \
+                self.assertRaisesRegex(ValueError, "节点刚换过"):
+            app.phone(0, part="node")
+        self.assertEqual(chose.call_args[0][0], [row])  # the bad rows left out
+        self.assertEqual(self.server.calls[-1][1], "/v1/client/phone?only=node&node=a.example")
 
     def test_the_phone_game_flowing_with_nothing_captured_shows(self):
         app = self.app(saved=GOOD)
@@ -1214,6 +1235,18 @@ class PageServerTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class MarkerTests(unittest.TestCase):
+    @unittest.skipIf(sys.platform == "win32", "Windows keeps the folder's own permissions")
+    def test_the_window_marker_is_for_this_user_only(self):
+        with tempfile.TemporaryDirectory() as folder:
+            path = Path(folder) / "window.json"
+            path.write_text("old")
+            path.chmod(0o644)  # left by an earlier version
+            webui.write_private(path, '{"key": "k"}')
+            self.assertEqual(path.read_text(), '{"key": "k"}')
+            self.assertEqual(path.stat().st_mode & 0o777, 0o600)
 
 
 @unittest.skipUnless(winsys.WINDOWS, "the tray icon is Windows only")

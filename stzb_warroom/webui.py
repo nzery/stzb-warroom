@@ -17,6 +17,7 @@ in the notification area shows the window again or quits.
 
 import hmac
 import json
+import os
 import secrets
 import shutil
 import sys
@@ -489,6 +490,17 @@ def main(server, state_dir, background=False, show=None, after=None):
         held.close()
 
 
+def write_private(path, text):
+    """Write `text` readable by this user only (the window's key is in it)."""
+    handle = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+    try:
+        os.chmod(path, 0o600)  # one made earlier with the default permissions
+    except OSError:
+        pass
+    with os.fdopen(handle, "w", encoding="utf-8") as file:
+        file.write(text)
+
+
 def run(server, state_dir, background, show, stay=False):
     """The program itself, once it is the only one."""
     winsys.sharp()
@@ -499,7 +511,7 @@ def run(server, state_dir, background, show, stay=False):
     state_dir.mkdir(parents=True, exist_ok=True)
     shutil.rmtree(state_dir / "browser", ignore_errors=True)  # Edge's data, from before the window was Electron
     marker = state_dir / "window.json"
-    marker.write_text(json.dumps({"url": window.url, "key": window.key}))
+    write_private(marker, json.dumps({"url": window.url, "key": window.key}))
     threading.Thread(target=window.serve_forever, name="window", daemon=True).start()
     app.begin()
     tray = winsys.Tray(TITLE, on_open=window.show, icon=UI / "icon.ico",

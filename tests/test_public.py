@@ -4,6 +4,11 @@ Only the addresses players use appear (HOSTS); no public IPv4 address other than
 the public resolver in ADDRESSES. The files, every commit's changes and message, and the tags'
 notes are checked. Words that must not appear either are listed outside the repository, one per
 line, in the file PRIVATE_WORDS (or $ST_PRIVATE_WORDS) names; without it that part is skipped.
+
+The private words are looked for in the files, and in what each commit after CHECKED_AFTER adds,
+its message and the tags' notes (the commits up to it were published before; a rewritten history
+without it is all checked). The game's own data names belong there, not here: even hashed, a
+guessable name could be confirmed.
 """
 
 import ipaddress
@@ -20,6 +25,7 @@ EXAMPLES = ipaddress.ip_network("1.2.3.0/24")
 PRIVATE_WORDS = Path.home() / ".config" / "stzb-warroom" / "private-words.txt"
 HOST = re.compile(r"(?<![\w-])(?:[a-z0-9-]+\.)*nzery\.dev\b", re.I)
 IPV4 = re.compile(r"(?<![\d.])\d{1,3}(?:\.\d{1,3}){3}(?![\d.])")
+CHECKED_AFTER = "c4bd1296e1f7eda81aba2fea74197c6d3b86adb9"
 
 
 def problems(text):
@@ -63,9 +69,16 @@ def in_git():
         return False
 
 
+def has_commit(ref):
+    try:
+        git("cat-file", "-e", ref + "^{commit}")
+        return True
+    except (OSError, subprocess.CalledProcessError):
+        return False
+
+
 class PublicTests(unittest.TestCase):
-    def texts(self):
-        """(where, text) of every file, and with git, every commit and tag."""
+    def files(self):
         if in_git():
             names = git("ls-files", "-z").split("\0")
         else:
@@ -76,10 +89,29 @@ class PublicTests(unittest.TestCase):
                 yield name, (ROOT / name).read_text(encoding="utf-8", errors="replace")
             except OSError:
                 pass
+
+    def texts(self):
+        """(where, text) of every file, and with git, every commit and tag."""
+        yield from self.files()
         if in_git():
             for commit in git("log", "--all", "-z", "-p", "--format=COMMIT %h%n%B").split("\0"):
                 if commit:
                     yield commit.strip().split("\n", 1)[0], commit
+            yield "tags", git("for-each-ref", "refs/tags", "--format=%(refname:short) %(contents)")
+
+    def added_texts(self):
+        """(where, text) of every file, and with git, the messages and added lines of the commits
+        after CHECKED_AFTER, and the tags' notes."""
+        yield from self.files()
+        if in_git():
+            since = ["--not", CHECKED_AFTER] if has_commit(CHECKED_AFTER) else []
+            # What is or is about to be published: not other local branches or a tool's own refs.
+            log = git("log", "HEAD", "--remotes", "--tags", "-p", "--unified=0",
+                      "--format=%x00COMMIT %h%n%B", *since)
+            for commit in filter(None, log.split("\0")):
+                message, _, diff = commit.partition("\ndiff --git ")
+                added = [line[1:] for line in diff.splitlines() if line.startswith("+") and not line.startswith("+++")]
+                yield message.strip().split("\n", 1)[0], message + "\n" + "\n".join(added)
             yield "tags", git("for-each-ref", "refs/tags", "--format=%(refname:short) %(contents)")
 
     def test_no_server_address(self):
@@ -90,7 +122,8 @@ class PublicTests(unittest.TestCase):
         words = private_words()
         if not words:
             self.skipTest("no private words file")
-        found = {(where, word) for where, text in self.texts() for word in words if mentions(text.lower(), word)}
+        found = {(where, word) for where, text in self.added_texts() for word in words
+                 if mentions(text.lower(), word)}
         self.assertEqual(found, set())
 
     def test_the_check_finds_them(self):

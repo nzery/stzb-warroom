@@ -199,7 +199,7 @@ class UploadTests(unittest.TestCase):
         # The server removes credentials; the client sends what the game sent.
         uploader = self.uploader(accept())
         request = client_frame(40001, {"password": "x"})
-        login = server_frame(40001, [1, [7], 1, 0, [["Tb_sample,id,secret", ["Tb_sample", [[7, "lock"]]]]]],
+        login = server_frame(40001, [1, [7], 1, 0, [["sample,id,secret", ["sample", [[7, "lock"]]]]]],
                              encoding=3)
         self.feed(uploader, (request, True), (login, False))
         rows = self.queue.batch()[2]
@@ -262,9 +262,34 @@ class UploadTests(unittest.TestCase):
         uploader.run()
         self.assertEqual(limits, [4, 4, 6, 8])
         self.assertEqual(waits[:3], [0, 0, 0.5])
-        self.assertEqual([f["event"] for f in logged], ["upload_failed"] * 3 + ["upload_recovered"])
+        # the run of failures logged once, and its end
+        self.assertEqual([f["event"] for f in logged], ["upload_failed", "upload_recovered"])
+        self.assertEqual(logged[1]["failures"], 3)
         self.assertEqual(uploader.failures, 0)
         self.assertIsNone(self.queue.batch())
+
+    def test_after_a_stall_the_next_batch_is_half_as_large(self):
+        uploader = self.uploader(TimeoutError("timed out"), TimeoutError("timed out"), accept(), accept())
+        uploader.log = lambda **_: None
+        frames = [server_frame(9, [n]) for n in range(8)]
+        offset = 100
+        for frame in frames:
+            uploader.on_packet(1.0, 1, packet(frame, offset))
+            offset += len(frame)
+        uploader.stop.wait = lambda _delay: uploader.stop.is_set()
+
+        def queued_wait(_delay):
+            if len(uploader.server.requests) >= 4:
+                uploader.stop.set()
+        uploader.queued.wait = queued_wait
+        with unittest.mock.patch.object(upload, "MAX_ROWS", 8):
+            uploader.run()
+        # once one got through, the rest goes whole again
+        self.assertEqual([len(r[2]["frames"]) for r in uploader.server.requests], [8, 4, 2, 6])
+        for n in range(3):
+            self.queue.add("s", n + 1, {"frame": "x" * 10})
+        self.assertEqual(len(self.queue.batch(max_rows=2)[2]), 2)
+        self.assertEqual(len(self.queue.batch(max_bytes=1)[2]), 1)  # the first row always goes
 
     def test_each_batch_tells_its_timing_by_the_monotonic_clock(self):
         uploader = self.uploader(accept(), accept())
@@ -579,6 +604,32 @@ class NotifyTests(unittest.TestCase):
         follower.follow_once(threading.Event())
         self.assertIn("notify=1", server.path)
         self.assertEqual(json.loads((Path(folder.name) / "c.json").read_text()), {"epoch": "e", "after": 12})
+
+    def test_a_stream_ended_at_once_is_opened_again_less_often_and_at_random(self):
+        from stzb_warroom import notify
+        folder = tempfile.TemporaryDirectory()
+        self.addCleanup(folder.cleanup)
+        stop, waits = threading.Event(), []
+
+        def wait(delay):
+            waits.append(delay)
+            if len(waits) >= 6:
+                stop.set()
+            return stop.is_set()
+        stop.wait = wait
+
+        class Server:
+            def json(self, path, token):
+                return {"event_epoch": "e", "next_id": 10}
+
+            def open(self, path, token, timeout):
+                return io.BytesIO(b'event: ready\ndata: {"event_epoch": "e"}\n\n')  # and ends at once
+
+        with unittest.mock.patch.object(notify.random, "uniform", side_effect=lambda a, b: b):
+            Follower(Server(), "t", Path(folder.name) / "c.json", warn=lambda _text: None).follow(stop)
+        self.assertEqual(waits, [1.5, 3.0, 6.0, 12.0, 15.0, 15.0])  # 1, 2, 4, 8, 10, 10 at most half more
+        for _ in range(100):
+            self.assertTrue(0.25 <= notify.jittered(0.5) <= 0.75)
 
     def test_follower_says_when_notifications_resume(self):
         folder = tempfile.TemporaryDirectory()
