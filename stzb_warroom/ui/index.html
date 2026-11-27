@@ -125,12 +125,18 @@
     <section class="page" id="page-accounts">
       <div id="account-list" class="account-list"></div>
       <div class="card add-card">
-        <div class="add-head"><h3>添加账号</h3><span class="muted">粘贴邀请码（stj_ 开头）或 Token（sta_ 开头），一次一个；这台电脑上玩几个号就加几次</span></div>
-        <form id="add-form" class="inline-form">
-          <input id="add-token" type="password" autocomplete="off" spellcheck="false" placeholder="stj_… 或 sta_…">
-          <button class="btn primary" type="submit">添加</button>
-        </form>
-        <div class="add-public"><button class="btn ghost" type="button" data-action="join_public" data-confirm="生成新账号：你上传的战报同赛季的成员都能看到。确定生成？">一键生成账号</button><span class="muted">没有邀请码、或粘贴不了时点这里直接生成（你上传的战报同赛季的成员都能看到）</span></div>
+        <div class="add-head"><h3>添加账号</h3><span class="muted">这台电脑上玩几个游戏账号就添加几次，加好后先登录对应账号</span></div>
+        <div class="add-public">
+          <button class="btn primary add-public-btn" type="button" data-action="join_public" data-confirm="生成新账号：你上传的战报同赛季的成员都能看到。确定生成？">一键生成账号</button>
+          <span class="muted">直接点击生成即可使用，不需要邀请码（你上传的战报同赛季的成员都能看到）</span>
+        </div>
+        <details class="add-manual">
+          <summary>有邀请码或 Token？点此手动输入</summary>
+          <form id="add-form" class="inline-form">
+            <input id="add-token" type="password" autocomplete="off" spellcheck="false" placeholder="粘贴邀请码（stj_ 开头）或 Token（sta_ 开头）">
+            <button class="btn ghost" type="submit">添加</button>
+          </form>
+        </details>
       </div>
     </section>
 

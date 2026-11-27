@@ -466,8 +466,13 @@ input[type=text]:focus, input[type=password]:focus { border-color: var(--gold2);
 .account-actions .danger-text { margin-left: auto; color: var(--red); }
 .add-head { display: flex; align-items: baseline; gap: 12px; flex-wrap: wrap; margin-bottom: 12px; }
 .add-head .muted { font-size: 12px; }
-.add-public { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; margin-top: 12px; }
+.add-public { display: flex; align-items: center; gap: 14px; flex-wrap: wrap; }
+.add-public-btn { padding: 10px 20px; font-size: 14px; font-weight: 600; }
 .add-public .muted { font-size: 12px; }
+.add-manual { margin-top: 14px; padding-top: 10px; border-top: 1px solid var(--line); }
+.add-manual summary { cursor: pointer; font-size: 12px; color: var(--muted); user-select: none; }
+.add-manual summary:hover { color: var(--ink); }
+.add-manual .inline-form { margin-top: 10px; }
 
 /* 查询: a short name box (2026-11-13 user); 刷新 and 导出玩家信息 on the right. */
 .vtoolbar .vfilters { flex: 1; }

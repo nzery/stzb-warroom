@@ -305,8 +305,8 @@ async function main() {
   vm.runInContext(`S.tapped = { role: 8, place: '5' }; S.notices = [
     { seq: 1, role: 7, tapped: '9', level: 'info', title: '甲点开', view: { blocks: [] } },
     { seq: 2, role: 8, tapped: '5', level: 'info', title: '乙点开', view: { blocks: [] } }]; renderNotices();`, context);
-  const html = vm.runInContext(`document.getElementById('notice-list').innerHTML`, context);
-  assert.ok(html.indexOf('乙点开') < html.indexOf('其他通知') && html.indexOf('其他通知') < html.indexOf('甲点开'), html);
+  const noticeHtml = vm.runInContext(`document.getElementById('notice-list').innerHTML`, context);
+  assert.ok(noticeHtml.indexOf('乙点开') < noticeHtml.indexOf('其他通知') && noticeHtml.indexOf('其他通知') < noticeHtml.indexOf('甲点开'), noticeHtml);
   // settings & checks reflect built-in Windows PktMon capture cleanly without requiring Wireshark
   vm.runInContext(`renderSettings({ server: 'https://api.example', settings: { autostart: false, autostart_available: false,
     keep_running: true, dumpcap: null, dumpcap_picked: null, pktmon: true, capture_mode: 'pktmon', state_dir: 'C:\\\\data', windows: true } });
@@ -315,6 +315,9 @@ async function main() {
   assert.ok(nodes.get('capture-mode').textContent.includes('Windows 内置抓包'));
   assert.ok(nodes.get('dumpcap-path').textContent.includes('无需安装'));
   assert.ok(nodes.get('checks').innerHTML.includes('Windows 内置抓包'));
+  // one-click account generation is the primary action; manual invite/Token form is folded away
+  assert.ok(html.includes('btn primary add-public-btn') && html.includes('data-action="join_public"'));
+  assert.ok(html.includes('<details class="add-manual">') && html.indexOf('data-action="join_public"') < html.indexOf('id="add-form"'));
   console.log('UI startup and refresh regression checks passed');
 }
 main().catch((error) => { console.error(error); process.exitCode = 1; });

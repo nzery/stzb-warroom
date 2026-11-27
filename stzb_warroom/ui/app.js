@@ -312,7 +312,7 @@ function render() {
 
 function captureView(d) {
   const c = d.capture;
-  if (!d.tokens.length) return { cls: 'idle', icon: 'user', title: '还没有添加账号', desc: '添加管理员发给你的 Token 后就能开始上报。', dot: '', side: '未开始' };
+  if (!d.tokens.length) return { cls: 'idle', icon: 'user', title: '还没有添加账号', desc: '点“添加账号”，再点“一键生成账号”就能开始上报。', dot: '', side: '未开始' };
   switch (c.state) {
     case 'running': if (d.phone?.blind) return { cls: 'wait', icon: 'alert', title: '手机的游戏数据没有抓到', desc: '手机正在经这台电脑玩游戏，但电脑没抓到数据，战报不会上传。点“重新抓包”试试；开着 VPN 或代理的话先关掉。', dot: 'wait', side: '没抓到数据' };
       if (c.lost) return { cls: 'wait', icon: 'alert', title: '换网络后没抓到游戏数据', desc: '电脑刚换了网络，之后没再抓到游戏数据，通知和战报都会中断。还在玩的话点“重新抓包”；没在玩可以不管，这条提示过几分钟会消失。', dot: 'wait', side: '没抓到数据' };
@@ -395,7 +395,7 @@ function renderBanners(d) {
       `<b>账号还不能收通知</b>：${waiting.map((a) => `${esc(a.role ? roleName(a.role.label) : a.name || a.token)} ${esc(accountState(a)[0])}`).join('；')}`,
       '<button class="btn primary" data-goto="accounts">去看看</button>'));
   }
-  if (!d.tokens.length) parts.push(banner('warn', 'user', '还没有添加 Token，数据不会上传。', '<button class="btn primary" data-goto="accounts">添加账号</button>'));
+  if (!d.tokens.length) parts.push(banner('warn', 'user', '还没有添加账号，点“添加账号”一键生成后即可开始上报。', '<button class="btn primary" data-goto="accounts">添加账号</button>'));
   // On the overview the status card says it already.
   if (d.capture.state === 'error' && S.page !== 'overview' && !(invalid.length && invalid.length === d.tokens.length)) {
     const needWireshark = (d.capture.error || '').includes('dumpcap not found');
