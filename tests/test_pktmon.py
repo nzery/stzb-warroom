@@ -51,6 +51,11 @@ class PktMonUnitTests(unittest.TestCase):
             winpktmon.pktmon_start_args("pktmon.exe", win10),
             ["pktmon.exe", "start", "--etw", "-p", "0", "-m", "real-time"],
         )
+        # Empty/unrecognized help output defaults to modern --capture --pkt-size 0 (never -p 0).
+        self.assertEqual(
+            winpktmon.pktmon_start_args("pktmon.exe", ""),
+            ["pktmon.exe", "start", "--capture", "--comp", "nics", "--pkt-size", "0", "--log-mode", "real-time"],
+        )
 
     def test_filetime_to_unix(self):
         # 2026-01-01 00:00:00 UTC = 1767225600

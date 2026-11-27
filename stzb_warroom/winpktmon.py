@@ -154,23 +154,18 @@ class PacketDeduper:
 def pktmon_start_args(pktmon_path, help_text, comp_nics=True):
     """Build compatible `pktmon start` arguments across Windows 10 (2004+) and Windows 11."""
     lower = (help_text or "").lower()
-    args = [pktmon_path, "start"]
-    if "--capture" in lower:
-        args.append("--capture")
-    elif "--etw" in lower:
-        args.append("--etw")
-    else:
-        args.append("--capture")
-    if comp_nics and "--comp" in lower:
+    legacy_etw = "--etw" in lower and "--capture" not in lower
+    args = [pktmon_path, "start", "--etw" if legacy_etw else "--capture"]
+    if comp_nics and (not lower or "--comp" in lower or "-c" in lower):
         args += ["--comp", "nics"]
-    if "--pkt-size" in lower:
-        args += ["--pkt-size", "0"]
-    else:
+    if legacy_etw and "--pkt-size" not in lower:
         args += ["-p", "0"]
-    if "--log-mode" in lower:
-        args += ["--log-mode", "real-time"]
     else:
+        args += ["--pkt-size", "0"]
+    if legacy_etw and "--log-mode" not in lower:
         args += ["-m", "real-time"]
+    else:
+        args += ["--log-mode", "real-time"]
     return args
 
 
@@ -670,7 +665,7 @@ class PktMonSession:
             detail = (_decode_console(added.stderr) or _decode_console(added.stdout)).strip()
             raise RuntimeError(f"pktmon filter add failed: {detail or added.returncode}")
 
-        help_res = _run_pktmon(self.pktmon, "start", "--help", timeout=10)
+        help_res = _run_pktmon(self.pktmon, "start", "help", timeout=10)
         help_text = _decode_console(help_res.stdout) + "\n" + _decode_console(help_res.stderr)
 
         self._start_etw()
