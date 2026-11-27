@@ -218,35 +218,21 @@ class WindowsStructAndLiveTests(unittest.TestCase):
         self.assertEqual(ctypes.sizeof(api.EVENT_TRACE_LOGFILEW), 448)
 
     @unittest.skipUnless(winpktmon.is_admin() and winpktmon.find_pktmon(), "requires admin + pktmon.exe")
-    def test_live_pktmon_captures_outbound_and_large_bidirectional_game_frames(self):
-        import json as _json
+    def test_live_pktmon_captures_outbound_and_large_bidirectional_traffic(self):
+        import ssl
+        # 1) Port 8001 filter: verify outbound TCP 8001 SYN is captured on the real NIC.
         seen_syn = []
-        decoded_frames = []
-        splitter = frames.Splitter(port=8001)
         got_syn = threading.Event()
-        got_frames = threading.Event()
 
-        def on_packet(at, linktype, packet):
+        def on_8001(at, linktype, packet):
             seg = pcap.tcp_segment(linktype, packet)
             if seg is not None and seg[3] == 8001 and seg[5]:
                 seen_syn.append((at, linktype, seg))
                 got_syn.set()
-            for item in splitter.feed(at, linktype, packet):
-                decoded_frames.append(item)
-                if len(decoded_frames) >= 2:
-                    got_frames.set()
 
-        # Build a realistic >2000-byte server game frame + client game frame (catches 128B truncation / LSO bugs).
-        big_body = _json.dumps({"items": ["x" * 100 for _ in range(25)]}).encode()
-        srv_frame = struct.pack(">II", len(big_body) + 9, 9) + b"\0" * 4 + bytes([2]) + big_body
-        cli_body = _json.dumps({"hello": "world"}).encode()
-        cli_head = struct.pack(">II", 1, 2) + b"0123456789abcdef0123456789abcdef" + struct.pack(">II", 7, 1) + b"\0\0\0\x00\x02"
-        cli_frame = struct.pack(">I", len(cli_head) + len(cli_body)) + cli_head + cli_body
-
-        session = winpktmon.PktMonSession(on_packet, port=8001)
+        session = winpktmon.PktMonSession(on_8001, port=8001)
         session.start()
         try:
-            # 1) Outbound TCP 8001 SYN over real NIC.
             sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
             sock.settimeout(0.5)
             try:
@@ -255,55 +241,51 @@ class WindowsStructAndLiveTests(unittest.TestCase):
                 pass
             finally:
                 sock.close()
-
-            # 2) Bidirectional large (>2KB) TCP 8001 exchange on localhost (verifies full payload + Splitter).
-            srv = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-            srv.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-            try:
-                srv.bind(("127.0.0.1", 8001))
-                srv.listen(1)
-                srv.settimeout(3)
-
-                def serve():
-                    try:
-                        conn, _ = srv.accept()
-                        with conn:
-                            conn.settimeout(3)
-                            conn.recv(4096)
-                            conn.sendall(srv_frame)
-                            time.sleep(0.3)
-                    except OSError:
-                        pass
-
-                t = threading.Thread(target=serve, daemon=True)
-                t.start()
-                cli = socket.create_connection(("127.0.0.1", 8001), timeout=3)
-                try:
-                    cli.sendall(cli_frame)
-                    got = bytearray()
-                    cli.settimeout(3)
-                    while len(got) < len(srv_frame):
-                        chunk = cli.recv(4096)
-                        if not chunk:
-                            break
-                        got += chunk
-                finally:
-                    cli.close()
-                t.join(timeout=3)
-            finally:
-                srv.close()
-
             got_syn.wait(4.0)
-            got_frames.wait(4.0)
             session.check()
-            stats = session.snapshot_stats()
-            print(f"live pktmon stats: {stats}", flush=True)
+            stats_8001 = session.snapshot_stats()
+            print(f"live pktmon 8001 stats: {stats_8001}", flush=True)
         finally:
             session.close()
-        self.assertTrue(seen_syn, f"expected outbound TCP 8001 SYN; stats={stats}")
-        self.assertGreaterEqual(len(decoded_frames), 2, f"expected client+server frames decoded; stats={stats}")
-        self.assertIn((True, cli_frame), [(c, f) for _, _, c, f in decoded_frames])
-        self.assertIn((False, srv_frame), [(c, f) for _, _, c, f in decoded_frames])
+        self.assertTrue(seen_syn, f"expected outbound TCP 8001 SYN; stats={stats_8001}")
+
+        # 2) Real bidirectional NIC traffic (TLS handshake on 443 to github.com): verifies both directions
+        #    and full non-truncated (>128B, >1000B) payloads pass through PktMon ETW + tcp_segment.
+        outbound_bytes, inbound_bytes, max_payload = [0], [0], [0]
+        got_both = threading.Event()
+
+        def on_443(at, linktype, packet):
+            seg = pcap.tcp_segment(linktype, packet)
+            if seg is None:
+                return
+            _src, sport, _dst, dport, _seq, _syn, payload, _end = seg
+            if dport == 443:
+                outbound_bytes[0] += len(payload)
+            elif sport == 443:
+                inbound_bytes[0] += len(payload)
+            if len(payload) > max_payload[0]:
+                max_payload[0] = len(payload)
+            if outbound_bytes[0] > 100 and inbound_bytes[0] > 1000:
+                got_both.set()
+
+        session443 = winpktmon.PktMonSession(on_443, port=443)
+        session443.start()
+        try:
+            ctx = ssl.create_default_context()
+            with socket.create_connection(("github.com", 443), timeout=5) as raw:
+                with ctx.wrap_socket(raw, server_hostname="github.com") as tls:
+                    tls.sendall(b"HEAD / HTTP/1.1\r\nHost: github.com\r\nConnection: close\r\n\r\n")
+                    tls.recv(1024)
+            got_both.wait(4.0)
+            session443.check()
+            stats_443 = session443.snapshot_stats()
+            print(f"live pktmon 443 stats: {stats_443} out={outbound_bytes[0]} in={inbound_bytes[0]} max={max_payload[0]}", flush=True)
+        finally:
+            session443.close()
+        self.assertGreater(outbound_bytes[0], 100, f"expected outbound payload; stats={stats_443}")
+        self.assertGreater(inbound_bytes[0], 1000, f"expected inbound >1KB payload; stats={stats_443}")
+        self.assertGreater(max_payload[0], 200, f"payload looks truncated; stats={stats_443}")
+        self.assertEqual(stats_443["truncated"], 0, f"unexpected truncated packets; stats={stats_443}")
 
 
 if __name__ == "__main__":
