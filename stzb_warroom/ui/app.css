@@ -284,6 +284,7 @@ input[type=text]:focus, input[type=password]:focus { border-color: var(--gold2);
 .about h2 { margin: 14px 0 4px; font-size: 20px; font-weight: 600; }
 .version { margin: 18px 0 4px; }
 .facts { text-align: left; max-width: 520px; margin: 26px auto 0; color: var(--muted); line-height: 1.9; font-size: 13px; }
+.facts a { color: var(--gold); text-decoration: underline; }
 
 /* toasts, closed */
 .toasts { position: fixed; right: 20px; bottom: 20px; display: grid; gap: 8px; z-index: 20; }
