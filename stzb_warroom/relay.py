@@ -724,7 +724,7 @@ def run(server, tokens, stop, log=None, origins=None):
             misses = 0
             while not stop.is_set():
                 sync_scoped(running, kept_scoped(running, scoped, misses), log)
-                if stop.wait(30 if running else 600):
+                if stop.wait(180 if running else 600):
                     break
                 scoped, errors = {}, []
                 try:

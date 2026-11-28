@@ -114,6 +114,20 @@ class Queue:
                             (json.dumps({"server": server, "tokens": tokens}),))
         return dropped
 
+    def purge_for_removed(self, server, remaining_tokens):
+        """Drop queued frames/reports immediately when a temporary account is removed on exit."""
+        tokens = sorted(hashlib.sha256(token.encode()).hexdigest() for token in remaining_tokens)
+        with self.lock, self.db:
+            dropped = self.db.execute("DELETE FROM rows").rowcount
+            self.db.execute("DELETE FROM reports")
+            self.db.execute("INSERT OR REPLACE INTO meta VALUES ('scope', ?)",
+                            (json.dumps({"server": server, "tokens": tokens}),))
+        try:
+            self.db.execute("PRAGMA wal_checkpoint(TRUNCATE)")
+        except sqlite3.Error:
+            pass
+        return dropped
+
     def add(self, stream_id, seq, row):
         with self.lock:
             if self._room(1):

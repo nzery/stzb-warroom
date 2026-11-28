@@ -51,6 +51,7 @@ DIAGNOSTICS = "/v1/client/diagnostics"
 DIAGNOSTICS_MAX = 60000  # characters the server takes
 RELAYS_EVERY = 60  # seconds between two asks for the relays while none is known
 RELAYS_REFRESH = 600  # and once there are some (a token approved or moved since: more relays)
+NODE_RELAYS_REFRESH = 180  # refresh interval for scoped community node exits (woken immediately on phone page changes)
 UPDATE_EVERY = 6 * 3600
 # Once the server answers 426 (it no longer serves this version), the release is looked for this
 # often until the code an update brings is downloaded; then the program restarts into it by itself.
@@ -443,10 +444,12 @@ class App:
 
     def forget_temporary(self):
         """At closing: an internet cafe's account (the server's ``computer`` kind "temp") is deleted
-        here and stopped there, so that the computer's next user cannot use it."""
+        here and stopped there, and the local upload queue is cleared so that the computer's next
+        user cannot read unsent frames or use the account."""
         with self.lock:
             temporary = [token for token in self.tokens
                          if ((self.accounts.get(token) or {}).get("computer") or {}).get("kind") == "temp"]
+        removed = False
         for token in temporary:
             with self.lock:
                 if token not in self.tokens:
@@ -454,8 +457,22 @@ class App:
                 index = self.tokens.index(token)
             try:
                 self.remove_token(index, restart=False)
+                removed = True
             except ValueError:
                 pass
+        if removed:
+            queue_path = self.state_dir / "queue.sqlite"
+            if queue_path.exists():
+                try:
+                    with self.lock:
+                        remaining = list(self.tokens)
+                    queue = upload.Queue(queue_path)
+                    try:
+                        queue.purge_for_removed(self.server.origin, remaining)
+                    finally:
+                        queue.close()
+                except (OSError, upload.sqlite3.Error):
+                    pass
 
     def stop_computer(self, index, device):
         """Another computer of the account stops (one added after this one; the server decides)."""
@@ -792,7 +809,15 @@ class App:
             value["selection"] = {"ms": round(elapsed * 1000)}
         if reset:
             self.log("已重置手机节点：旧的二维码 30 秒内失效，手机要重新扫码")
+        if reset or only in {"node", "sub"}:
+            self._wake_exits()
         return value
+
+    def _wake_exits(self):
+        with self.lock:
+            wake = (self.session or {}).get("exits_wake")
+        if wake is not None:
+            wake.set()
 
     def _phone_ask(self, path, token, post, timeout):
         """The server's answer (a dict) to one phone page request; ValueError says why not."""
@@ -831,12 +856,14 @@ class App:
         asked again every RELAYS_EVERY until there are some, then every RELAYS_REFRESH for a relay
         a token may use since (approved, moved to another domain): an exit is added for it."""
         mine = session["exits_run"] = object()  # an older run (the exit turned off and on) ends
+        wake = session["exits_wake"] = threading.Event()
 
         def live():
             return not session["stop"].is_set() and self.settings["phone_exit"] and session["exits_run"] is mine
 
         def run():
             while live():
+                wake.clear()
                 problem = "暂时没有可用的手机线路"
                 wanted, errors = {}, []
                 try:
@@ -859,7 +886,12 @@ class App:
                 if not origins and not exits and not wanted and live():
                     self.log(f"手机经本机连接游戏：{problem}，稍后再试", "warn")
                 self.touch()
-                session["stop"].wait(30 if session.get("node_exits") else RELAYS_REFRESH if session.get("exits") else RELAYS_EVERY)
+                wait_for = NODE_RELAYS_REFRESH if session.get("node_exits") else RELAYS_REFRESH if session.get("exits") else RELAYS_EVERY
+                deadline = time.monotonic() + wait_for
+                while live():
+                    remaining = deadline - time.monotonic()
+                    if remaining <= 0 or wake.wait(min(remaining, 1.0)):
+                        break
             self.touch()
 
         threading.Thread(target=run, name="relays", daemon=True).start()
@@ -868,6 +900,9 @@ class App:
     def _stop_exits(self, session):
         with self.lock:
             session["exits_run"] = None
+            wake = session.get("exits_wake")
+            if wake is not None:
+                wake.set()
             relay.sync_scoped(session.get("node_exits", {}), {})
             exits, session["exits"] = session.get("exits") or [], []
         for exit_ in exits:

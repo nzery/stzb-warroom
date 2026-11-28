@@ -265,10 +265,20 @@ class AppTests(unittest.TestCase):
             app.stop_computer(0, "3")
         self.assertEqual(app.stop_computer(0, 3), {"text": "已停用那台电脑"})
         self.assertEqual(app.accounts[GOOD]["computers"], [{"id": "own"}])
-        # At closing an internet cafe's account goes, here and on the server; the own one stays.
+        # At closing an internet cafe's account goes, here and on the server, and queued frames are cleared; the own one stays.
+        from stzb_warroom import upload as upload_mod
+        q = upload_mod.Queue(app.state_dir / "queue.sqlite")
+        q.bind(self.server.origin, [GOOD, NEW])
+        q.add("s" * 32, 1, {"k": "v"})
+        q.close()
         app.forget_temporary()
         self.assertEqual(app.tokens, [GOOD])
         self.assertEqual(sent, [(GOOD, {"stop": 3}), (NEW, {"stop": "this"})])
+        q = upload_mod.Queue(app.state_dir / "queue.sqlite")
+        try:
+            self.assertEqual(q.pending(), 0)
+        finally:
+            q.close()
         self.server.json = real
 
     def test_a_temporary_answer_is_sent_as_it_is(self):
