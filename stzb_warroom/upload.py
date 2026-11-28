@@ -54,6 +54,9 @@ SLOW_BATCH = 3  # a batch taking longer than this is logged
 RUN = uuid.uuid4().hex[:16]
 MAX_STALLS = 20  # interruptions told to the server at most, the newest
 SMALLEST_BATCH = 6  # halvings of a batch after failures in a row at most (100 rows -> 1, 3 MB -> 48 KB)
+MAX_BATCH_MS = 10000  # upper bound on server-requested coalescing window
+BATCH_ROWS = 30  # flush early once this many ordinary rows are waiting
+BATCH_BYTES = 64 * 1024  # or once this many JSON bytes are waiting
 
 
 def battle_reports(value):
@@ -291,6 +294,13 @@ class Uploader:
         self.dead = set()  # streams the server refused: their connection starts a new one
         self.drop = {"client": set(), "server": set()}  # message ids the server does not want
         self.whole = set()  # report lists the server also wants as they came, besides their reports
+        self.flush = {"client": set(), "server": set()}  # message ids that flush any coalesced batch at once
+        self.batch_ms = 0  # milliseconds to coalesce ordinary frames (0: send immediately)
+        self._batch_lock = threading.Lock()
+        self._batch_deadline = None
+        self._batch_urgent = False
+        self._batch_rows = 0
+        self._batch_bytes = 0
         self.waiting = {}  # stream id -> [monotonic time to try again, wait]: held back by the server
         self.swept = time.monotonic()
         self.stop = threading.Event()
@@ -375,10 +385,10 @@ class Uploader:
         link = self.stream(ends)
         added = self.queue.add_reports(self.roles.get(link[0]), link[0], link[1] + 1, at, channel, reports)
         if added:
-            self._queued(link[0], range(link[1] + 1, link[1] + added + 1))
+            self._queued(link[0], range(link[1] + 1, link[1] + added + 1), held=False)
         link[1] += added
         if added:
-            self.queued.set()
+            self._wake(urgent=True)
 
     def connections(self, within=300):
         """Open game connections seen in the last `within` seconds (a closed one, as after
@@ -399,32 +409,74 @@ class Uploader:
         link = self.stream(ends)
         if self.queue.add(link[0], link[1] + 1, row):
             link[1] += 1
-            self._queued(link[0], (link[1],))
-            self.queued.set()
+            side = "client" if row.get("client") else "server"
+            urgent = (self.batch_ms <= 0 or link[1] == 1
+                      or row.get("message_id") in self.flush[side])
+            self._queued(link[0], (link[1],), held=not urgent)
+            self._wake(urgent=urgent, size=len(row.get("frame") or ""))
 
-    def _queued(self, stream_id, seqs):
+    def _wake(self, urgent=False, size=0):
+        """Schedule an upload: immediately for urgent rows or full buffers, else after `batch_ms`."""
+        now = time.monotonic()
+        with self._batch_lock:
+            if urgent or self.batch_ms <= 0:
+                self._batch_urgent = True
+                self._batch_deadline = None
+                self.queued.set()
+                return
+            self._batch_rows += 1
+            self._batch_bytes += size
+            if self._batch_rows >= BATCH_ROWS or self._batch_bytes >= BATCH_BYTES:
+                self._batch_urgent = True
+                self._batch_deadline = None
+                self.queued.set()
+                return
+            deadline = now + self.batch_ms / 1000.0
+            if self._batch_deadline is None or deadline < self._batch_deadline:
+                self._batch_deadline = deadline
+                self.queued.set()
+
+    def _batch_wait(self):
+        """Seconds left to wait for coalescing before sending, or 0 to send now."""
+        if self.batch_ms <= 0 or self.failures or self.unanswered:
+            return 0.0
+        with self._batch_lock:
+            if self._batch_urgent or self._batch_deadline is None:
+                return 0.0
+            return max(0.0, self._batch_deadline - time.monotonic())
+
+    def _batch_reset(self):
+        with self._batch_lock:
+            self._batch_deadline = None
+            self._batch_urgent = False
+            self._batch_rows = 0
+            self._batch_bytes = 0
+
+    def _queued(self, stream_id, seqs, held=False):
         now = time.monotonic()
         with self.queued_lock:
             times = self.queued_at.setdefault(stream_id, [])
-            times.extend([seq, now] for seq in seqs)
+            times.extend([seq, now, held] for seq in seqs)
             if len(times) > MAX_QUEUED:
                 del times[:len(times) - MAX_QUEUED]
 
     def _waited(self, stream_id, start, now):
-        """Seconds the row `start` of the stream has waited (None: queued by an earlier run)."""
+        """(seconds the row `start` waited, whether it was intentionally coalesced), or (None, False)."""
         with self.queued_lock:
-            for seq, at in self.queued_at.get(stream_id, ()):
+            for item in self.queued_at.get(stream_id, ()):
+                seq, at = item[0], item[1]
+                held = item[2] if len(item) > 2 else False
                 if seq == start:
-                    return now - at
+                    return now - at, held
                 if seq > start:
                     break
-        return None
+        return None, False
 
     def _acknowledged(self, stream_id, cursor):
         with self.queued_lock:
             times = self.queued_at.get(stream_id)
             if times is not None:
-                keep = next((i for i, (seq, _at) in enumerate(times) if seq > cursor), len(times))
+                keep = next((i for i, item in enumerate(times) if item[0] > cursor), len(times))
                 del times[:keep]
                 if not times:
                     del self.queued_at[stream_id]
@@ -459,9 +511,13 @@ class Uploader:
             self.http.close()
         started = time.monotonic()
         extra = self._report(started)
-        waited = self._waited(stream_id, start, started)
+        waited, coalesced = self._waited(stream_id, start, started)
         if waited is not None:
             extra["timing"]["age"] = round(waited, 3)
+            if coalesced and self.batch_ms > 0 and not (self.failures or self.unanswered):
+                held = min(waited, self.batch_ms / 1000.0)
+                if held > 0:
+                    extra["timing"]["held"] = round(held, 3)
         try:
             payload = {"stream_id": stream_id, "start_seq": start, "frames": rows, **extra}
             if self.local_capture:
@@ -518,7 +574,12 @@ class Uploader:
                 self.on_role()
         if isinstance(result.get("drop"), dict):
             self.drop = {side: set(result["drop"].get(side) or ()) for side in ("client", "server")}
+        if isinstance(result.get("flush"), dict):
+            self.flush = {side: set(result["flush"].get(side) or ()) for side in ("client", "server")}
+        if type(result.get("batch_ms")) is int:
+            self.batch_ms = max(0, min(MAX_BATCH_MS, result["batch_ms"]))
         self.whole = set(result.get("whole") or ())
+        self._batch_reset()
         if result.get("rejected_tokens"):
             self.log(event="tokens_rejected", count=result["rejected_tokens"])
         return True
@@ -526,6 +587,13 @@ class Uploader:
     def run(self):
         last_error = None
         while not self.stop.is_set():
+            wait = self._batch_wait()
+            if wait > 0:
+                self.queued.clear()
+                wait = self._batch_wait()
+                if wait > 0:
+                    self.queued.wait(wait)
+                    continue
             try:
                 busy = self.upload_once()
                 last_error = None

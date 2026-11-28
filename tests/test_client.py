@@ -305,6 +305,45 @@ class UploadTests(unittest.TestCase):
         uploader.upload_once()
         self.assertNotIn("age", uploader.server.requests[1][2]["timing"])
 
+    def test_smart_batching_coalesces_ordinary_frames_and_flushes_urgent_ones(self):
+        policy = lambda body: dict(accept()(body), batch_ms=1500, flush={"client": [99], "server": [42]})
+        sent = []
+        done = threading.Event()
+
+        def answer(body):
+            sent.append((time.monotonic(), body))
+            if len(sent) >= 2:
+                done.set()
+            return policy(body)
+
+        uploader = self.uploader(answer, answer)
+        first = server_frame(9, [1])
+        self.feed(uploader, (first, False))
+        # First row goes immediately and receives the server's batching policy.
+        self.assertTrue(uploader.upload_once())
+        self.assertEqual(uploader.batch_ms, 1500)
+        self.assertEqual(uploader.flush, {"client": {99}, "server": {42}})
+
+        thread = threading.Thread(target=uploader.run, daemon=True)
+        thread.start()
+        self.addCleanup(thread.join, 5)
+        self.addCleanup(uploader.stop.set)
+
+        # Ordinary row waits instead of going immediately.
+        second = server_frame(9, [2])
+        self.feed(uploader, (second, False), skip=len(first))
+        time.sleep(0.15)
+        self.assertEqual(len(sent), 1)
+        # Urgent row (id 42 in flush.server) flushes both rows at once.
+        urgent = server_frame(42, [3])
+        started = time.monotonic()
+        self.feed(uploader, (urgent, False), skip=len(first) + len(second))
+        self.assertTrue(done.wait(1.0))
+        self.assertLess(time.monotonic() - started, 0.5)
+        self.assertEqual([r["message_id"] for r in sent[1][1]["frames"]], [9, 42])
+        self.assertIn("held", sent[1][1]["timing"])
+        self.assertGreater(sent[1][1]["timing"]["held"], 0.05)
+
     def test_the_interruption_goes_with_the_batch_that_gets_through(self):
         uploader = self.uploader(TimeoutError("timed out"), ConnectTimeout("x"), accept(), accept())
         uploader.log = lambda **_: None
