@@ -928,7 +928,6 @@ async function loadPhone(part = 'guide', reset = false, manual = false) {
   view.feedback = null;
   if (manual) view.progress = reset ? '正在更换钥匙…' : '正在刷新二维码…';
   if (reset) {
-    view.revoke = false;
     delete view.parts?.node;
     delete view.parts?.sub;
   }
@@ -1207,8 +1206,7 @@ function renderPhone(d) {
       if (part?.selection) extra += `<p class="muted">本机测速 ${esc(part.selection.ms)} ms</p>`;
       if (PHONE_QR[qrPart].keyed && (part || view.progress)) {
         const disabled = view.loading ? ' disabled' : '';
-        extra += `<p><button class="btn" data-phone-refresh="${qrPart}"${disabled}>刷新二维码</button>
-          <label><input type="checkbox" data-phone-revoke${view.revoke ? ' checked' : ''}${disabled}> 让旧码失效</label></p>`;
+        extra += `<p><button class="btn" data-phone-refresh="${qrPart}"${disabled}>刷新二维码</button></p>`;
         if (view.progress) extra += `<p role="status"><span class="spin dark"></span> ${esc(view.progress)}</p>`;
         else if (view.feedback?.part === qrPart) extra += `<p role="status">${esc(view.feedback.text)}</p>`;
       }
@@ -1302,14 +1300,11 @@ async function phoneClick(event) {
     } catch { /* act said why */ }
     return true;
   }
-  const revoke = event.target.closest('[data-phone-revoke]');
-  if (revoke) { S.phone.revoke = revoke.checked; return true; }
   const refresh = event.target.closest('[data-phone-refresh]');
   if (refresh) {
     if (S.phone.loading) return true;
-    const reset = Boolean(S.phone.revoke);
-    if (!reset || confirm('让这个账号原有的手机节点和订阅失效？已导入的手机需要重新扫码。')) {
-      loadPhone(refresh.dataset.phoneRefresh, reset, true);
+    if (confirm('让这个账号原有的手机节点和订阅失效？已导入的手机需要重新扫码。')) {
+      loadPhone(refresh.dataset.phoneRefresh, true, true);
     }
     return true;
   }
