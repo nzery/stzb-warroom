@@ -407,34 +407,45 @@ class Uploader:
 
     def add(self, ends, row):
         link = self.stream(ends)
+        side = "client" if row.get("client") else "server"
+        urgent = (self.batch_ms <= 0 or link[1] == 0
+                  or row.get("message_id") in self.flush[side])
+        if not urgent:
+            self._hold(len(row.get("frame") or ""))
         if self.queue.add(link[0], link[1] + 1, row):
             link[1] += 1
-            side = "client" if row.get("client") else "server"
-            urgent = (self.batch_ms <= 0 or link[1] == 1
-                      or row.get("message_id") in self.flush[side])
             self._queued(link[0], (link[1],), held=not urgent)
-            self._wake(urgent=urgent, size=len(row.get("frame") or ""))
+            if urgent:
+                self._wake(urgent=True)
+            else:
+                self.queued.set()
 
-    def _wake(self, urgent=False, size=0):
-        """Schedule an upload: immediately for urgent rows or full buffers, else after `batch_ms`."""
+    def _hold(self, size=0):
+        """Arm the coalescing deadline BEFORE writing an ordinary row to the queue so the upload
+        thread can never observe the row without also observing its coalescing window."""
         now = time.monotonic()
         with self._batch_lock:
-            if urgent or self.batch_ms <= 0:
+            if self.batch_ms <= 0:
                 self._batch_urgent = True
                 self._batch_deadline = None
-                self.queued.set()
                 return
             self._batch_rows += 1
             self._batch_bytes += size
             if self._batch_rows >= BATCH_ROWS or self._batch_bytes >= BATCH_BYTES:
                 self._batch_urgent = True
                 self._batch_deadline = None
-                self.queued.set()
                 return
             deadline = now + self.batch_ms / 1000.0
             if self._batch_deadline is None or deadline < self._batch_deadline:
                 self._batch_deadline = deadline
-                self.queued.set()
+
+    def _wake(self, urgent=False):
+        """Wake the upload thread immediately (used for urgent frames and reports)."""
+        with self._batch_lock:
+            if urgent or self.batch_ms <= 0:
+                self._batch_urgent = True
+                self._batch_deadline = None
+        self.queued.set()
 
     def _batch_wait(self):
         """Seconds left to wait for coalescing before sending, or 0 to send now."""
@@ -495,8 +506,8 @@ class Uploader:
 
     # upload thread ------------------------------------------------------------------
 
-    def upload_once(self):
-        """Send one batch; False when the queue is empty."""
+    def upload_once(self, *, respect_batch=False):
+        """Send one batch; False when the queue is empty or still coalescing."""
         now = time.monotonic()
         # After a stalled or broken try the next batch is half as large, down to SMALLEST_BATCH
         # halvings: what did not get through on a poor line is not sent again whole.
@@ -504,6 +515,8 @@ class Uploader:
         batch = self.queue.batch({stream_id for stream_id, (until, _wait) in self.waiting.items() if until > now},
                                  max_rows=MAX_ROWS >> shrink, max_bytes=MAX_BODY >> shrink)
         if batch is None:
+            return False
+        if respect_batch and self._batch_wait() > 0:
             return False
         stream_id, start, rows = batch
         if self.moved and hasattr(self.http, "close"):
@@ -595,7 +608,7 @@ class Uploader:
                     self.queued.wait(wait)
                     continue
             try:
-                busy = self.upload_once()
+                busy = self.upload_once(respect_batch=True)
                 last_error = None
                 if self.failures or self.unanswered:
                     now = time.monotonic()
@@ -636,6 +649,8 @@ class Uploader:
                 continue
             if busy or last_error is not None:
                 self.stop.wait(0.1 if busy else 10)
+            elif self._batch_wait() > 0:
+                continue
             elif self.queued.wait(1):  # the queue was empty: go as soon as a row comes
                 self.queued.clear()
         if hasattr(self.http, "close"):
