@@ -479,10 +479,13 @@ function renderOverview(d) {
   const rows = d.tokens.map((a) => {
     const [label, cls] = accountState(a);
     const b = a.state !== 'invalid' && a.bark;
-    const push = !b ? '' : !b.bound ? '<span class="push warn">手机推送未绑定</span><button class="link" data-goto="phone">去绑定</button>'
-      : b.error ? `<span class="push err" title="${esc(b.error)}">推送失败：${esc(b.error)}</span><button class="link" data-goto="phone">去看看</button>`
+    const jump = a.role ? ` data-goto-role="${esc(a.role.id)}" data-goto-step="0"` : '';
+    const push = !b ? '' : !b.bound ? `<span class="push warn">手机推送未绑定</span><button class="link" data-goto="phone"${jump}>去绑定</button>`
+      : b.error ? `<span class="push err" title="${esc(b.error)}">推送失败：${esc(b.error)}</span><button class="link" data-goto="phone"${jump}>去看看</button>`
       : `<span class="push ok">推送到${b.kind === 'ntfy' ? '安卓' : ' iPhone'}</span>`;
-    return `<div class="mini ov-account"><div class="main-text"><b>${esc(a.role ? roleName(a.role.label) : a.name || a.token)}</b>${push ? `<div class="sub-line">${push}</div>` : ''}</div><span class="state ${cls}">${label}</span></div>`;
+    const muted = a.state !== 'invalid' && a.local_notify === false ? '<span class="push">本机已静默</span>' : '';
+    const sub = [push, muted].filter(Boolean).join('');
+    return `<div class="mini ov-account"><div class="main-text"><b>${esc(a.role ? roleName(a.role.label) : a.name || a.token)}</b>${sub ? `<div class="sub-line">${sub}</div>` : ''}</div><span class="state ${cls}">${label}</span></div>`;
   });
   if (d.tokens.length && phone.running && !phone.waiting) {
     const [text, cls] = pipes ? [`手机正在经这台电脑玩：${pipes} 条游戏连接`, 'ok'] : problems.length ? [problems[0], 'warn'] : ['没有手机经这台电脑玩', ''];
@@ -707,9 +710,12 @@ function renderAccounts(d) {
       ? '<div class="account-problem warn">这是临时电脑：关掉本程序时自动删除这个账号，12 小时不用也会自动失效。</div>' : '';
     const facts = [role ? role.split(' · ').slice(1).join(' · ') : '还没有角色信息', a.name, `<span class="token-text">${esc(a.token)}</span>`]
       .filter(Boolean).map((f, i, all) => (i === all.length - 1 ? f : esc(f))).join(' · ');
+    const localNotify = a.state !== 'invalid'
+      ? `<div class="account-notify" title="关掉后只在这台电脑静默，抓包上报、手机中转和手机推送不受影响"><span>本机通知</span><label class="switch"><input type="checkbox" data-local-notify="${index}"${a.local_notify !== false ? ' checked' : ''}><span></span></label></div>`
+      : '';
     return `<div class="card account ${a.state === 'invalid' ? 'invalid' : ''}">
       <div class="account-head"><span class="avatar">${esc(title.slice(0, 1))}</span>
-        <div class="who"><b>${esc(title)}<span class="state ${cls}">${label}</span></b><small>${facts}</small></div></div>
+        <div class="who"><b>${esc(title)}<span class="state ${cls}">${label}</span></b><small>${facts}</small></div>${localNotify}</div>
       ${problem}${temporary}${computers}
       <div class="account-actions">${site}${a.removable ? `<button class="btn ghost small danger-text" data-action="remove_token" data-index="${index}" data-confirm="${
         a.computer && a.computer.kind !== 'own' ? '在这台电脑上删除这个账号？这台电脑会停用，别的电脑照常。' : '删除这个 Token？'}">删除账号</button>` : ''}</div></div>`;
@@ -992,6 +998,25 @@ function phoneProblems(p, problems) {
   return problems.map((message) => banner('warn', 'info', esc(message)));
 }
 
+// Other local accounts that already bound the same phone push type (Bark or ntfy), deduplicated by address.
+function reusablePushSources(index, os) {
+  const want = os === 'android' ? 'ntfy' : os === 'iphone' ? 'bark' : null;
+  if (!want) return [];
+  const seen = new Set();
+  const sources = [];
+  (S.data?.tokens || []).forEach((other, i) => {
+    if (i === index || other.state === 'invalid') return;
+    const b = other.bark;
+    if (!b || !b.bound || b.kind !== want) return;
+    const key = b.kind === 'ntfy' ? (b.android?.topic || b.address) : b.address;
+    if (key && seen.has(key)) return;
+    if (key) seen.add(key);
+    const label = other.role ? roleName(other.role.label) : (other.name || other.token);
+    sources.push({ index: i, label });
+  });
+  return sources;
+}
+
 // The push binding of one account (Bark on an iPhone, ntfy on Android), under the step's text.
 function pushBlock(a, index, os) {
   if (!a.bark) return '<p class="muted">这个账号暂时不能绑定推送。</p>';
@@ -1005,10 +1030,17 @@ function pushBlock(a, index, os) {
       <button class="btn ghost small" data-action="bark_unbind" data-index="${index}" data-confirm="解绑后这台${phone}不再收到推送，确定吗？">解绑</button></div>
       ${a.bark.ally_help ? '<p class="small-note muted">盟友没有电脑？上面“手机”选“盟友手机”，你的推送也发给他。</p>' : ''}`;
   }
-  return os === 'android'
-    ? `<div class="row-actions"><button class="btn primary" data-action="ntfy_bind" data-index="${index}">绑定安卓</button></div>`
-    : `<form class="inline-form phone-bark" data-bark-form="${index}"><input type="text" data-bark-input="${index}" spellcheck="false" autocomplete="off" placeholder="粘贴 Bark 里的地址：https://api.day.app/…">
-      <button class="btn primary" type="submit">绑定</button></form>`;
+  const sources = reusablePushSources(index, os);
+  const reuse = sources.length
+    ? `<div class="row-actions">${sources.map((src) => `<button class="btn primary" data-bark-copy="${index}" data-source="${src.index}">直接共用「${esc(src.label)}」的${os === 'android' ? '安卓推送（免重新订阅）' : ' iPhone 推送'}</button>`).join('')}</div>`
+    : '';
+  if (os === 'android') {
+    const cls = sources.length ? 'btn' : 'btn primary';
+    const text = sources.length ? '或新建独立安卓推送' : '绑定安卓';
+    return `${reuse}<div class="row-actions"><button class="${cls}" data-action="ntfy_bind" data-index="${index}">${text}</button></div>`;
+  }
+  return `${reuse}<form class="inline-form phone-bark" data-bark-form="${index}"><input type="text" data-bark-input="${index}" spellcheck="false" autocomplete="off" placeholder="粘贴 Bark 里的地址：https://api.day.app/…">
+    <button class="btn ${sources.length ? '' : 'primary'}" type="submit">绑定</button></form>`;
 }
 // An ally's phones (no computer of their own): the server's texts, one line each, a form to add one.
 // An Android one is subscribed by hand in ntfy: its server and topic (no QR code: 2026-11-22 players,
@@ -1134,7 +1166,7 @@ function renderPhone(d) {
   watchPhone(S.page === 'phone' && Boolean(account) && step?.check === 'connect');
   const qrPart = step && PHONE_QR[step.show] ? step.show : null;
   const { key: _drawn, ...shown } = view;
-  const key = JSON.stringify([shown, accounts.map(({ a }) => a.role.id), account?.a.role.id, account?.a.bark, os, pipes, S.phoneStep, S.phoneSeen, S.allyShown?.id]);
+  const key = JSON.stringify([shown, accounts.map(({ a }) => [a.role.id, a.bark?.bound, a.bark?.kind, a.bark?.address]), account?.a.role.id, account?.a.bark, os, pipes, S.phoneStep, S.phoneSeen, S.allyShown?.id]);
   if (key === view.key) return;
   const box = $('phone-box');
   if (!account) {
@@ -1153,7 +1185,9 @@ function renderPhone(d) {
   const phones = chips('手机', [['iphone', 'iPhone'], ['android', '安卓'], ['ally', '盟友手机']].map(([id, label]) =>
     `<button class="chip${os === id ? ' active' : ''}" data-phone-os="${id}">${label}</button>`).join(''));
   const dots = steps.length ? `<div class="phone-dots">${steps.map((st, i) => `<button class="phone-dot${i === at ? ' active' : ''}${i < at ? ' done' : ''}" data-phone-step="${i}" title="${esc(st.title)}">${i + 1}</button>`).join('')}</div>` : '';
-  const bar = `<div class="phone-bar">${who}${phones}${dots}</div>`;
+  const multiNote = accounts.length > 1 && os !== 'ally'
+    ? '<p class="phone-multi-note muted">同一台电脑的多个账号共用一个手机节点即可，无需每个号都重复扫码；只需在第 1 步给每个账号绑定推送。</p>' : '';
+  const bar = `<div class="phone-bar">${who}${phones}${dots}</div>${multiNote}`;
   let body;
   if (os === 'ally') {
     const card = allyCard(account.a, account.index);
@@ -1246,8 +1280,26 @@ async function phoneClick(event) {
     S.personalRole = Number(role.dataset.phoneRole);
     store.set('personalRole', S.personalRole);
     for (const name of PERSONAL) S.personal[name] = { query: {} };
+    const picked = personalAccounts().find(({ a }) => a.role.id === S.personalRole);
+    if (picked && (!picked.a.bark || !picked.a.bark.bound) && (S.phoneOs === 'iphone' || S.phoneOs === 'android')) {
+      S.phoneStep = { ...(S.phoneStep || {}), [S.phoneOs]: 0 };
+      store.set('phoneStep', S.phoneStep);
+    }
     S.phone = {};
     loadPhone();
+    return true;
+  }
+  const copyPush = event.target.closest('[data-bark-copy]');
+  if (copyPush) {
+    try {
+      await withBusy(copyPush, '绑定中', () => act('bark_copy', {
+        index: Number(copyPush.dataset.barkCopy),
+        source: Number(copyPush.dataset.source),
+      }));
+      toast('已共用手机推送，手机无需重复设置');
+      S.accountsKey = '';
+      renderPhone(S.data);
+    } catch { /* act said why */ }
     return true;
   }
   const revoke = event.target.closest('[data-phone-revoke]');
@@ -1770,7 +1822,7 @@ function show(page) {
 }
 
 const MESSAGES = {
-  bark_test: '已发送测试推送，看看手机有没有收到', ntfy_bind: '已生成安卓订阅，用手机扫二维码', bark_unbind: '已解绑手机推送', remove_token: '已删除 Token',
+  bark_test: '已发送测试推送，看看手机有没有收到', ntfy_bind: '已生成安卓推送主题，请在 ntfy 里手动添加订阅', bark_unbind: '已解绑手机推送', remove_token: '已删除 Token',
   open_installer: '正在打开 Wireshark 安装程序，或在浏览器里下载',
 };
 
@@ -1778,7 +1830,25 @@ document.addEventListener('click', async (event) => {
   const nav = event.target.closest('[data-page]');
   if (nav) return show(nav.dataset.page);
   const goto = event.target.closest('[data-goto]');
-  if (goto) return show(goto.dataset.goto);
+  if (goto) {
+    if (goto.dataset.goto === 'phone' && goto.dataset.gotoRole) {
+      S.personalRole = Number(goto.dataset.gotoRole);
+      store.set('personalRole', S.personalRole);
+      for (const name of PERSONAL) S.personal[name] = { query: {} };
+      if (S.phoneOs === 'ally') {
+        const picked = personalAccounts().find(({ a }) => a.role.id === S.personalRole);
+        const kind = picked?.a.bark?.kind;
+        S.phoneOs = kind === 'ntfy' ? 'android' : kind === 'bark' ? 'iphone' : '';
+        store.set('phoneOs', S.phoneOs);
+      }
+      if (goto.dataset.gotoStep !== undefined && (S.phoneOs === 'iphone' || S.phoneOs === 'android')) {
+        S.phoneStep = { ...(S.phoneStep || {}), [S.phoneOs]: Number(goto.dataset.gotoStep) };
+        store.set('phoneStep', S.phoneStep);
+      }
+      S.phone = {};
+    }
+    return show(goto.dataset.goto);
+  }
   if (event.target.closest('[data-chat-older]')) return chatOlder();
   if (event.target.closest('#chat-web-logout')) {
     if (!confirm('把手机群聊链接推送到你手机？之前发过的旧链接会马上失效（链接泄漏了也点这里换一条）。')) return;
@@ -1902,6 +1972,23 @@ $('open-mini').classList.toggle('hidden', MINI || !window.warroomWindow);  // on
 $('open-mini').addEventListener('click', () => window.warroomWindow?.openMini());
 
 document.addEventListener('change', async (event) => {
+  const localNotify = event.target.closest('[data-local-notify]');
+  if (localNotify) {
+    const index = Number(localNotify.dataset.localNotify);
+    const enabled = localNotify.checked;
+    localNotify.disabled = true;
+    try {
+      await act('set_local_notify', { index, enabled });
+      toast(enabled ? '已开启该账号的本机通知' : '已关闭该账号的本机通知（上报和手机推送不受影响）');
+    } catch {
+      localNotify.checked = !enabled;
+    } finally {
+      localNotify.disabled = false;
+      S.accountsKey = '';
+      render();
+    }
+    return;
+  }
   const input = event.target.closest('[data-pref]');
   if (!input) return;
   const value = input.type === 'checkbox' ? input.checked : input.value;

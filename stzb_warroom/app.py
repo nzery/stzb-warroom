@@ -241,7 +241,47 @@ class App:
         value = dict(self.accounts.get(token) or {"state": "checking"})
         value["token"] = mask(token)
         value["removable"] = self.removable(token)
+        value["local_notify"] = self.local_notify_enabled(token)
         return value
+
+    def _muted_tags(self):
+        saved = self.settings.get("local_notify_off")
+        return {item for item in saved if isinstance(item, str)} if isinstance(saved, list) else set()
+
+    def local_notify_enabled(self, token):
+        """Whether notifications for `token` are shown on this computer (capture and phone push always stay on)."""
+        with self.lock:
+            return tag(token) not in self._muted_tags()
+
+    def set_local_notify(self, index, enabled):
+        """Turn desktop notifications on or off for one account on this computer only."""
+        token = self._token(index)
+        enabled = bool(enabled)
+        token_tag = tag(token)
+        if enabled:
+            # Drop stale cursor files so re-enabling starts from the newest event instead of replaying muted history.
+            key = hashlib.sha256(token.encode()).hexdigest()[:8]
+            for path in self.state_dir.glob(f"notify-{key}*.json"):
+                try:
+                    path.unlink()
+                except OSError:
+                    pass
+        with self.lock:
+            muted = self._muted_tags()
+            if enabled:
+                muted.discard(token_tag)
+            else:
+                muted.add(token_tag)
+            if muted:
+                self.settings["local_notify_off"] = sorted(muted)
+            else:
+                self.settings.pop("local_notify_off", None)
+            self._write_settings()
+            role = ((self.accounts.get(token) or {}).get("role") or {}).get("label") or mask(token)
+        self.log(f"本机通知：已{'开启' if enabled else '关闭'} {role}"
+                 + ("" if enabled else "（上报、手机中转和手机推送不受影响）"))
+        self.touch()
+        return {"local_notify": enabled}
 
     # settings ---------------------------------------------------------------------------
 
@@ -437,6 +477,14 @@ class App:
             self.tokens.remove(token)
             self.accounts.pop(token, None)
             self.hints.pop(token, None)
+            muted = self._muted_tags()
+            if tag(token) in muted:
+                muted.discard(tag(token))
+                if muted:
+                    self.settings["local_notify_off"] = sorted(muted)
+                else:
+                    self.settings.pop("local_notify_off", None)
+                self._write_settings()
             self._save_tokens()
         self.log(f"已删除 Token {mask(token)}")
         if restart:
@@ -688,6 +736,30 @@ class App:
     def ntfy_bind(self, index):
         """An Android phone: the server gives the token a topic on its ntfy server, and how to subscribe."""
         return self._bark("POST", "/v1/client/bark", index, {"kind": "ntfy"})
+
+    def bark_copy(self, index, source_index):
+        """Reuse another local token's phone push binding (Bark or ntfy) on the server."""
+        target = self._token(index)
+        source = self._token(source_index)
+        if target == source:
+            raise ValueError("请选择本机另一个账号")
+        try:
+            with self.server.open("/v1/client/bark", f"{target},{source}", {"copy": True},
+                                  timeout=40, method="POST") as response:
+                value = json.load(response)
+        except HTTPError as exc:
+            try:
+                message = json.loads(exc.read() or b"{}").get("error")
+            except (OSError, ValueError):
+                message = None
+            raise ValueError(message or f"服务器返回 HTTP {exc.code}")
+        except OSError as exc:
+            raise ValueError(f"连不上服务器：{exc}")
+        with self.lock:
+            if target in self.accounts:
+                self.accounts[target]["bark"] = value
+        self.touch()
+        return value
 
     def bark_unbind(self, index):
         return self._bark("DELETE", "/v1/client/bark", index)
@@ -944,7 +1016,12 @@ class App:
             self.notices.clear()
             self.notices.extend(kept)
 
-    def on_notice(self, notice):
+    def notice_for(self, token):
+        return lambda notice: self.on_notice(notice, token=token)
+
+    def on_notice(self, notice, token=None):
+        if token is not None and not self.local_notify_enabled(token):
+            return
         if expired(notice, self.now()):
             return
         with self.lock:
@@ -991,6 +1068,8 @@ class App:
         approved (before, the server refuses them with 403 every minute). When the check cannot
         reach the server, the stream is tried and reports its own problem."""
         def ready():
+            if not self.local_notify_enabled(token):
+                return False
             with self.lock:
                 value = self.accounts.get(token)
             if value is None:  # not checked yet: the check runs at start
@@ -1002,6 +1081,8 @@ class App:
         """The role keys whose notifications to follow for the token: what the server listed (its current
         role and any other it plays now, 2026-11-14), None from a server that lists none (the current one
         only), notify.UNKNOWN until the account check has answered."""
+        if not self.local_notify_enabled(token):
+            return []
         with self.lock:
             value = self.accounts.get(token)
         if value is None or value.get("state") == "checking":
@@ -1113,7 +1194,7 @@ class App:
                                                  daemon=True)
             session["thread"].start()
         notify.start(self.server, session["tokens"], self.state_dir, stop, prompt_for=self.prompt_for,
-                     ready_for=self.notify_ready, roles_for=self.notify_roles, show=self.on_notice,
+                     ready_for=self.notify_ready, roles_for=self.notify_roles, show_for=self.notice_for,
                      on_relogin=lambda states: self.on_relogin(session, states),
                      warn=lambda text: self.log(text, "warn"))
         if self.settings["phone_exit"]:

@@ -318,6 +318,37 @@ async function main() {
   // one-click account generation is the primary action; manual invite/Token form is folded away
   assert.ok(html.includes('btn primary add-public-btn') && html.includes('data-action="join_public"'));
   assert.ok(html.includes('<details class="add-manual">') && html.indexOf('data-action="join_public"') < html.indexOf('id="add-form"'));
+  // per-account local notification toggle on 账号 & muted badge on 概览; reuse push button and multi-account note on 手机
+  vm.runInContext(`
+    S.data = {
+      capture: { state: 'running', since: 1 },
+      stats: { uploaded: 0, pending: 0, uploaded_at: 0, connections: 0 },
+      phone: { running: true, waiting: false, exits: [] },
+      tokens: [
+        { token: 'sta_…1111', state: 'ok', local_notify: true, role: { id: 101, label: '甲 · 盟 · 服' },
+          bark: { bound: true, kind: 'ntfy', address: 'https://ntfy.example/aaaa…', android: { server: 'https://ntfy.example', topic: 'aaaa1111' } } },
+        { token: 'sta_…2222', state: 'ok', local_notify: false, role: { id: 202, label: '乙 · 盟 · 服' },
+          bark: { bound: false } },
+      ],
+    };
+    S.accountsKey = '';
+    renderAccounts(S.data);
+    renderOverview(S.data);
+  `, context);
+  const accHtml = nodes.get('account-list').innerHTML;
+  assert.ok(accHtml.includes('data-local-notify="0" checked') && accHtml.includes('data-local-notify="1">'), accHtml);
+  const ovHtml = nodes.get('ov-accounts').innerHTML;
+  assert.ok(ovHtml.includes('本机已静默') && ovHtml.includes('data-goto-role="202" data-goto-step="0"'), ovHtml);
+  vm.runInContext(`
+    personalAccounts = () => (S.data?.tokens || []).map((a, index) => ({ a, index })).filter(({ a }) => a.state === 'ok' && a.role);
+    personalAccount = () => personalAccounts().find(({ a }) => a.role.id === S.personalRole) || personalAccounts()[0] || null;
+    S.personalRole = 202; S.page = 'phone'; S.phoneOs = 'android'; S.phoneStep = { android: 0 };
+    S.phone = { role: 202, problem: null, guide: { android: [{ title: '绑定通知', text: '说明', show: 'push', check: 'push' }] } };
+    renderPhone(S.data);
+  `, context);
+  const multiPhone = nodes.get('phone-box').innerHTML;
+  assert.ok(multiPhone.includes('data-bark-copy="1" data-source="0"') && multiPhone.includes('直接共用「甲」的安卓推送'), multiPhone);
+  assert.ok(multiPhone.includes('同一台电脑的多个账号共用一个手机节点即可'), multiPhone);
   console.log('UI startup and refresh regression checks passed');
 }
 main().catch((error) => { console.error(error); process.exitCode = 1; });

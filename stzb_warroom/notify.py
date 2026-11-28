@@ -272,18 +272,19 @@ def follow_roles(server, token, state_dir, stop, roles_for, label, ready, option
 
 
 def start(server, tokens, state_dir, stop, prompt_for=lambda _token: ask_terminal, ready_for=lambda _token: None,
-          roles_for=lambda _token: None, on_relogin=None, **options):
+          roles_for=lambda _token: None, on_relogin=None, show_for=None, **options):
     """Follow every token's notifications and prompts until `stop`; the notification threads.
 
     `prompt_for(token)`: follow_prompts's `show` for that token; `ready_for(token)`: its
-    Follower's `ready`; `roles_for(token)`: the roles to follow (follow_roles). The prompts are asked
-    from the start: they say why a token's capture is not uploaded before it is approved.
-    `options`: Follower's color, show and warn.
+    Follower's `ready`; `roles_for(token)`: the roles to follow (follow_roles); `show_for(token)`:
+    per-token `show` callback. The prompts are asked from the start: they say why a token's capture
+    is not uploaded before it is approved. `options`: Follower's color, show and warn.
     """
     threads = []
     for token in tokens:
+        token_options = {**options, "show": show_for(token)} if show_for else options
         threads.append(threading.Thread(target=follow_roles, daemon=True, args=(
-            server, token, state_dir, stop, roles_for, len(tokens) > 1, ready_for(token), options)))
+            server, token, state_dir, stop, roles_for, len(tokens) > 1, ready_for(token), token_options)))
         threading.Thread(target=follow_prompts, args=(server, token, stop, prompt_for(token), on_relogin), daemon=True).start()
     for thread in threads:
         thread.start()

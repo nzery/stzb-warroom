@@ -1243,6 +1243,73 @@ class PageServerTests(unittest.TestCase):
             with self.subTest(path=path):
                 self.assertEqual(self.request("GET", path)[0], 404)
 
+    def test_local_notify_toggle_mutes_one_account_without_touching_others(self):
+        import hashlib
+        tokens = ["sta_" + "a" * 43, "sta_" + "b" * 43]
+        with self.app.lock:
+            self.app.tokens[:] = tokens
+            self.app.accounts.clear()
+            self.app.accounts.update({
+                tokens[0]: {"state": "ok", "approved": True, "role": {"id": 1, "label": "甲"}, "roles": [{"id": 1}]},
+                tokens[1]: {"state": "ok", "approved": True, "role": {"id": 2, "label": "乙"}, "roles": [{"id": 2}]},
+            })
+        self.assertEqual([t["local_notify"] for t in self.app.snapshot()["tokens"]], [True, True])
+        # Mute account 1: drops notices immediately, stops SSE roles/ready, keeps account 0 live, never stores raw token.
+        self.window.act("set_local_notify", {"index": 1, "enabled": False})
+        self.assertEqual([t["local_notify"] for t in self.app.snapshot()["tokens"]], [True, False])
+        self.assertNotIn(tokens[1], json.dumps(self.app.settings))
+        self.assertFalse(self.app.notify_ready(tokens[1])())
+        self.assertEqual(self.app.notify_roles(tokens[1]), [])
+        self.assertTrue(self.app.notify_ready(tokens[0])())
+        self.assertEqual(self.app.notify_roles(tokens[0]), [1])
+        self.app.notice_for(tokens[1])({"title": "盟友的点地", "level": "info"})
+        self.app.notice_for(tokens[0])({"title": "我自己的点地", "level": "info"})
+        self.assertEqual([n["title"] for n in self.app.notices], ["我自己的点地"])
+        # Re-enabling drops stale cursor files for that token so old muted events are not replayed.
+        key1 = hashlib.sha256(tokens[1].encode()).hexdigest()[:8]
+        cursor = self.app.state_dir / f"notify-{key1}-2.json"
+        cursor.write_text('{"epoch":"e","after":1}', encoding="utf-8")
+        self.window.act("set_local_notify", {"index": 1, "enabled": True})
+        self.assertFalse(cursor.exists())
+        self.assertTrue(self.app.notify_ready(tokens[1])())
+        self.assertEqual(self.app.notify_roles(tokens[1]), [2])
+        self.assertEqual(App(FakeServer(), self.app.state_dir).settings.get("local_notify_off"), None)
+
+    def test_bark_copy_sends_both_tokens_and_updates_target_binding(self):
+        tokens = ["sta_" + "a" * 43, "sta_" + "b" * 43]
+        with self.app.lock:
+            self.app.tokens[:] = tokens
+            self.app.accounts.clear()
+            self.app.accounts.update({
+                tokens[0]: {"state": "ok", "bark": {"bound": True, "kind": "ntfy", "address": "https://ntfy.example/abcd…"}},
+                tokens[1]: {"state": "ok", "bark": {"bound": False}},
+            })
+        seen = []
+
+        class Reply:
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *_):
+                return False
+
+            def read(self):
+                return json.dumps({"bound": True, "kind": "ntfy", "address": "https://ntfy.example/abcd…"}).encode()
+
+        def fake_open(path, token, body=None, timeout=40, method="GET"):
+            seen.append((method, path, token, body))
+            return Reply()
+
+        self.app.server.open = fake_open
+        result = self.window.act("bark_copy", {"index": 1, "source": 0})
+        self.assertEqual(seen, [("POST", "/v1/client/bark", f"{tokens[1]},{tokens[0]}", {"copy": True})])
+        self.assertTrue(result["bound"])
+        self.assertTrue(self.app.accounts[tokens[1]]["bark"]["bound"])
+        with self.assertRaisesRegex(ValueError, "另一个账号"):
+            self.window.act("bark_copy", {"index": 0, "source": 0})
+        with self.assertRaisesRegex(ValueError, "没有这个账号"):
+            self.window.act("bark_copy", {"index": 1, "source": "0"})
+
 
 if __name__ == "__main__":
     unittest.main()
